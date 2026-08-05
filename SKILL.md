@@ -38,6 +38,79 @@ Generator hygiene, each learned the hard way:
 - **Beware substring replaces hitting `def` lines.** `s.replace("check_foo()", …)` also matches
   inside `def check_foo():`. Anchor on the full line, or verify the file still parses.
 
+## Ask before you assume: the choices that are the user's, not yours
+
+Some parameters look like engineering defaults but are actually **procurement and
+budget decisions the user owns**. Picking one silently and then writing three
+pages of rationale for it makes it expensive to change later. Ask up front, in
+one message, before any placement:
+
+- **Layer count.** 4 layers is the reflexive answer for a mixed-signal board and
+  it is often wrong. On this project the 4-layer stack was defended with four
+  arguments and none had a number attached; the one quantity that mattered —
+  stray capacitance on a 1 pF feedback node — argued the other way, because the
+  nearest plane moves from 0.2 mm to 1.6 mm away and the stray drops ~8x. Ask,
+  and if you have a preference, give the number that supports it.
+- **Board outline and mounting** — enclosure-driven.
+- **Assembly process** — hand-solder vs reflow decides whether a QFN or a
+  PowerPAD is acceptable at all.
+- **Conformal coating** — it changes which IPC-2221B column applies (A6 0.8 mm
+  uncoated vs A7 0.4 mm coated), so it decides HV geometry, not just finish.
+- **Connector types and pinout** — usually fixed by what plugs into it.
+
+Converting a finished 4-layer board to 2 is very doable if the generator is the
+source of truth — here it was 5 DRC violations and about an hour — but every
+inner-plane *decision* has to be re-derived, and the design doc's rationale
+sections have to be rewritten rather than patched. Cheaper to ask.
+
+Related, when a stack changes: **every layer literal is now a liability.** A
+hardcoded `CU = (F_Cu, In1_Cu, In2_Cu, B_Cu)` in an audit keeps "checking" layers
+that no longer exist. Derive the layer set from `board.GetCopperLayerCount()` and
+assert it equals what the audit was written for.
+
+## No vias in pads — and DRC will not tell you
+
+KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
+is simply "connected", which is how a 0.6 mm via sat inside C10's 0805 land
+through a full adversarial review. At reflow the via barrel wicks solder out of
+the joint; the result is a starved joint that looks fine under a microscope.
+
+Write the check yourself — and make it **net-blind**, because the real cases are
+same-net:
+
+```python
+for v in vias:
+    for ref, p in pads:
+        if v.GetEffectiveShape(layer).Collide(p.GetEffectiveShape(layer), mm(0.2)):
+            bad.append(...)          # no net comparison anywhere
+```
+
+Two things this found beyond the one defect that was reported: three *more*
+in-pad vias (a supply via inside a SOIC pin, two ground vias inside SOIC pins),
+and three near-misses at 0.03–0.19 mm. A user reporting one instance of a class
+of defect is reporting the class. Scan for all of it.
+
+When a via genuinely has nowhere to go — two 0805 lands 0.22 mm apart, a SOIC
+pin 0.49 mm from its decoupler — step it *off the axis* rather than squeezing it
+between: run a short stub of track and put the via where there is room.
+
+## The stackup is part of the design, not a fab preference
+
+If the board file has no `(stackup ...)` block, KiCad assumes a default and the
+fab builds whatever is cheapest that week — while your design doc quotes
+dielectric-dependent numbers (stray capacitance, impedance, creepage class) that
+depend on a stackup nobody agreed to. Write it explicitly.
+
+The SWIG `pcbnew` API does not usefully expose `BOARD_STACKUP` (you get an opaque
+`SwigPyObject` with no methods), so this has to be a text edit on the saved
+`.kicad_pcb`. Anchor it on a regex that captures the existing indentation —
+KiCad indents with tabs, and a hardcoded two-space `"\n  (setup\n"` anchor will
+not match. **Make the failure loud**: if the anchor is missing, exit; do not
+return quietly, or the stackup silently stops being written and every number that
+depends on it becomes unbacked. Then verify KiCad *parses* it rather than merely
+tolerating it — load and re-save through `pcbnew` and confirm the block survives
+the round-trip.
+
 ## The verification ladder
 
 Each rung catches what the one below cannot. Climb all of it; stopping early is how
@@ -194,6 +267,14 @@ the layout script after any schematic change, not only after connectivity change
 zones are re-filled, so any geometric measurement afterwards is against stale copper. Re-fill
 (`ZONE_FILLER`) before measuring, or you will "verify" the previous state. This bit me while
 trying to calibrate a clearance guard.
+
+- **A thermal pad wants solid copper, not thermal relief.** Zones default to
+  `ZONE_CONNECTION_THERMAL`; spokes on an exposed-pad land starve exactly the
+  connection the island exists to make. DRC's `starved_thermal` check catches it
+  (`zone min spoke count 2; actual 1`) — set `ZONE_CONNECTION_FULL` on that zone.
+- **A track endpoint sitting on top of a zone is not connected to it** if they
+  are on different layers. It needs a via. DRC reports this as `track_dangling`
+  plus an unconnected item; both point at the same missing via.
 
 ## Datasheet discipline
 
