@@ -3,9 +3,16 @@
 A Claude Code skill for KiCad schematic capture, PCB layout, and datasheet-grounded
 review of analog / mixed-signal designs.
 
-Everything in [`SKILL.md`](SKILL.md) was learned from a real defect on a low-noise
-0..100 V metrology source (ADR1399 / DAC8811 / OPA455, 110 V rails, 1.2 ppm noise
-target) — not from general advice. Each rule names the failure it prevents.
+Every rule here exists because the failure it describes actually shipped and had to
+be caught — not because it is general advice. Each one names the failure it prevents,
+and keeps the concrete numbers where they make the rule easier to apply.
+
+Two files, so schematic-only work does not have to load the board material:
+
+| File | Read it when |
+|---|---|
+| `SKILL.md` | always — shared practice plus schematic capture |
+| `PCB.md` | the task touches the board: `pcbnew`, DRC, footprints, zones, stackup, creepage |
 
 Topics covered:
 

@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it.
 ---
 
 # KiCad schematic and PCB design
@@ -8,6 +8,13 @@ description: Create or modify KiCad schematics, symbols, footprints and PCB layo
 Every rule below exists because the failure it describes actually shipped and had to be
 caught. Most were found on precision analog / high-voltage boards, which is where KiCad's
 own checks are thinnest — but nothing here is specific to one design.
+
+## Working on the board? Read `PCB.md`
+
+This file covers what is shared plus schematic capture. **PCB layout, footprints,
+land patterns, `pcbnew` scripting, zones, DRC, stackup and creepage live in
+[`PCB.md`](PCB.md)** — read that file as well when the task touches the board, and
+skip it entirely for schematic-only work.
 
 ## Core principle: generate, never hand-place
 
@@ -38,6 +45,7 @@ Generator hygiene, each learned the hard way:
   ERC reported *a* problem but not which nets had merged; only the netlist showed that.
 - **Beware substring replaces hitting `def` lines.** `s.replace("check_foo()", …)` also matches
   inside `def check_foo():`. Anchor on the full line, or verify the file still parses.
+
 
 ## Ask before you assume: the choices that are the user's, not yours
 
@@ -70,49 +78,6 @@ hardcoded `CU = (F_Cu, In1_Cu, In2_Cu, B_Cu)` in an audit keeps "checking" layer
 that no longer exist. Derive the layer set from `board.GetCopperLayerCount()` and
 assert it equals what the audit was written for.
 
-## No vias in pads — and DRC will not tell you
-
-KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
-is simply "connected" — which is how a 0.6 mm via can sit inside an 0805 land
-through a full adversarial review. At reflow the via barrel wicks solder out of
-the joint; the result is a starved joint that looks fine under a microscope.
-
-Write the check yourself — and make it **net-blind**, because the real cases are
-same-net:
-
-```python
-for v in vias:
-    for ref, p in pads:
-        if v.GetEffectiveShape(layer).Collide(p.GetEffectiveShape(layer), mm(0.2)):
-            bad.append(...)          # no net comparison anywhere
-```
-
-Expect such a scan to find more than was reported: one instance typically comes
-with several others (supply and ground vias inside SOIC lands are common) plus a
-tail of near-misses in the 0.03–0.19 mm range. **A user reporting one instance of
-a class of defect is reporting the class** — scan for all of it, and say what the
-scan found.
-
-When a via genuinely has nowhere to go — two chip lands 0.22 mm apart, a SOIC pin
-0.5 mm from its decoupler — step it *off the axis* rather than squeezing it
-between: run a short stub of track and put the via where there is room.
-
-## The stackup is part of the design, not a fab preference
-
-If the board file has no `(stackup ...)` block, KiCad assumes a default and the
-fab builds whatever is cheapest that week — while your design doc quotes
-dielectric-dependent numbers (stray capacitance, impedance, creepage class) that
-depend on a stackup nobody agreed to. Write it explicitly.
-
-The SWIG `pcbnew` API does not usefully expose `BOARD_STACKUP` (you get an opaque
-`SwigPyObject` with no methods), so this has to be a text edit on the saved
-`.kicad_pcb`. Anchor it on a regex that captures the existing indentation —
-KiCad indents with tabs, and a hardcoded two-space `"\n  (setup\n"` anchor will
-not match. **Make the failure loud**: if the anchor is missing, exit; do not
-return quietly, or the stackup silently stops being written and every number that
-depends on it becomes unbacked. Then verify KiCad *parses* it rather than merely
-tolerating it — load and re-save through `pcbnew` and confirm the block survives
-the round-trip.
 
 ## The verification ladder
 
@@ -135,6 +100,11 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
 5. **Domain guards** for anything the tools don't model (see *Guards*, below).
+
+Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
+Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
+clearance — are in [`PCB.md`](PCB.md).
+
 
 ## KiCad file-format gotchas
 
@@ -248,37 +218,6 @@ Use `max(height × 0.15, 0.15)` and ≥1.0 mm height. Also state the **stackup**
 board with no `(stackup …)` block gets the fab's house build, and every dielectric-dependent
 number you computed (trace-to-plane stray, return-path coupling) silently assumes one.
 
-## PCB / `pcbnew` notes
-
-Run layout scripts with KiCad's **bundled** Python — `pcbnew` is not importable from a normal
-venv:
-
-```
-/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
-```
-
-It prints a harmless `create wxApp before calling this` assert; ignore it. API traps met in
-practice: `ZONE` has no `SetDoNotAllowZoneFills`; `LSET & LSET` is not supported; and
-`SHAPE::Collide` wants a real `VECTOR2I`, not a tuple. Distances come back in internal units —
-`pcbnew.ToMM()` everything before comparing.
-
-**A schematic edit that changes no nets can still break `--schematic-parity`.** Renaming a
-symbol's *Value* field desyncs it from the value stored in the `.kicad_pcb` footprint. Re-run
-the layout script after any schematic change, not only after connectivity changes.
-
-**Zone fills are a cache.** Changing a clearance *rule* does not move filled copper until
-zones are re-filled, so any geometric measurement afterwards is against stale copper. Re-fill
-(`ZONE_FILLER`) before measuring, or you will "verify" the previous state. This is a classic
-false negative when *calibrating* a clearance guard: tightening the rule to force a violation
-appears to do nothing, and the guard looks broken when in fact the test was.
-
-- **A thermal pad wants solid copper, not thermal relief.** Zones default to
-  `ZONE_CONNECTION_THERMAL`; spokes on an exposed-pad land starve exactly the
-  connection the island exists to make. DRC's `starved_thermal` check catches it
-  (`zone min spoke count 2; actual 1`) — set `ZONE_CONNECTION_FULL` on that zone.
-- **A track endpoint sitting on top of a zone is not connected to it** if they
-  are on different layers. It needs a via. DRC reports this as `track_dangling`
-  plus an unconnected item; both point at the same missing via.
 
 ## Datasheet discipline
 
@@ -306,25 +245,6 @@ table. Every one of these was a real error caught by doing so:
   logic rail up before an HV rail.
 - **Logic-level compatibility**: a 5 V pull-up into a 3.3 V-only GPIO destroys it.
 
-## Modifying a footprint: copper, mask and paste are three independent layers
-
-If you narrow a pad's **copper** for creepage, `F.Mask` and `F.Paste` do **not** follow.
-This nearly shipped: an exposed pad was cut 2.95 → 2.00 mm and its mask 2.71 → 1.80 mm for
-HV clearance, while the four paste apertures stayed at their original size — printing paste
-**2.49 mm wide**, 0.245 mm *outside* the copper and onto bare solder mask, right in the
-0.675 mm channel between −15 V and +110 V. Creepage measured on copper said 0.675 mm; the
-real post-reflow figure was **0.430 mm**, below IPC-2221B B2.
-
-After editing any pad, measure all three layers:
-
-```python
-for layer, name in ((pcbnew.F_Cu,"copper"), (pcbnew.F_Mask,"mask"), (pcbnew.F_Paste,"paste")):
-    ...  # min/max extents per layer, then the gap to the nearest foreign-net land
-```
-
-Also: **never print paste over an open via barrel** — solder wicks down it. If thermal vias
-sit inside the pad's mask opening, either shape the apertures to miss them, or specify
-plugged/filled vias (IPC-4761) in the fab notes.
 
 ## Guards (checks, validators, audits)
 
@@ -365,6 +285,7 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Protection on a precision node has a cost.** A TVS sized for an 85 V input leaks µA near
   breakdown — comparable to the entire load on a node built for 134 µVpp. Clamp at the victim
   end, disconnect with a relay, or document the residual risk; don't reflexively fit the part.
+
 
 ## Reviewing someone else's numbers
 
