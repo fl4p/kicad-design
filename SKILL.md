@@ -5,8 +5,9 @@ description: Create or modify KiCad schematics, symbols, footprints and PCB layo
 
 # KiCad schematic and PCB design
 
-Hard-won on a low-noise 0..100 V metrology source (ADR1399 / DAC8811 / OPA455, 110 V rails,
-1.2 ppm noise target). Every gotcha below was paid for with a real defect.
+Every rule below exists because the failure it describes actually shipped and had to be
+caught. Most were found on precision analog / high-voltage boards, which is where KiCad's
+own checks are thinnest — but nothing here is specific to one design.
 
 ## Core principle: generate, never hand-place
 
@@ -45,12 +46,13 @@ budget decisions the user owns**. Picking one silently and then writing three
 pages of rationale for it makes it expensive to change later. Ask up front, in
 one message, before any placement:
 
-- **Layer count.** 4 layers is the reflexive answer for a mixed-signal board and
-  it is often wrong. On this project the 4-layer stack was defended with four
-  arguments and none had a number attached; the one quantity that mattered —
-  stray capacitance on a 1 pF feedback node — argued the other way, because the
-  nearest plane moves from 0.2 mm to 1.6 mm away and the stray drops ~8x. Ask,
-  and if you have a preference, give the number that supports it.
+- **Layer count.** 4 layers is the reflexive answer for a mixed-signal board.
+  Ask instead of assuming, and if you have a preference, give the *number* that
+  supports it. Beware of writing the rationale after the choice: a stack defended
+  by several plausible arguments with no quantity attached to any of them is a
+  default wearing a justification. Note that inner planes are not automatically
+  better for sensitive nodes — a plane 0.2 mm below a high-impedance node loads it
+  ~8x harder than one 1.6 mm below it on a 2-layer board.
 - **Board outline and mounting** — enclosure-driven.
 - **Assembly process** — hand-solder vs reflow decides whether a QFN or a
   PowerPAD is acceptable at all.
@@ -58,10 +60,10 @@ one message, before any placement:
   uncoated vs A7 0.4 mm coated), so it decides HV geometry, not just finish.
 - **Connector types and pinout** — usually fixed by what plugs into it.
 
-Converting a finished 4-layer board to 2 is very doable if the generator is the
-source of truth — here it was 5 DRC violations and about an hour — but every
-inner-plane *decision* has to be re-derived, and the design doc's rationale
-sections have to be rewritten rather than patched. Cheaper to ask.
+Converting a finished board between layer counts is very doable when a generator
+is the source of truth — expect a handful of DRC violations, not a redesign — but
+every inner-plane *decision* has to be re-derived, and the design document's
+rationale sections have to be rewritten rather than patched. Cheaper to ask.
 
 Related, when a stack changes: **every layer literal is now a liability.** A
 hardcoded `CU = (F_Cu, In1_Cu, In2_Cu, B_Cu)` in an audit keeps "checking" layers
@@ -71,7 +73,7 @@ assert it equals what the audit was written for.
 ## No vias in pads — and DRC will not tell you
 
 KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
-is simply "connected", which is how a 0.6 mm via sat inside C10's 0805 land
+is simply "connected" — which is how a 0.6 mm via can sit inside an 0805 land
 through a full adversarial review. At reflow the via barrel wicks solder out of
 the joint; the result is a starved joint that looks fine under a microscope.
 
@@ -85,13 +87,14 @@ for v in vias:
             bad.append(...)          # no net comparison anywhere
 ```
 
-Two things this found beyond the one defect that was reported: three *more*
-in-pad vias (a supply via inside a SOIC pin, two ground vias inside SOIC pins),
-and three near-misses at 0.03–0.19 mm. A user reporting one instance of a class
-of defect is reporting the class. Scan for all of it.
+Expect such a scan to find more than was reported: one instance typically comes
+with several others (supply and ground vias inside SOIC lands are common) plus a
+tail of near-misses in the 0.03–0.19 mm range. **A user reporting one instance of
+a class of defect is reporting the class** — scan for all of it, and say what the
+scan found.
 
-When a via genuinely has nowhere to go — two 0805 lands 0.22 mm apart, a SOIC
-pin 0.49 mm from its decoupler — step it *off the axis* rather than squeezing it
+When a via genuinely has nowhere to go — two chip lands 0.22 mm apart, a SOIC pin
+0.5 mm from its decoupler — step it *off the axis* rather than squeezing it
 between: run a short stub of track and put the via where there is room.
 
 ## The stackup is part of the design, not a fab preference
@@ -265,8 +268,9 @@ the layout script after any schematic change, not only after connectivity change
 
 **Zone fills are a cache.** Changing a clearance *rule* does not move filled copper until
 zones are re-filled, so any geometric measurement afterwards is against stale copper. Re-fill
-(`ZONE_FILLER`) before measuring, or you will "verify" the previous state. This bit me while
-trying to calibrate a clearance guard.
+(`ZONE_FILLER`) before measuring, or you will "verify" the previous state. This is a classic
+false negative when *calibrating* a clearance guard: tightening the rule to force a violation
+appears to do nothing, and the guard looks broken when in fact the test was.
 
 - **A thermal pad wants solid copper, not thermal relief.** Zones default to
   `ZONE_CONNECTION_THERMAL`; spokes on an exposed-pad land starve exactly the
