@@ -37,7 +37,10 @@ everywhere at once. Hand-editing a generated file is a bug waiting to happen —
 the docs saying the artefact is generated and the generator is the source of truth.
 
 **Verify reproducibility**: `md5` the output, re-run the generator, `md5` again. Equal or the
-generator has hidden state.
+generator has hidden state — **but only if the generator actually ran**. Assert its exit
+status is 0 *and* that the output's mtime moved, in the same breath as comparing the hashes: a
+re-run under an interpreter that cannot import `pcbnew` leaves the file untouched, so the two
+md5s match and the check reports PASS having tested nothing. See *Generator hygiene* below.
 
 Warn the user that GUI edits will be overwritten on the next run, and check for a running
 Eeschema/pcbnew holding a stale copy before regenerating.
@@ -56,14 +59,18 @@ Generator hygiene, each learned the hard way:
   through the API: `pcbnew` gives every item it creates a random UUID and exposes `m_Uuid`
   **read-only** (there is no `SetUuid`), so it takes a post-save rewrite of the `.kicad_pcb`.
   [`PCB.md`](PCB.md) covers that and the second, less obvious cause of a wobbling md5.
-- **Verify the generator actually ran before believing a reproducibility check.** Re-running it
-  under an interpreter that cannot import `pcbnew` leaves the file untouched, so the two md5s
-  match and the check reports PASS having tested nothing. Assert the *generator's* exit status
-  is 0 *and* that the output file's mtime moved — comparing hashes alone cannot distinguish
-  "reproducible" from "never regenerated". (Cost: a confident "reproducibility verified" on a
-  board whose generator had not executed once.) Note this applies to **your own script's**
-  exit status; `kicad-cli`'s means almost nothing unless you pass `--exit-code-violations` —
-  see *The verification ladder*.
+- **Verify the generator actually ran before believing a reproducibility check.** (Stated in
+  *Core principle* above because an agent that skims the principle box implements the broken
+  version.) Cost: a confident "reproducibility verified" on a board whose generator had not
+  executed once. Note this applies to **your own script's** exit status; `kicad-cli`'s means
+  almost nothing unless you pass `--exit-code-violations` — see *The verification ladder*.
+- **Do not put a load-bearing check behind a bare `assert`.** `python -O` / `PYTHONOPTIMIZE=1`
+  deletes every `assert` statement in the file, silently and with no message — so a generator
+  invoked from a Makefile or CI wrapper that happens to set `-O` emits the same artefact with
+  *zero* checking. Anything whose absence is a false PASS must be `if not cond: raise ...`.
+  Keep `assert` for genuine can't-happen invariants only, and put
+  `if not __debug__: sys.exit("refusing to run under -O: the guards are gone")` at the top of
+  any generator that has guards worth having.
 - **Export the netlist after every structural edit and read it.** Two separate reroutes
   silently merged nets (SCLK+SDI+~CS, then VREF10+GND) because stub endpoints share a column.
   ERC reported *a* problem but not which nets had merged; only the netlist showed that.
@@ -88,8 +95,16 @@ one message, before any placement:
 - **Board outline and mounting** — enclosure-driven.
 - **Assembly process** — hand-solder vs reflow decides whether a QFN or a
   PowerPAD is acceptable at all.
-- **Conformal coating** — it changes which IPC-2221B column applies (A6 0.8 mm
-  uncoated vs A7 0.4 mm coated), so it decides HV geometry, not just finish.
+- **Conformal coating** — it changes which IPC-2221 column applies, so it decides
+  HV geometry, not just finish. Do **not** carry "0.8 mm uncoated / 0.4 mm coated"
+  around as a constant: those are A6/A7 for the **101–250 V** band only. The same
+  columns are 0.13 mm at 0–15 V and 1.5 mm at 301–500 V. Every spacing number you
+  write down must carry `standard + revision + table + column + voltage band +
+  the voltage actually used`, or it is not checkable and will be misapplied at a
+  different voltage. Note the current revision is **IPC-2221C** (Dec 2023); the
+  figures quoted here and in `PCB.md` are the B-era ones and have **not** been
+  re-verified against C's Table 6-1 — read it before leaning on a marginal number,
+  and see `PCB.md` for which column (A5–A7 assembly vs B1–B4 bare-board) applies.
 - **Connector types and pinout** — usually fixed by what plugs into it.
 
 **If the user forbids questions** ("don't ask me anything", or an autonomous run), you still
@@ -147,8 +162,10 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   or add ORing, current limiting or isolation that makes either connection order safe.
 - **A series limiter belongs at the connector, and the pull-up on the exposed side of it.**
   What is exposed is usually the *run*, not just the pin: an open-collector status output on a
-  +110 V op-amp sat **0.670 mm** from the 0–100 V output land — a spacing that only meets
-  IPC-2221B under the conformal coating — and its track then crossed the board 1.02 mm from the
+  +110 V op-amp sat **0.670 mm** from the 0–100 V output land — a spacing that meets
+  IPC-2221C Table 6-1 **A7** (0.4 mm, coated, 101–250 V) but not **A6** (0.8 mm, uncoated,
+  same band), i.e. it is compliant only if the board is actually coated — and its track then
+  crossed the board 1.02 mm from the
   output track, ending at a Raspberry Pi GPIO with nothing in series. Put the limiter at the
   *device pin* and that whole run is downstream of it, so a bridge or coating void onto the run
   simply bypasses it. Everything **upstream** of the limiter is what gets protected, so it goes
@@ -157,7 +174,7 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   backwards. Leave it at the connector and it forms a divider with the limiter, so a valid
   `V_OL` caps the limiter at a few kΩ — and the bounding fault of 110 V across 3 kΩ is 37 mA
   and **4.0 W**, a fusible rather than a resistor. Moving the pull-up upstream removes the
-  divider entirely and lets the limiter be large enough (47 kΩ → 2.3 mA, **0.242 W**) that
+  divider entirely and lets the limiter be large enough (47 kΩ → 2.34 mA, **0.257 W**) that
   nothing in the path becomes a fuse. Size the pull-up against the receiver's **worst-case**
   input leakage, not its typical: 100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is
   what bounds how large the pair can get. Record which side each part is on and why, or the
@@ -165,9 +182,12 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   Two traps in those numbers, both of which this entry fell into before being corrected.
   **Bound the fault at the rail, not at the maximum output** — the first version sized it at
   100 V because that was the output swing, while the supply is 110 V, which is the same defect
-  the *maximum credible fault* bullet above describes. And 0.242 W is **97 % of a 1206**, so
-  the derating rule under *Guards* applies and the part goes to a 2010. A protection resistor
-  chosen at the nominal fault and the nameplate rating is sized twice over at the wrong number.
+  the *maximum credible fault* bullet above describes. And 110²/47 kΩ = **0.257 W is 103 % of
+  a 0.25 W 1206** — over its nameplate before any derating at all — so the part goes to a 2010.
+  Quote the series and rating the percentage is against: 1206 thick-film runs 0.125–0.5 W
+  depending on series, and at a 110 V fault the part's **working-voltage** rating binds
+  independently of power. A protection resistor chosen at the nominal fault and the nameplate
+  rating is sized twice over at the wrong number.
 
 
 ## The verification ladder
@@ -178,7 +198,7 @@ plausible-but-wrong artefacts ship.
 ```sh
 K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli   # not on PATH by default
 $K sch export pdf --black-and-white -o out.pdf x.kicad_sch  # 1. does it even parse?
-$K sch erc --exit-code-violations -o erc.rpt x.kicad_sch    # 2. ERC
+$K sch erc --severity-all --exit-code-violations -o erc.rpt x.kicad_sch  # 2. ERC
 $K sch export netlist --format kicadsexpr -o n.net x.kicad_sch  # 3. are the NETS right?
 $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
@@ -191,8 +211,20 @@ exit status is 0" passes a board it never checked — the anti-monotone false PA
 document is about, sitting in its own ladder. Either pass the flag, or parse the report and
 assert the violation count; never take `$?` alone as the verdict.
 
+**`--severity-all` is not optional for ERC either, and "ERC = 0" is a statement about the
+severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities` —
+43 rules on KiCad 9.0.4 — plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC
+map that `PCB.md` treats as a first-class guard precondition. A rule set to `ignore` is not
+resurrected by `--severity-all`, and one real project silently carried four at `ignore`
+(`footprint_filter`, `four_way_junction`, `simulation_model_issue`, `single_global_label`).
+Worse, that map lives in the same `.kicad_pro` that a generator can rewrite wholesale — see
+*Never write a file another generator owns* above, where doing exactly that reset DRC to
+defaults. **Before believing a green ERC, diff `erc.rule_severities` against defaults and list
+every `ignore` in the release report**, and do the same for `pin_map`, which decides whether
+two outputs driving each other is an error at all.
+
 1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
-2. **ERC = 0.** Necessary, nowhere near sufficient.
+2. **ERC = 0.** Necessary, nowhere near sufficient — and see the severity-map caveat above.
 3. **Read the netlist.** ERC cannot tell you that a feedback tap is on the wrong side of a
    resistor. Print every net with its nodes and read them against intent. This is the single
    highest-value check. **Assert the component count before reading anything else** — an
@@ -263,7 +295,7 @@ when they are no longer current.
 | **Symbol Y axis is inverted** | Library Y is up, schematic Y is down. Global pin pos = `(X + px, Y - py)` for angle 0. |
 | `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. The `_Small` variants (`R_Small`, `C_Small`, `C_Polarized_Small`, `L_Small`, `D_Small`) connect at **±2.54 mm** — generators reach for them constantly and the 1.27 mm error dangles every wire silently. |
 | `Device:R_Pack02` | Elements are **1↔4 and 2↔3**, bodies drawn *vertically*. Not 1↔2 / 3↔4. Get it backwards on a matched filter pair and you short the source across one resistor and the ADC inputs across the other — netlist and ERC both stay clean. Resistor packs are the natural way to make a matched pair un-mismatchable, so this row earns its keep. |
-| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. `Conn_02xNN` puts its even pins on the **right**, at `x = X + 7.62`. Better: don't encode any of this, call `pn()`. |
+| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. For 2-row parts there is **no bare `Conn_02xNN`** — the library ships `_Odd_Even`, `_Counter_Clockwise`, `_Row_Letter_First`, `_Row_Letter_Last` and `_Top_Bottom`, and using the bare name is a symbol-not-found, i.e. the exit-139/0-component failure below. Even pins sit on the **right** at `x = X + 7.62` for **`_Odd_Even` only**; the other variants number differently, so which pins are on which side changes with the suffix. N in the centring formula is the **row count**, not the pin count. Better: don't encode any of this, call `pn()`. |
 | **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
 | **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
@@ -285,16 +317,44 @@ def _xf(px, py, ang, mirror):
     elif mirror == 'y': x = -x
     return (x, y)
 
-def pn(ref, num):                        # -> exact global coords of that pin
-    lid, X, Y, ang, mir = INST[ref]
-    for n, lx, ly in LIBPINS[lid]:
+def pn(ref, unit, num):                  # -> exact global coords of that pin
+    lid, X, Y, ang, mir = INST[(ref, unit)]     # keyed on (ref, UNIT), see below
+    for n, lx, ly in LIBPINS[(lid, unit)]:
         if n == str(num):
             dx, dy = _xf(lx, ly, ang, mir)
             return (round(X+dx, 4), round(Y+dy, 4))
-    raise KeyError(f"{ref} has no pin {num}")
+    raise KeyError(f"{ref} unit {unit} has no pin {num}")   # never fall through
 ```
 
-Then wire with `poly(pn("U3","2"), pn("U5","5"))` and the coordinates cannot drift.
+Then wire with `poly(pn("U3",1,"2"), pn("U5",1,"5"))` and the coordinates cannot drift.
+
+**`unit` is mandatory, not decoration.** A dual or quad op-amp is **one refdes with several
+unit instances**, each placed at a *different* (X, Y), and the units do not share a pin space.
+`Amplifier_Operational:LM2904` on 9.0.4:
+
+```
+LM2904_1_1  pins 3(-7.62,2.54) 2(-7.62,-2.54) 1(7.62,0)
+LM2904_2_1  pins 5(-7.62,2.54) 6(-7.62,-2.54) 7(7.62,0)
+LM2904_3_1  pins 8(-2.54,7.62) 4(-2.54,-7.62)      <- the SUPPLY unit
+```
+
+Key `INST` on refdes alone and it cannot even hold unit A and unit B; flatten `LIBPINS` across
+units and a lookup by pin number returns unit 2's offset applied to unit 1's placement point.
+Every offset above is on-grid, so the grid/orthogonality guard below **cannot catch it** — you
+get a wire onto a neighbouring pin, or a dangle, in silence. Unit 3 is where pins 8 and 4 live,
+which is the whole *Decoupling is a current loop* section. Parse the `NAME_<unit>_<bodystyle>`
+sub-symbols, and raise if a requested pin is not in the requested unit rather than searching
+the others. Add unit number to the enumerated parameter space under *Guards* as a **required**
+dimension.
+
+**Resolve `extends` before embedding.** **12 007 of the 22 387 top-level symbols in the stock
+9.0.4 libraries (53.6 %) are `(extends "PARENT")`** and carry no pins and no graphics of their
+own — `Amplifier_Operational:LM358` is literally `(symbol "LM358" (extends "LM2904") …)`. A
+parser that reads only the named entry gets **zero pins for over half the library**, and
+copying that bare entry into the `.kicad_sch` is exactly the one-line `lib_symbols` defect in
+the table above: `kicad-cli` either segfaults (exit 139) or writes a 0-component netlist at
+exit 0. Flatten the parent's pins and graphics into the emitted entry — which is what the GUI
+writes — and assert the emitted symbol has ≥ 1 pin.
 
 **The order of those two operations is not a style choice, and getting it wrong is invisible
 on most boards.** KiCad mirrors *after* rotating. Mirror-first and rotate-first agree at 0°
@@ -351,24 +411,41 @@ Audit it instead of eyeballing:
 
 ```python
 def check_rail_orientation():   # graphic must point AWAY from the attached wire
-    bad = []
-    for libid, x, y, graphic_down in _RAILS:
-        for (x1, y1, x2, y2) in _SEGS:
-            for (ax, ay), (bx, by) in (((x1,y1),(x2,y2)), ((x2,y2),(x1,y1))):
-                if (ax, ay) != (x, y) or ax != bx:   # not here, or not vertical
-                    continue
-                if (by > ay) == graphic_down:
-                    bad.append(f"{libid} at ({x},{y}) drawn over its own wire")
+    if not _RAILS or not _SEGS:          # empty input is UNVERIFIED, never a pass
+        raise ValueError(f"UNVERIFIED: {len(_RAILS)} rails, {len(_SEGS)} segments")
+    bad, matched = [], 0
+    for libid, x, y, graphic_down, gbox in _RAILS:
+        hits = 0
+        for (ax, ay, bx, by) in _SEGS:
+            for (px, py), (qx, qy) in (((ax,ay),(bx,by)), ((bx,by),(ax,ay))):
+                if (px, py) != (x, y):
+                    continue             # this segment does not start on the rail
+                hits += 1
+                if px == qx:                                  # vertical
+                    if (qy > py) == graphic_down:
+                        bad.append(f"{libid} at ({x},{y}) drawn over its own wire")
+                # horizontal attachment is legal and was previously SKIPPED, which
+                # made "no matching segment" read as PASS
+        if hits == 0:
+            bad.append(f"{libid} at ({x},{y}) has NO wire on it -- dangling")
+        else:
+            matched += 1
     # ...and the glyph must not be drawn across some OTHER net's wire either.
-    for libid, x, y, graphic_down in _RAILS:
-        y0, y1 = (y, y + 2.54) if graphic_down else (y - 2.54, y)
-        x0, x1 = x - 1.27, x + 1.27
+    for libid, x, y, graphic_down, gbox in _RAILS:
+        # gbox is the symbol's OWN graphic bbox, taken from its library entry --
+        # NOT a hardcoded 1.27 x 2.54.  Earth_Protective, GNDPWR and friends are
+        # bigger than that box, so a real crossing goes unseen.
+        x0, x1, h = x - gbox.w/2, x + gbox.w/2, gbox.h
+        y0, y1 = (y, y + h) if graphic_down else (y - h, y)
         for (ax, ay, bx, by) in _SEGS:
             if ax == bx and x0 < ax < x1 and min(ay,by) < y1 and max(ay,by) > y0:
                 bad.append(f"{libid} at ({x},{y}) glyph crosses vertical wire")
             elif ay == by and y0 < ay < y1 and min(ax,bx) < x1 and max(ax,bx) > x0:
                 bad.append(f"{libid} at ({x},{y}) glyph crosses horizontal wire")
-    if bad: raise AssertionError("\n  ".join(sorted(set(bad))))
+    print(f"{len(_RAILS)} rails, {matched} with an attached wire, "
+          f"{len(_SEGS)} segments considered")     # count beside the verdict
+    if bad:
+        raise ValueError("\n  ".join(sorted(set(bad))))
 ```
 
 The second loop matters: the first version only checked a symbol's *own* wire and passed a
@@ -423,10 +500,18 @@ an MPN, and does not prevent procurement from substituting a part that breaks th
 **A value is not a part until value × voltage × package has been checked together.** Each of
 the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
 was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
-survived**, because the fix was applied to the instance rather than the class. At 250 V an
-0805 tops out in the tens of nF, and the smallest 100 nF/250 V X7R is a **1206** —
-`CGA5L3X7R2E104K160AE`, where TDK's size code `CGA5` is 3216 metric, i.e. 1206 (`CGA4` = 0805,
-`CGA6` = 1210); a non-soft-termination sibling `C3216X7R2E104K160AA` is the same size. Take
+survived**, because the fix was applied to the instance rather than the class.
+
+Do **not** memorise where the frontier is — this section originally claimed "at 250 V an 0805
+tops out in the tens of nF, and the smallest 100 nF/250 V X7R is a 1206", and that is simply
+false: Holy Stone `C0805X104K251T` is a stocked 0.1 µF ±10 % **250 V X7R in 0805**, and Samsung
+shipped an 0805 250 V 100 nF X7T in 2025. Ceramic energy density moves every year, and quoting
+a limit from memory here is the exact defect *Never quote a spec from memory* below forbids.
+**The rule is the method, not the number**: run a distributor parametric query on
+(capacitance, voltage, dielectric, package) together and take the answer from what is actually
+in stock. One example done properly — `CGA5L3X7R2E104K160AE` is a 100 nF/250 V X7R where TDK's
+size code `CGA5` is 3216 metric, i.e. 1206 (`CGA4` = 0805, `CGA6` = 1210); a
+non-soft-termination sibling `C3216X7R2E104K160AA` is the same size. Take
 the size code from the vendor's own dimension table rather than reading the digits as an EIA
 code, which is how this was first written down here as a 1210. Then derate: a 250 V X7R at
 110 V of bias keeps roughly a third of
@@ -517,7 +602,10 @@ HTTP/1.1 and gets `INTERNAL_ERROR` on HTTP/2, while a browser gets a 403 whose b
 `errors.edgesuite.net` reference. Handshake success rules out certs, network and auth — the
 WAF is dropping you on fingerprint.
 
-**A headless browser does not help.** Playwright's default Chrome advertises
+**A *default* headless browser does not help — a real one does.** The distinction is
+`channel="chrome"` driving the installed Chrome, and [`SETUP.md`](SETUP.md) has the working
+recipe plus the preflight that proves it is available on this machine; do not read the
+paragraph below as "browsers are useless here". Playwright's default Chrome advertises
 `HeadlessChrome/<version>` in its User-Agent and Akamai 403s on that token alone —
 `navigator.webdriver` was already `false`, so stealth patches miss the point. Verified against
 both a product page and the direct `…/media/…/*.pdf` path: 403 on each.
@@ -600,7 +688,10 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **A perfect score on your own design may have tested nothing.** The `pn()` transform above
   was validated at **164/164 pins** on a real board and was still wrong for a third of its
   input space: that board contained no mirrored symbols, so four of the twelve rotation ×
-  mirror combinations were never exercised, and those four swap pin 1 with pin 2. Your design
+  mirror combinations (4 angles × 3 mirror states) were never exercised, and those four swap
+  pin 1 with pin 2. The denominator below is 24 because the enumeration checks **both pins**
+  of a two-pin part in each of the twelve cells — say which, or the arithmetic reads as a typo
+  in the one paragraph that is about reporting coverage honestly. Your design
   is a *sample*, and the branches it never reaches are precisely the ones nobody has looked
   at. For any helper with a small discrete parameter space — rotation × mirror, layer set,
   package variant, pad shape, unit number — **enumerate the space and check every cell against

@@ -83,10 +83,17 @@ Write the check yourself — and make it **net-blind**, because the real cases a
 same-net:
 
 ```python
-for v in vias:
-    for ref, p in pads:
-        if v.GetEffectiveShape(layer).Collide(p.GetEffectiveShape(layer), mm(0.2)):
-            bad.append(...)          # no net comparison anywhere
+n = 0
+for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
+    for v in vias:                       # build these explicitly, do not assume
+        for ref, p in pads:
+            if not (v.IsOnLayer(layer) and p.IsOnLayer(layer)):
+                continue
+            n += 1
+            if v.GetEffectiveShape(layer).Collide(p.GetEffectiveShape(layer), mm(0.2)):
+                bad.append(...)          # no net comparison anywhere
+assert n, "UNVERIFIED: no via/pad pairs examined at all"
+print(f"{n} via/pad pairs examined, {len(bad)} hits")   # count beside the verdict
 ```
 
 Expect such a scan to find more than was reported: one instance typically comes
@@ -138,7 +145,7 @@ practice, with the name that actually works — all three confirmed on KiCad 9.0
 
 Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
 
-**KiCad's bundled `pcbnew` imports Altium boards.** `PCB_IO_Mgr` converts a `.PcbDoc` to
+**KiCad's bundled `pcbnew` imports Altium boards.** `PCB_IO_MGR` (all caps — `PCB_IO_Mgr` is an `AttributeError`) converts a `.PcbDoc` to
 `.kicad_pcb` programmatically, so an Altium design can be pulled into a scripted KiCad
 pipeline rather than re-drawn. Expect to fix up layer mapping afterwards — the import does
 not always land copper, mask and silk on the layers you would have chosen — and re-run the
@@ -264,7 +271,26 @@ This nearly shipped: an exposed pad was cut 2.95 → 2.00 mm and its mask 2.71 �
 HV clearance, while the four paste apertures stayed at their original size — printing paste
 **2.49 mm wide**, 0.245 mm *outside* the copper and onto bare solder mask, right in the
 0.675 mm channel between −15 V and +110 V. Creepage measured on copper said 0.675 mm; the
-real post-reflow figure was **0.430 mm**, below IPC-2221B B2.
+real post-reflow figure was **0.430 mm**, below IPC-2221C Table 6-1 **B2** (0.6 mm, internal
+/ external-with-permanent-coating, 101–170 V).
+
+**Which column applies is not obvious, and getting it wrong is worth 0.2 mm here.** A5–A7 are
+the *assembly* columns — component leads and their terminations, i.e. the pad-to-pad case
+above once parts are on. B1–B4 are the *bare-board* conductor columns — track to track, track
+to land. They disagree by enough to flip a verdict: 0.670 mm passes A7 and fails A6, while
+0.675 mm passes B2 — three numbers within 5 µm of each other with three different answers.
+State the column, the voltage band and the coating status every time, or the number means
+nothing. And note this is IPC-2221**C** (Dec 2023), which supersedes B; the B-era values
+quoted historically in this file were not re-verified against C's Table 6-1, so re-read it
+before leaning on a marginal figure.
+
+**None of this covers an isolation barrier.** IPC-2221 is a PCB design standard and does not
+address reinforced/functional isolation. If the board has a barrier — mains, or any
+safety-relevant separation — the binding documents are IEC 60664-1 / 62368-1, where clearance
+(through air) and creepage (across surface) are *separate* quantities derived from working
+voltage, pollution degree, overvoltage category and material group/CTI, and where slotting the
+board is a legitimate remedy. Do not enforce a round number nobody derived: write down which
+standard, which table, and the four inputs, or say plainly that the figure is a house rule.
 
 After editing any pad, measure all three layers:
 
@@ -294,7 +320,8 @@ directions that have room — and it is the same shape as an empty-scan false pa
 ```sh
 cp board.kicad_pcb /tmp/t.kicad_pcb    # then swap the footprint via pcbnew,
                                        # keeping position, rotation and pad nets
-$K pcb drc --severity-error --severity-warning -o /tmp/drc.json /tmp/t.kicad_pcb
+$K pcb drc --format json --severity-all --exit-code-violations \
+    -o /tmp/drc.json /tmp/t.kicad_pcb
 ```
 
 Thirty seconds, and it settles courtyard, clearance and silkscreen at once. Re-run any

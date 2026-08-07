@@ -26,6 +26,11 @@ you "probably won't need it".
 ls <datasheet-dir>/ | grep -i <part-family>
 
 # 2. Which vendor sites are reachable from THIS machine, right now.
+#    This PRINTS, it does not verdict -- and it probes the wrong host on purpose,
+#    so read it as orientation only.  `http=403`, a 200 behind a consent wall and a
+#    redirect all look like success here, and 3 explains that the host that matters
+#    is the ASSET host (mds.analog.com), not www.  Proving you can fetch a datasheet
+#    means fetching a known PDF URL and running it through 4's validation.
 for h in www.analog.com www.ti.com www.st.com www.onsemi.com www.vishay.com; do
   printf "%-22s " "$h"
   curl -sS -o /dev/null -w "http=%{http_code} t=%{time_total}s\n" --max-time 12 "https://$h/"
@@ -43,7 +48,16 @@ python3 -c "from playwright.sync_api import sync_playwright
 p=sync_playwright().start(); b=p.chromium.launch(channel='chrome'); print('chrome channel ok'); b.close(); p.stop()"
 
 # 5. PDF tooling (poppler; not present on stock macOS)
-command -v pdfinfo pdftotext pdftocairo || echo "brew install poppler"
+#    NOT `command -v a b c` -- that exits 0 if ANY ONE of them resolves.  Measured:
+#    bash `command -v ls missing1 missing2` -> rc=0, zsh -> rc=1.  So the one-liner
+#    passes under bash on a machine that has pdfinfo and neither pdftotext nor
+#    pdftocairo -- exactly the tools 4 and *Reading the PDF* depend on -- and it
+#    fails open only in scripts and CI, never when you test it interactively in zsh.
+miss=
+for c in pdfinfo pdftotext pdftocairo; do
+  command -v "$c" >/dev/null 2>&1 || { echo "MISSING $c"; miss=1; }
+done
+[ -z "$miss" ] || { echo "brew install poppler"; exit 1; }
 ```
 
 Check 4 matters more than it looks. `python3 -c "import playwright"` succeeds when the
@@ -249,11 +263,23 @@ reported by a prior agent as "PDF document, version 1.7" — technically true, e
 worthless.
 
 ```sh
-file -b --mime-type x.pdf                              # application/pdf
-pdfinfo x.pdf | awk '/Pages/{print $2}'                # 0 pages is always a failure;
-                                                       #   1 page is a failure for an IC
-pdftotext -layout x.pdf - | grep -ci "<MPN>" || true   # the part number actually appears
-                                                       #   (grep exits 1 on no match)
+[ "$(file -b --mime-type x.pdf)" = application/pdf ] || { echo "not a PDF"; exit 1; }
+
+# Pages.  An UNREADABLE pdf (corrupt, encrypted, absent) makes pdfinfo fail and the
+# pipeline still exit 0 with EMPTY output -- and `[ "$pages" -eq 0 ]` on an empty
+# string does not evaluate true, so "could not read it" silently becomes "fine".
+# Capture the status, and treat empty as FAIL.
+info=$(pdfinfo x.pdf) || { echo "pdfinfo failed -- unreadable, NOT clean"; exit 1; }
+pages=$(printf '%s\n' "$info" | awk '/^Pages:/{print $2}')
+[ -n "$pages" ] || { echo "no page count -- unverified, not a pass"; exit 1; }
+[ "$pages" -ge 2 ] || { echo "$pages page(s) -- a stub, not an IC datasheet"; exit 1; }
+
+# The MPN actually appears.  NOT `... | grep -ci "<MPN>" || true`: the `|| true`
+# disarms the check permanently, `grep -c` prints a reassuring "0", and the
+# pipeline status is grep's, so a pdftotext that failed outright is invisible.
+txt=$(pdftotext -layout x.pdf -) || { echo "pdftotext failed -- unverified"; exit 1; }
+n=$(printf '%s\n' "$txt" | grep -ci "<MPN>")
+[ "$n" -ge 1 ] || { echo "MPN absent -- wrong part, or a stub PDF"; exit 1; }
 ```
 
 **Judge the file by those three checks, never by the tools' stderr.** Poppler prints

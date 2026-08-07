@@ -12,7 +12,7 @@ Three files, so schematic-only work does not have to load the board material:
 | File | Read it when |
 |---|---|
 | `SKILL.md` | always — shared practice plus schematic capture |
-| `SETUP.md` | before a board task — can this machine actually fetch and validate the datasheets? |
+| `SETUP.md` | before **any** task that will read a datasheet, schematic-only included — can this machine actually fetch and validate them? Run it at the start, not when you hit the wall. |
 | `PCB.md` | the task touches the board: `pcbnew`, DRC, footprints, zones, stackup, creepage |
 
 Topics covered:
