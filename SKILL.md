@@ -115,6 +115,19 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   power pins; compute or bound injection current, back-powering and rail contention. Apply an
   isolator's default-state table to the voltage actually present at VCCI/VCCO — "host off" is
   not the same as "isolator side unpowered" when a separate brick still feeds it.
+- **A rail clamp is not a current sink.** For every clamp path, identify what absorbs the
+  current with the receiving rail both powered and unpowered. A logic rail that normally
+  consumes more than the injected current is not proof: its load may be absent, disabled or
+  disconnected in the fault state. For every fault inside the accepted envelope, provide a
+  guaranteed shunt/return path, bound the resulting rail rise and back-power current, and
+  include the sink in the maximum-fault stress ledger. Only a fault explicitly excluded from
+  that envelope may be documented as unsupported; documentation is not a substitute for an
+  in-scope protection path.
+- **Size protection at the maximum credible fault, not the normal signal maximum.** Include
+  supply tolerance and transients, component tolerance, working-voltage limits, continuous and
+  pulse power, ambient-temperature derating, and the protection part's failure mode. A nominal
+  package rating with only a few percent of room is not design margin. If prose calls the fault
+  110 V while the arithmetic uses 100 V, the protection check has failed even if ERC and DRC pass.
 - **Do not join two possible power sources directly.** State which connector powers which rail,
   or add ORing, current limiting or isolation that makes either connection order safe.
 
@@ -154,6 +167,16 @@ Treat verification summaries as cached output. Regenerate ERC, DRC, parity and a
 before release, then derive or check the documented counts against those files. A design note
 that says "two warnings" beside a current zero-warning report is a failed verification step,
 not harmless stale prose.
+
+After any value, net-name, topology or safety-limit change, sweep every representation of that
+fact: generator comments and schematic annotations, connector labels and silkscreen, BOM and
+assembly instructions, current integration/design documents, and firmware or host-side limits.
+Search explicitly for the old value or name. Preserve dated reviews as point-in-time records;
+mark findings resolved or superseded with a date and a reference to the current evidence rather
+than rewriting the original finding. A generated artefact can be electrically current while the
+instruction that tells someone what to fit remains dangerously stale; any contradiction among
+the live release artefacts is a release failure, and historical records must be clearly marked
+when they are no longer current.
 
 
 ## KiCad file-format gotchas
@@ -292,6 +315,14 @@ Before release, replace descriptive BOM placeholders with exact, orderable manuf
 numbers including package and performance grade. Verify the selected ordering code against the
 same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
 an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
+
+Build a **corner ledger** for every quantity that establishes bias, gain, safety margin or
+component stress. Combine supply tolerance, passive tolerance, device min/max specifications,
+and temperature or ageing terms where material; then prove every result stays inside the
+datasheet's characterized operating range. Typical-value arithmetic is useful for nominal
+performance, never for demonstrating compliance. In particular, do not infer that a pin named
+`SENSE`, `REF` or `FB` is high impedance — use its specified current when calculating copper
+drop, bias current and drift.
 
 **Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
 table. Every one of these was a real error caught by doing so:
