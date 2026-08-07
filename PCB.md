@@ -13,9 +13,13 @@ evaluate their input.
 DRC green means "no rule was broken", not "the design is right". In particular:
 
 ```sh
-$K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
+$K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
+- **`--exit-code-violations` is not optional either.** Without it `pcb drc` writes
+  every violation to the report and still **exits 0** — measured at 175 violations
+  exiting `0` bare and `5` with the flag. Any wrapper that trusts `$?` passes a
+  board it never checked. See *The verification ladder* in `SKILL.md`.
 - **`--schematic-parity` is not optional.** It is the only check that the board
   still matches the netlist.
 - **A rule area that relaxes a constraint is keyed on *position*.** Anything that
@@ -109,9 +113,15 @@ venv:
 ```
 
 It prints a harmless `create wxApp before calling this` assert; ignore it. API traps met in
-practice: `ZONE` has no `SetDoNotAllowZoneFills`; `LSET & LSET` is not supported; and
-`SHAPE::Collide` wants a real `VECTOR2I`, not a tuple. Distances come back in internal units —
-`pcbnew.ToMM()` everything before comparing.
+practice, with the name that actually works — all three confirmed on KiCad 9.0.4:
+
+| you reach for | it does not exist | use |
+|---|---|---|
+| `ZONE.SetDoNotAllowZoneFills(...)` | `AttributeError` | `ZONE.SetDoNotAllowCopperPour(...)` |
+| `LSET & LSET`, `LSET \| LSET` | `TypeError: unsupported operand type(s)` | `LSET.AddLayerSet()` / `RemoveLayerSet()` / `Contains()` |
+| `SHAPE::Collide((x, y), …)` | rejects the tuple | pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine |
+
+Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
 
 **KiCad's bundled `pcbnew` imports Altium boards.** `PCB_IO_Mgr` converts a `.PcbDoc` to
 `.kicad_pcb` programmatically, so an Altium design can be pulled into a scripted KiCad

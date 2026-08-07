@@ -58,10 +58,12 @@ Generator hygiene, each learned the hard way:
   [`PCB.md`](PCB.md) covers that and the second, less obvious cause of a wobbling md5.
 - **Verify the generator actually ran before believing a reproducibility check.** Re-running it
   under an interpreter that cannot import `pcbnew` leaves the file untouched, so the two md5s
-  match and the check reports PASS having tested nothing. Assert the exit status is 0 *and*
-  that the output file's mtime moved — comparing hashes alone cannot distinguish "reproducible"
-  from "never regenerated". (Cost: a confident "reproducibility verified" on a board whose
-  generator had not executed once.)
+  match and the check reports PASS having tested nothing. Assert the *generator's* exit status
+  is 0 *and* that the output file's mtime moved — comparing hashes alone cannot distinguish
+  "reproducible" from "never regenerated". (Cost: a confident "reproducibility verified" on a
+  board whose generator had not executed once.) Note this applies to **your own script's**
+  exit status; `kicad-cli`'s means almost nothing unless you pass `--exit-code-violations` —
+  see *The verification ladder*.
 - **Export the netlist after every structural edit and read it.** Two separate reroutes
   silently merged nets (SCLK+SDI+~CS, then VREF10+GND) because stub endpoints share a column.
   ERC reported *a* problem but not which nets had merged; only the netlist showed that.
@@ -153,12 +155,19 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   last, beside the connector, with the clamp.
   The pull-up then has to move to the exposed side, and this is the part that is easy to get
   backwards. Leave it at the connector and it forms a divider with the limiter, so a valid
-  `V_OL` caps the limiter at a few kΩ — and 100 V across 3 kΩ is 32 mA and 4 W, a fusible
-  rather than a resistor. Moving the pull-up upstream removes the divider entirely and lets the
-  limiter be large enough (47 kΩ → 2 mA, 0.196 W) that nothing in the path becomes a fuse.
-  Size the pull-up against the receiver's **worst-case** input leakage, not its typical:
-  100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is what bounds how large the pair can
-  get. Record which side each part is on and why, or the next tidy-up moves the pull-up back.
+  `V_OL` caps the limiter at a few kΩ — and the bounding fault of 110 V across 3 kΩ is 37 mA
+  and **4.0 W**, a fusible rather than a resistor. Moving the pull-up upstream removes the
+  divider entirely and lets the limiter be large enough (47 kΩ → 2.3 mA, **0.242 W**) that
+  nothing in the path becomes a fuse. Size the pull-up against the receiver's **worst-case**
+  input leakage, not its typical: 100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is
+  what bounds how large the pair can get. Record which side each part is on and why, or the
+  next tidy-up moves the pull-up back.
+  Two traps in those numbers, both of which this entry fell into before being corrected.
+  **Bound the fault at the rail, not at the maximum output** — the first version sized it at
+  100 V because that was the output swing, while the supply is 110 V, which is the same defect
+  the *maximum credible fault* bullet above describes. And 0.242 W is **97 % of a 1206**, so
+  the derating rule under *Guards* applies and the part goes to a 2010. A protection resistor
+  chosen at the nominal fault and the nameplate rating is sized twice over at the wrong number.
 
 
 ## The verification ladder
@@ -169,10 +178,18 @@ plausible-but-wrong artefacts ship.
 ```sh
 K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli   # not on PATH by default
 $K sch export pdf --black-and-white -o out.pdf x.kicad_sch  # 1. does it even parse?
-$K sch erc -o erc.rpt x.kicad_sch                           # 2. ERC
+$K sch erc --exit-code-violations -o erc.rpt x.kicad_sch    # 2. ERC
 $K sch export netlist --format kicadsexpr -o n.net x.kicad_sch  # 3. are the NETS right?
-$K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
+$K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
+
+**`--exit-code-violations` is not optional, and leaving it off is the highest-leverage false
+PASS available to you.** Without it, `kicad-cli sch erc` and `pcb drc` write every violation
+into the report and then **exit 0**. Measured: a board carrying 175 DRC violations exits `0`
+bare and `5` with the flag. So a CI step, a `set -e` script, or an agent that "asserted the
+exit status is 0" passes a board it never checked — the anti-monotone false PASS this whole
+document is about, sitting in its own ladder. Either pass the flag, or parse the report and
+assert the violation count; never take `$?` alone as the verdict.
 
 1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
 2. **ERC = 0.** Necessary, nowhere near sufficient.
@@ -181,29 +198,39 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
    highest-value check.
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
-   Pass **`--exclude-drawing-sheet`** on board exports: the worksheet frame and title block
-   plot in the same colour family as copper, and their rules run edge-to-edge — on an isolated
-   board they look exactly like copper marching straight across your isolation barrier. Nearly
-   cost a false "serious violation" finding; settle it by asking the *file* whether anything
-   lives on a copper layer, not by squinting at a render.
+   Keep the worksheet frame out of board renders: it plots in the same colour family as copper
+   and its rules run edge-to-edge — on an isolated board they look exactly like copper marching
+   straight across your isolation barrier. Nearly cost a false "serious violation" finding;
+   settle that class of question by asking the *file* whether anything lives on a copper layer,
+   not by squinting at a render. The flag differs per subcommand, and guessing earns an
+   `Unknown argument`: `sch export pdf` and `pcb export svg` take **`--exclude-drawing-sheet`**;
+   `pcb export pdf` **omits the sheet by default** and takes `--include-border-title` to opt
+   back in.
 5. **Domain guards** for anything the tools don't model (see *Guards*, below).
 
 **Text on a generated sheet does not reflow, and nothing checks it.** Adding one note
 lands it silently on top of another; growing a component row pushes its east end into the
 text column beside it. Only rung 4 sees this. Budget the extents before placing, because
-the stroke font is wider than it looks — measured off a real A3 sheet with `pdftotext
--bbox`:
+the stroke font is wider than it looks — measured with KiCad's own text-extent engine
+(`EDA_TEXT::GetTextBox`, the same stroke font that draws the sheet):
 
 | quantity | multiple of the nominal text size |
 |---|---|
-| per-character advance, lowercase | ≈ 0.67 |
+| per-character advance, lowercase | ≈ **0.80** |
 | per-character advance, **UPPERCASE** | ≈ **0.91** (p90 1.15) |
 | line pitch | ≈ 1.61 |
 
-Planning with 0.7 — which is the *lowercase* median — put five collisions on one sheet, and
-every one of them was on an ALL-CAPS heading running 1.4× wider than budgeted. Use ~0.95 ×
-size per character for anything with capitals in it, and remember that a block of *n* lines
-occupies `1.61 × size × (n − 1)` plus one line of height.
+Planning with 0.7 put five collisions on one sheet, and every one of them was on an ALL-CAPS
+heading running 1.4× wider than budgeted. Use ~0.95 × size per character for anything with
+capitals in it, and remember that a block of *n* lines occupies `1.61 × size × (n − 1)` plus
+one line of height.
+
+**Measure with KiCad, not with `pdftotext -bbox`.** The earlier lowercase figure here was
+0.67, taken from a `pdftotext` pass over an exported sheet — about 20 % low, which is the same
+class of error the rule exists to fix. KiCad's PDF export draws glyphs as vector strokes and
+*additionally* emits an invisible selectable-text layer in a substituted base font;
+`pdftotext` measures the substitute, not the strokes. (The discrepancy is confirmed; that
+explanation of it is not.) Line pitch is unaffected — 1.610 either way.
 
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
 Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
@@ -231,9 +258,9 @@ when they are no longer current.
 |---|---|
 | **Raw newlines in quoted strings** | Break the parser. `Failed to load schematic`, no line number. Escape as `\n`. Cost: a 175-violation file that turned out to be unparseable. |
 | **Symbol Y axis is inverted** | Library Y is up, schematic Y is down. Global pin pos = `(X + px, Y - py)` for angle 0. |
-| `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. |
+| `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. The `_Small` variants (`R_Small`, `C_Small`, `C_Polarized_Small`, `L_Small`, `D_Small`) connect at **±2.54 mm** — generators reach for them constantly and the 1.27 mm error dangles every wire silently. |
 | `Device:R_Pack02` | Elements are **1↔4 and 2↔3**, bodies drawn *vertically*. Not 1↔2 / 3↔4. Get it backwards on a matched filter pair and you short the source across one resistor and the ADC inputs across the other — netlist and ERC both stay clean. Resistor packs are the natural way to make a matched pair un-mismatchable, so this row earns its keep. |
-| `Connector_Generic:Conn_01xNN` | Pins face **left**, at `(X-5.08, Y + 2.54*(n-1))`. |
+| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. `Conn_02xNN` puts its even pins on the **right**, at `x = X + 7.62`. Better: don't encode any of this, call `pn()`. |
 | **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
 | **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
@@ -248,10 +275,11 @@ you are about to embed and expose `pn(ref, pin)`:
 ```python
 def _xf(px, py, ang, mirror):
     x, y = px, -py                       # schematic Y is flipped vs the symbol editor
-    if mirror == 'x':   y = -y
-    elif mirror == 'y': x = -x
     a = math.radians(ang); ca, sa = round(math.cos(a)), round(math.sin(a))
-    return (x*ca + y*sa, -x*sa + y*ca)
+    x, y = x*ca + y*sa, -x*sa + y*ca     # rotate FIRST...
+    if mirror == 'x':   y = -y           # ...then mirror, in global coordinates
+    elif mirror == 'y': x = -x
+    return (x, y)
 
 def pn(ref, num):                        # -> exact global coords of that pin
     lid, X, Y, ang, mir = INST[ref]
@@ -263,6 +291,16 @@ def pn(ref, num):                        # -> exact global coords of that pin
 ```
 
 Then wire with `poly(pn("U3","2"), pn("U5","5"))` and the coordinates cannot drift.
+
+**The order of those two operations is not a style choice, and getting it wrong is invisible
+on most boards.** KiCad mirrors *after* rotating. Mirror-first and rotate-first agree at 0°
+and 180° — an axis mirror commutes with a half-turn — and disagree at 90° and 270°, where
+they exchange **pin 1 and pin 2 of every two-pin part**. Clean ERC, clean netlist, swapped
+part. An earlier version of this snippet had it backwards and scored 164/164 pins landing
+exactly on their wire endpoints on a real board, because that board happened to contain no
+mirrored symbols at all: the perfect score tested none of the broken branch. Calibrate `pn()`
+by placing one part at 90° **with** `(mirror y)`, exporting the netlist, and checking which
+pin reached which net — not by confirming the board you already have is fine.
 
 **Parse balanced blocks per item; never pair two fields with one regex.** A reviewer checking a
 resistor pack's element mapping wrote `\(at ([-\d.]+) ([-\d.]+).*?\(number "(\d+)"` with
@@ -289,11 +327,21 @@ are not covered by either; check them separately.
 
 ### Power-symbol orientation — derive it, don't trust call sites
 
-Every stock power symbol **except `GND`** draws its graphic *upward* from the connection
-point (`-15V` and `PWR_FLAG` included — the polarity is in the glyph shape, not its
-direction). So a symbol at the bottom of a downward stub, or a `GND` at the top of an upward
-stub, is drawn back over its own wire. It is purely graphical, so **ERC never sees it**, and
-it is easy to get right in one place and wrong in another.
+Stock power symbols draw their graphic *upward* from the connection point — `-15V` and
+`PWR_FLAG` included, because the polarity is in the glyph shape, not its direction — except
+for the **`GND*` and `Earth*` families**, which draw downward. That is **12 of the 101**
+symbols in `power.kicad_sym`: `GND`, `GND1`, `GND2`, `GND3`, `GNDA`, `GNDD`, `GNDPWR`,
+`GNDREF`, `GNDS`, `Earth`, `Earth_Clean`, `Earth_Protective`. So a symbol at the bottom of a
+downward stub, or a `GND` at the top of an upward stub, is drawn back over its own wire. It is
+purely graphical, so **ERC never sees it**, and it is easy to get right in one place and wrong
+in another.
+
+**Derive `graphic_down` from the symbol's own geometry, not from its name**, and do not
+special-case `GND` alone: an earlier version of this rule said "every symbol except `GND`",
+which draws `GNDA` — the obvious choice on the split-ground analog boards this skill is aimed
+at — straight over its own wire, and the audit below inherits the same wrong premise and
+passes it. Name-sniffing for "ground" fails in the other direction too: `VSS` and `VEE` sound
+like grounds and draw **upward**.
 
 Audit it instead of eyeballing:
 
@@ -323,6 +371,12 @@ The second loop matters: the first version only checked a symbol's *own* wire an
 `GND` whose triangle was drawn straight across an unrelated signal running underneath. When
 you add a check *after* seeing a defect, reproduce the defect and watch the new check fire —
 otherwise you have only asserted that the fixed version is fine.
+
+**Property text renders only at 0° or 90°, whatever the symbol's rotation.** Deriving a
+power symbol's label angle as `(360 - ang) % 360` yields **180** for a 180°-rotated
+symbol, and KiCad then prints the net name **upside down**. Every rotated rail on one
+sheet was affected, including a whole `PWR_FLAG` block, and neither ERC nor the netlist
+can see it — it is purely visual. Use `90 if ang in (90, 270) else 0`.
 
 ### Schematic annotation is not board annotation
 
@@ -366,9 +420,12 @@ an MPN, and does not prevent procurement from substituting a part that breaks th
 the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
 was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
 survived**, because the fix was applied to the instance rather than the class. At 250 V an
-0805 tops out in the tens of nF — TDK's 0805/250 V C0G part is 6.8 nF, AVX's high-voltage X7R
-0805 range ends at 47 nF, and the 100 nF/250 V X7R that does exist is a **1210**
-(`CGA5L3X7R2E104K160AE`). Then derate: a 250 V X7R at 110 V of bias keeps roughly a third of
+0805 tops out in the tens of nF, and the smallest 100 nF/250 V X7R is a **1206** —
+`CGA5L3X7R2E104K160AE`, where TDK's size code `CGA5` is 3216 metric, i.e. 1206 (`CGA4` = 0805,
+`CGA6` = 1210); a non-soft-termination sibling `C3216X7R2E104K160AA` is the same size. Take
+the size code from the vendor's own dimension table rather than reading the digits as an EIA
+code, which is how this was first written down here as a 1210. Then derate: a 250 V X7R at
+110 V of bias keeps roughly a third of
 its nominal value, so put the effective capacitance next to the nominal one rather than
 letting a decoupling calculation quietly use the label.
 
@@ -404,8 +461,13 @@ drop, bias current and drift.
 **A DC error that calibration removes still has a temperature coefficient, and that part
 survives.** It is tempting to wave away an IR drop on a board whose reference instrument reads
 the true output at every sweep point — the static term genuinely does vanish. Its *tempco* does
-not: copper is **+3930 ppm/K**, so 182 µV of drop in a reference return was also 10.2 µV/K of
-output drift, ±51 µV over a ±5 K room swing. Two traps compound here. First, a thermal term is
+not: copper is **+3930 ppm/K**, so 259 µV of *uncancelled* drop in a reference return was
+1.0 µV/K at the buffer and, through the ×10 output stage behind it, **10.2 µV/K** at the 100 V
+output — ±51 µV over a ±5 K room swing. Carry the drop through the gain before applying the
+tempco: the coefficient acts where the error is, the budget lives at the output, and collapsing
+those two into one multiplication (as an earlier version of this paragraph did, quoting a
+single leg's 182 µV against the output's 10.2 µV/K) under-reports drift by whatever gain sits
+downstream. Two further traps compound here. First, a thermal term is
 sub-0.1 Hz, so it falls outside a 0.1–10 Hz noise budget and gets dismissed as "not in band"
 rather than bounded. Second, the copper is usually widened or re-routed for a reason nobody
 records, and the next person narrows it back. Compute the tempco, write it next to the static
@@ -522,6 +584,15 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Calibrate against a known-bad input.** Copy the board, inject the exact fault the guard
   exists to catch (e.g. widen the EP land back to the unsafe stock size), and watch it exit
   non-zero. A guard never seen to fire is not a guard.
+- **A guard is blind to whatever its data model omits, and that blindness is silent.** A
+  text-overlap check iterated the generator's list of *text* objects and passed a caption
+  printed straight through a power symbol's net name — because a net name is a symbol
+  **property**, not a text object, so it was never in the collection being compared. The
+  guard was not wrong about the objects it saw; it could not see the colliding one. When
+  you write a guard, enumerate what the design contains and ask which of those object
+  classes your loop actually visits — properties, symbol graphics, zone fills and
+  drawing-sheet items are the usual omissions. Calibrating with a fault built from the
+  class you already iterate will never reveal this.
 - **Bounded searches lie.** A `\(text "([^"]{5,600})"` regex silently returned 19 of 26 text
   items and produced a confident "not found" for content that was present. If a search reports
   absence, verify the search could have seen the thing.
