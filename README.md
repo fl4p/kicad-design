@@ -7,11 +7,12 @@ Every rule here exists because the failure it describes actually shipped and had
 be caught — not because it is general advice. Each one names the failure it prevents,
 and keeps the concrete numbers where they make the rule easier to apply.
 
-Two files, so schematic-only work does not have to load the board material:
+Three files, so schematic-only work does not have to load the board material:
 
 | File | Read it when |
 |---|---|
 | `SKILL.md` | always — shared practice plus schematic capture |
+| `SETUP.md` | before a board task — can this machine actually fetch and validate the datasheets? |
 | `PCB.md` | the task touches the board: `pcbnew`, DRC, footprints, zones, stackup, creepage |
 
 Topics covered:

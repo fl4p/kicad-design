@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
 ---
 
 # KiCad schematic and PCB design
@@ -8,6 +8,19 @@ description: Create or modify KiCad schematics, symbols, footprints and PCB layo
 Every rule below exists because the failure it describes actually shipped and had to be
 caught. Most were found on precision analog / high-voltage boards, which is where KiCad's
 own checks are thinnest — but nothing here is specific to one design.
+
+## Before you start: run the preflight in `SETUP.md`
+
+Every rule in *Datasheet discipline* below assumes you can actually **get** the
+datasheet. Confirm that first — local cache, which vendor sites this machine can
+reach, which distributor API keys exist, and whether a real browser is available for
+bot-walled vendors. [`SETUP.md`](SETUP.md) has the checks, how to ask the user for
+missing keys, the rate-limit traps that masquerade as auth failures, and a verified
+recipe for fetching PDFs from vendors that refuse curl.
+
+Do it at the start, not when you hit a wall. An agent that discovers mid-task it
+cannot read a datasheet tends to substitute a part and explain the substitution as
+engineering.
 
 ## Working on the board? Read `PCB.md`
 
