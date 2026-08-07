@@ -1,6 +1,6 @@
 # Setup: make sure you can actually read datasheets before you design
 
-Companion to `SKILL.md`. **Run this preflight at the START of a board task, not when
+Companion to `SKILL.md`. **Run this preflight at the START of ANY task that will read a datasheet — schematic-only work included — not when
 you hit a wall.** `SKILL.md` forbids quoting a spec from memory — this file is how you
 make that possible, and how to validate a PDF once you have one.
 
@@ -236,9 +236,11 @@ with sync_playwright() as p:
         pg = ctx.pages[0] if ctx.pages else ctx.new_page()
         pg.goto(VENDOR_HOME, wait_until="domcontentloaded", timeout=60000)
         res = pg.evaluate(JS, PDF_URL)          # raises if cross-origin
-        assert res["status"] == 200 and res["b64"], f"blocked: {res['status']}"
+        if res["status"] != 200 or not res["b64"]:   # not assert: -O deletes those
+            raise RuntimeError(f"blocked: {res['status']}")
         data = base64.b64decode(res["b64"])
-        assert b"%PDF" in data[:1024], "not a PDF"
+        if b"%PDF" not in data[:1024]:
+            raise RuntimeError("not a PDF")
         pathlib.Path(OUT).write_bytes(data)
     finally:
         ctx.close()                              # else a headed window and a locked profile leak

@@ -33,9 +33,11 @@ $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x
   `footprint_type_mismatch`, `missing_courtyard`, `npth_inside_courtyard`,
   `pth_inside_courtyard`). Worse, that map lives in the `.kicad_pro` that
   `SKILL.md` warns a generator can rewrite wholesale, so it is a guard
-  precondition that moves silently. **Before believing a green DRC, diff
-  `rule_severities` against defaults and list every `ignore` in the release
-  report.** (On the project above, flipping all five back produced no additional
+  precondition that moves silently. **Before believing a green DRC, list every rule at `ignore` in the
+  release report — including KiCad's own defaults.** `missing_courtyard`,
+  `footprint_filters_mismatch` and both `*_inside_courtyard` rules ship at
+  `ignore`, so a diff-against-defaults reports nothing and never fires on the
+  very example above; enumerate, then diff to catch a map someone edited. (On the project above, flipping all five back produced no additional
   violations — the mechanism is real, that instance was clean.)
 - **A rule area that relaxes a constraint is keyed on *position*.** Anything that
   later moves into it silently stops being held to the strict value, and DRC
@@ -83,17 +85,25 @@ Write the check yourself — and make it **net-blind**, because the real cases a
 same-net:
 
 ```python
-n = 0
-for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
-    for v in vias:                       # build these explicitly, do not assume
-        for ref, p in pads:
-            if not (v.IsOnLayer(layer) and p.IsOnLayer(layer)):
-                continue
-            n += 1
-            if v.GetEffectiveShape(layer).Collide(p.GetEffectiveShape(layer), mm(0.2)):
-                bad.append(...)          # no net comparison anywhere
-assert n, "UNVERIFIED: no via/pad pairs examined at all"
-print(f"{n} via/pad pairs examined, {len(bad)} hits")   # count beside the verdict
+bad, pairs = [], 0
+# Derive the layer set -- do NOT hardcode (F_Cu, In1_Cu, In2_Cu, B_Cu).  On a
+# 6-layer board that literal skips In3/In4, the count still comes out non-zero,
+# and the guard reports coverage it did not have.  See SKILL.md, "every layer
+# literal is now a liability".
+layers = [l for l in board.GetEnabledLayers().CuStack()]
+for v in vias:                           # build these explicitly, do not assume
+    for ref, p in pads:
+        shared = [l for l in layers if v.IsOnLayer(l) and p.IsOnLayer(l)]
+        if not shared:
+            continue
+        pairs += 1                       # count PAIRS, not (via, pad, layer) triples
+        if any(v.GetEffectiveShape(l).Collide(p.GetEffectiveShape(l),
+                                              pcbnew.FromMM(0.2)) for l in shared):
+            bad.append(...)              # no net comparison anywhere
+# not `assert` -- python -O deletes it, and this is the only guard in the snippet
+if not pairs:
+    raise RuntimeError("UNVERIFIED: no via/pad pairs examined at all")
+print(f"{pairs} via/pad pairs over {len(layers)} copper layers, {len(bad)} hits")
 ```
 
 Expect such a scan to find more than was reported: one instance typically comes
@@ -271,8 +281,11 @@ This nearly shipped: an exposed pad was cut 2.95 → 2.00 mm and its mask 2.71 �
 HV clearance, while the four paste apertures stayed at their original size — printing paste
 **2.49 mm wide**, 0.245 mm *outside* the copper and onto bare solder mask, right in the
 0.675 mm channel between −15 V and +110 V. Creepage measured on copper said 0.675 mm; the
-real post-reflow figure was **0.430 mm**, below IPC-2221C Table 6-1 **B2** (0.6 mm, internal
-/ external-with-permanent-coating, 101–170 V).
+real post-reflow figure was **0.430 mm**. Which column condemns it depends on coating: this is
+paste on assembled parts, so it is the **assembly** case (A5–A7), where 0.430 mm clears A7
+(0.4 mm, coated) and fails A6 (0.8 mm, uncoated) — i.e. it is a defect on an uncoated board and
+marginal-at-best on a coated one. The bare-board copper-to-copper figure in the same channel is
+the 0.675 mm, and *that* is the one to rule against B1–B4.
 
 **Which column applies is not obvious, and getting it wrong is worth 0.2 mm here.** A5–A7 are
 the *assembly* columns — component leads and their terminations, i.e. the pad-to-pad case

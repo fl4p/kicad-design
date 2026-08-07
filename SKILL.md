@@ -97,8 +97,10 @@ one message, before any placement:
   PowerPAD is acceptable at all.
 - **Conformal coating** — it changes which IPC-2221 column applies, so it decides
   HV geometry, not just finish. Do **not** carry "0.8 mm uncoated / 0.4 mm coated"
-  around as a constant: those are A6/A7 for the **101–250 V** band only. The same
-  columns are 0.13 mm at 0–15 V and 1.5 mm at 301–500 V. Every spacing number you
+  around as a constant. IPC-2221 Table 6-1 is banded (…101–150, 151–170, 171–250,
+  251–300, 301–500 V…), the columns differ from each other within a band, and the
+  values move by an order of magnitude across the table. Quote the **row you
+  actually used**. Every spacing number you
   write down must carry `standard + revision + table + column + voltage band +
   the voltage actually used`, or it is not checkable and will be misapplied at a
   different voltage. Note the current revision is **IPC-2221C** (Dec 2023); the
@@ -163,8 +165,8 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
 - **A series limiter belongs at the connector, and the pull-up on the exposed side of it.**
   What is exposed is usually the *run*, not just the pin: an open-collector status output on a
   +110 V op-amp sat **0.670 mm** from the 0–100 V output land — a spacing that meets
-  IPC-2221C Table 6-1 **A7** (0.4 mm, coated, 101–250 V) but not **A6** (0.8 mm, uncoated,
-  same band), i.e. it is compliant only if the board is actually coated — and its track then
+  IPC-2221C Table 6-1 **A7** (0.4 mm, coated) but not **A6** (0.8 mm, uncoated) in the
+  110 V row, i.e. it is compliant only if the board is actually coated — and its track then
   crossed the board 1.02 mm from the
   output track, ending at a Raspberry Pi GPIO with nothing in series. Put the limiter at the
   *device pin* and that whole run is downstream of it, so a bridge or coating void onto the run
@@ -219,8 +221,11 @@ resurrected by `--severity-all`, and one real project silently carried four at `
 (`footprint_filter`, `four_way_junction`, `simulation_model_issue`, `single_global_label`).
 Worse, that map lives in the same `.kicad_pro` that a generator can rewrite wholesale — see
 *Never write a file another generator owns* above, where doing exactly that reset DRC to
-defaults. **Before believing a green ERC, diff `erc.rule_severities` against defaults and list
-every `ignore` in the release report**, and do the same for `pin_map`, which decides whether
+defaults. **Before believing a green ERC, list every rule sitting at `ignore` — INCLUDING KiCad's
+own defaults — in the release report.** Do not lead with "diff against defaults": all four
+rules above *are* the stock defaults, so a diff reports no difference and the guard that was
+supposed to catch them fires never. Diffing is the secondary check, for spotting a map that
+someone changed; enumerating the `ignore`s is the one that works, and do the same for `pin_map`, which decides whether
 two outputs driving each other is an error at all.
 
 1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
@@ -295,7 +300,7 @@ when they are no longer current.
 | **Symbol Y axis is inverted** | Library Y is up, schematic Y is down. Global pin pos = `(X + px, Y - py)` for angle 0. |
 | `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. The `_Small` variants (`R_Small`, `C_Small`, `C_Polarized_Small`, `L_Small`, `D_Small`) connect at **±2.54 mm** — generators reach for them constantly and the 1.27 mm error dangles every wire silently. |
 | `Device:R_Pack02` | Elements are **1↔4 and 2↔3**, bodies drawn *vertically*. Not 1↔2 / 3↔4. Get it backwards on a matched filter pair and you short the source across one resistor and the ADC inputs across the other — netlist and ERC both stay clean. Resistor packs are the natural way to make a matched pair un-mismatchable, so this row earns its keep. |
-| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. For 2-row parts there is **no bare `Conn_02xNN`** — the library ships `_Odd_Even`, `_Counter_Clockwise`, `_Row_Letter_First`, `_Row_Letter_Last` and `_Top_Bottom`, and using the bare name is a symbol-not-found, i.e. the exit-139/0-component failure below. Even pins sit on the **right** at `x = X + 7.62` for **`_Odd_Even` only**; the other variants number differently, so which pins are on which side changes with the suffix. N in the centring formula is the **row count**, not the pin count. Better: don't encode any of this, call `pn()`. |
+| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. For 2-row parts there is no bare `Conn_02xNN` **for N ≥ 2** (`Conn_02x01` is the one exception and does exist) — the library ships `_Odd_Even`, `_Counter_Clockwise`, `_Row_Letter_First`, `_Row_Letter_Last` and `_Top_Bottom`, and using the bare name is a symbol-not-found, i.e. the exit-139/0-component failure below. Even pins sit on the **right** at `x = X + 7.62` for **`_Odd_Even` only**; the other variants number differently, so which pins are on which side changes with the suffix. N in the centring formula is the number of **positions per row** — 8 for `Conn_02x08`, not 2. Better: don't encode any of this, call `pn()`. |
 | **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
 | **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
@@ -306,7 +311,7 @@ when they are no longer current.
 ### Derive geometry from the library, never from arithmetic
 
 The single biggest source of defects is hand-computed pin offsets. Parse the `lib_symbols`
-you are about to embed and expose `pn(ref, pin)`:
+you are about to embed and expose `pn(ref, unit, pin)`:
 
 ```python
 def _xf(px, py, ang, mirror):
@@ -342,9 +347,16 @@ Key `INST` on refdes alone and it cannot even hold unit A and unit B; flatten `L
 units and a lookup by pin number returns unit 2's offset applied to unit 1's placement point.
 Every offset above is on-grid, so the grid/orthogonality guard below **cannot catch it** — you
 get a wire onto a neighbouring pin, or a dangle, in silence. Unit 3 is where pins 8 and 4 live,
-which is the whole *Decoupling is a current loop* section. Parse the `NAME_<unit>_<bodystyle>`
-sub-symbols, and raise if a requested pin is not in the requested unit rather than searching
-the others. Add unit number to the enumerated parameter space under *Guards* as a **required**
+which is the whole *Decoupling is a current loop* section.
+
+**Unit 0 is "common to all units" and you must union it in, or the fix becomes a regression.**
+Measured on the stock 9.0.4 libraries: **664 `NAME_0_*` sub-symbols carry pins, and 191
+symbols keep *all* their pins there** — `Driver_Haptic:DRV2510-Q1` has a `DRV2510-Q1_0_0`
+with 17 pins and no `_1_1` at all. A strict `LIBPINS[(lid, unit)]` lookup raises `KeyError`
+on every one of those, and on a genuine multi-unit part with shared supply pins in unit 0 it
+drops them silently — worse than the flat lookup it replaced. So: pins for unit *u* =
+`NAME_0_*` **∪** `NAME_u_*`, and the same for body style (0 is common to 1 and 2). Then raise
+if the pin is in neither, rather than searching the other units. Add unit number to the enumerated parameter space under *Guards* as a **required**
 dimension.
 
 **Resolve `extends` before embedding.** **12 007 of the 22 387 top-level symbols in the stock
@@ -380,9 +392,13 @@ was invented.
 
 ```python
 def wire(x1, y1, x2, y2):
+    # `raise`, not `assert`: python -O deletes asserts, and these two are the only
+    # thing standing between a typo and a silently dangling wire.
     for v in (x1, y1, x2, y2):
-        assert ongrid(v), f"off-grid endpoint {(x1,y1,x2,y2)}"   # 1.27 mm grid
-    assert x1 == x2 or y1 == y2, f"diagonal wire {(x1,y1,x2,y2)}"
+        if not ongrid(v):
+            raise ValueError(f"off-grid endpoint {(x1,y1,x2,y2)}")   # 1.27 mm grid
+    if not (x1 == x2 or y1 == y2):
+        raise ValueError(f"diagonal wire {(x1,y1,x2,y2)}")
 ```
 
 A grid assert alone does **not** catch non-orthogonal wires — two diagonals shipped past it
@@ -432,10 +448,17 @@ def check_rail_orientation():   # graphic must point AWAY from the attached wire
             matched += 1
     # ...and the glyph must not be drawn across some OTHER net's wire either.
     for libid, x, y, graphic_down, gbox in _RAILS:
-        # gbox is the symbol's OWN graphic bbox, taken from its library entry --
-        # NOT a hardcoded 1.27 x 2.54.  Earth_Protective, GNDPWR and friends are
-        # bigger than that box, so a real crossing goes unseen.
-        x0, x1, h = x - gbox.w/2, x + gbox.w/2, gbox.h
+        # gbox is the symbol's OWN graphic bbox -- min/max over the library
+        # entry's polyline/rectangle/circle primitives, excluding property text
+        # -- NOT a hardcoded 1.27 x 2.54.  Measured on power.kicad_sym, exactly
+        # four glyphs exceed that box: Earth_Protective (h 5.080), +VDC (4.318),
+        # Earth_Clean (3.810), -VDC (3.175).  GNDPWR is SMALLER (h 2.032) but is
+        # the one symbol whose glyph is not x-symmetric about the pin
+        # (x -1.270..+1.016), so take x0/x1 from the bbox's real min/max rather
+        # than from a width centred on the connection point.
+        if gbox.w <= 0 or gbox.h <= 0:      # the (0,0,0,0) BBox failure, again
+            raise ValueError(f"UNVERIFIED: degenerate glyph box for {libid}")
+        x0, x1, h = x + gbox.x0, x + gbox.x1, gbox.h
         y0, y1 = (y, y + h) if graphic_down else (y - h, y)
         for (ax, ay, bx, by) in _SEGS:
             if ax == bx and x0 < ax < x1 and min(ay,by) < y1 and max(ay,by) > y0:
@@ -728,9 +751,11 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   geometry that did not meet the standard it claimed to enforce.
 - **A rating is not a limit.** The sibling failure to the one above: a check whose threshold is
   the *destruction* point instead of the *design* point passes everything that is not already
-  broken. A fault-power guard compared dissipation against nameplate, so it passed the 1206
-  sitting at 97 % and the 0805 at 92 % — precisely the two parts whose margins had motivated
-  writing it, and it reported them as fine. It only became a guard once it carried an explicit
+  broken. A fault-power guard compared dissipation against nameplate, so it passed parts
+  sitting in the high nineties of their rated power — precisely the margins that had motivated
+  writing it, and it reported them as fine. (The worked example under *Close every external
+  interface* is a sibling case that lands just **over** nameplate at 103 %; a nameplate
+  comparison catches that one and still waves through everything at 99 %, which is the point.) It only became a guard once it carried an explicit
   derating factor (60 % of nameplate for a permanent fault). Whenever a check compares against
   a datasheet maximum — power, voltage, current, temperature — ask what fraction of it you are
   actually willing to ship, and put *that* number in the comparison. Then re-run the
