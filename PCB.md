@@ -102,6 +102,68 @@ appears to do nothing, and the guard looks broken when in fact the test was.
 - **A track endpoint sitting on top of a zone is not connected to it** if they
   are on different layers. It needs a via. DRC reports this as `track_dangling`
   plus an unconnected item; both point at the same missing via.
+- **A via that lands outside its pour is silently unconnected.** Re-placing an LDO
+  block 3.5 mm moved its `+5V` pins past the edge of the L3 pour; the plane vias
+  then dropped onto bare laminate. Nothing in the placement code knew. After any
+  re-place, assert every plane via actually falls inside a filled area of the zone
+  it is supposed to reach — or add a zone that covers the strays and assert the
+  fill count.
+
+
+## Making a `pcbnew` layout reproducible — there are two causes, not one
+
+`--repro` on a board fails for a reason the schematic side never hits, and fixing
+only the obvious half leaves the md5 still wobbling.
+
+1. **Random UUIDs.** Every track, via, zone and text created through the API gets a
+   random UUID, and SWIG exposes `m_Uuid` **read-only** — there is no `SetUuid`. So
+   the canonicalisation has to be a string-aware s-expression pass over the *saved*
+   file, assigning `uuid5` over each item's own identity (refdes for footprints;
+   net/layer/width/coords otherwise, prefixed by the owning footprint's refdes).
+2. **Zone fills depend on item order.** KiCad orders items by UUID, and `ZONE_FILLER`'s
+   boolean operations walk that order — so with random UUIDs the *fills* came out
+   differing run to run by the odd redundant collinear vertex. Geometrically
+   identical, textually not, and it defeats any hash comparison.
+
+Therefore: **canonicalise ids and item order first, then fill.** Filling before
+canonicalising bakes the old order into the polygons and the md5 keeps moving while
+every geometric check reports PASS.
+
+
+## Geometry helpers are guards, and fail the same way
+
+**A segment-to-segment distance that only compares endpoints reports a large number for
+two segments crossing in a perfect X.** One returned **5 mm** for a genuine crossing and
+hid **17 real track crossings** from the router's own overlap check. Endpoint-to-endpoint
+distance is not segment distance: handle the intersecting case explicitly, then calibrate
+by feeding the helper two segments that cross at their midpoints and watching it return 0.
+
+The same applies to any `near()`-style spatial index used to prune clearance checks: if it
+ever returns a *subset* of the true neighbours, every clearance check built on it silently
+starts passing — absence of evidence encoding absence of the problem. Calibrate it as a
+**superset** property against brute force on a real board, not on a toy case.
+
+
+## Isolated designs: the binding clearance is zone-to-zone, and DRC is not asked
+
+On a board with primary and secondary domains, the minimum copper-to-copper distance almost
+never occurs between tracks — it occurs **between the two ground/power pours on the inner
+layers**, which is exactly where nobody looks. Measured on one 4-layer board: F.Cu 4.020,
+GND 4.000, PWR 4.295, B.Cu 4.000 mm — the two binding numbers were both zone-to-zone.
+
+DRC will not check any of this unless a rule asks it to, so an **independent audit must
+measure real geometry on every copper layer**, zones included, and enforce the stated figure.
+A secondary track sitting 3.638 mm from primary pads passed DRC cleanly for exactly this
+reason. Set the floor *at* the standard, calibrate it by injecting a known-bad geometry, and
+scope any package-bridging exemption (an isolator or DC/DC straddles the barrier by
+construction) to pairs where **both** items belong to that package **and** touch its pads —
+bounded by its own measured floor, so a new object cannot inherit the excuse.
+
+**Do not slot a plane to steer digital return current on a precision analog board.** It is
+the textbook move and it is usually wrong here: the converter datasheet asks for a
+*continuous* return beneath it, and a moat raises the impedance of the **analog** return to
+fix a **digital** problem. Solve it with placement — put the noisy return corridor physically
+away from the sensitive part and measure the clearance you achieved.
 
 
 ## Modifying a footprint: copper, mask and paste are three independent layers
