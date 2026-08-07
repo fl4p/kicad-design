@@ -159,6 +159,23 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
    lives on a copper layer, not by squinting at a render.
 5. **Domain guards** for anything the tools don't model (see *Guards*, below).
 
+**Text on a generated sheet does not reflow, and nothing checks it.** Adding one note
+lands it silently on top of another; growing a component row pushes its east end into the
+text column beside it. Only rung 4 sees this. Budget the extents before placing, because
+the stroke font is wider than it looks — measured off a real A3 sheet with `pdftotext
+-bbox`:
+
+| quantity | multiple of the nominal text size |
+|---|---|
+| per-character advance, lowercase | ≈ 0.67 |
+| per-character advance, **UPPERCASE** | ≈ **0.91** (p90 1.15) |
+| line pitch | ≈ 1.61 |
+
+Planning with 0.7 — which is the *lowercase* median — put five collisions on one sheet, and
+every one of them was on an ALL-CAPS heading running 1.4× wider than budgeted. Use ~0.95 ×
+size per character for anything with capitals in it, and remember that a block of *n* lines
+occupies `1.61 × size × (n − 1)` plus one line of height.
+
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
 Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
 clearance — are in [`PCB.md`](PCB.md).
@@ -316,6 +333,21 @@ numbers including package and performance grade. Verify the selected ordering co
 same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
 an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
 
+**Put the BOM in the generator and enforce it in both directions** — a placed part with no BOM
+row fails the build, and a BOM row with no placed part fails it too. Emit `MPN`,
+`Manufacturer` and a compact `Spec` as symbol properties so the requirement travels on the
+schematic rather than in a design note beside it. Without this, "R2/R3 are 0.1 %" is prose
+while the schematic says `4k22` and will accept any 5 % thick-film part with the right
+footprint — and if a firmware safety limit is *derived* from that 0.1 %, the limit silently
+stops bounding anything. (Real case: a DAC code cap protecting an 85 V absolute-maximum ADC
+input was computed from a 5 % worst-case gain that 0.1 % parts satisfy at 3.92 % and 1 %
+parts blow through at 6.35 %.) Verifying ~30 MPNs is cheap enough to have no excuse: DigiKey
+v4 takes **two-legged OAuth** (`grant_type=client_credentials` → bearer token → POST
+`products/v4/search/keyword`), which is ~40 lines of `urllib` with no browser, no callback
+port and no token store, and it returns the canonical part number, stock and the parametrics.
+Several "obvious" part numbers will be wrong or dead; guessing is how `OPA455AIDDA` (does not
+exist; it is `OPA455IDDA`) reaches a purchase order.
+
 Build a **corner ledger** for every quantity that establishes bias, gain, safety margin or
 component stress. Combine supply tolerance, passive tolerance, device min/max specifications,
 and temperature or ageing terms where material; then prove every result stays inside the
@@ -323,6 +355,16 @@ datasheet's characterized operating range. Typical-value arithmetic is useful fo
 performance, never for demonstrating compliance. In particular, do not infer that a pin named
 `SENSE`, `REF` or `FB` is high impedance — use its specified current when calculating copper
 drop, bias current and drift.
+
+**A DC error that calibration removes still has a temperature coefficient, and that part
+survives.** It is tempting to wave away an IR drop on a board whose reference instrument reads
+the true output at every sweep point — the static term genuinely does vanish. Its *tempco* does
+not: copper is **+3930 ppm/K**, so 182 µV of drop in a reference return was also 10.2 µV/K of
+output drift, ±51 µV over a ±5 K room swing. Two traps compound here. First, a thermal term is
+sub-0.1 Hz, so it falls outside a 0.1–10 Hz noise budget and gets dismissed as "not in band"
+rather than bounded. Second, the copper is usually widened or re-routed for a reason nobody
+records, and the next person narrows it back. Compute the tempco, write it next to the static
+figure, and say explicitly which one the calibration removes.
 
 **Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
 table. Every one of these was a real error caught by doing so:
@@ -447,6 +489,15 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Set floors to the standard, not the standard minus epsilon.** Every floor in one audit sat
   0.01 mm under the figure it cited (`0.79` for "exactly IPC A6 = 0.80"), so it passed
   geometry that did not meet the standard it claimed to enforce.
+- **A rating is not a limit.** The sibling failure to the one above: a check whose threshold is
+  the *destruction* point instead of the *design* point passes everything that is not already
+  broken. A fault-power guard compared dissipation against nameplate, so it passed the 1206
+  sitting at 97 % and the 0805 at 92 % — precisely the two parts whose margins had motivated
+  writing it, and it reported them as fine. It only became a guard once it carried an explicit
+  derating factor (60 % of nameplate for a permanent fault). Whenever a check compares against
+  a datasheet maximum — power, voltage, current, temperature — ask what fraction of it you are
+  actually willing to ship, and put *that* number in the comparison. Then re-run the
+  known-bad calibration, because a threshold this loose passes the calibration inputs too.
 - **Calibration must cover the case that matters, not the case you already fixed.** A cap guard
   tested `NaN` and `0.01` — both outside its acceptance band — and never tested a *plausible*
   bad measurement inside it, which is the one that raised the cap to full scale.
