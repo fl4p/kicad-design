@@ -10,7 +10,7 @@ check up front, how to get and verify API keys, the rate-limit traps that masque
 auth failures, a programmatic browser fetch, and what to do when you still cannot read
 the PDF.
 
-Commands in §0 and §3 are written for **macOS**. The reasoning is portable; the paths
+Commands in §0, §3 and §3a are written for **macOS**. The reasoning is portable; the paths
 and `nc` flags are not.
 
 ---
@@ -48,7 +48,7 @@ command -v pdfinfo pdftotext pdftocairo || echo "brew install poppler"
 
 Check 4 matters more than it looks. `python3 -c "import playwright"` succeeds when the
 browser drivers are missing and when `channel="chrome"` is unavailable — it prints OK
-in exactly the situation §3 cannot run. That is the anti-monotone false PASS: a guard
+in exactly the situation §3a cannot run. That is the anti-monotone false PASS: a guard
 that reports fine when it cannot evaluate its input.
 
 ### Reading check 2
@@ -64,7 +64,7 @@ If TCP connects, the TLS handshake completes, ALPN negotiates h2, **and the requ
 still yields nothing**, that is consistent with a **WAF fingerprint rejection** rather
 than a network block — the server is refusing the client's fingerprint after the
 handshake. A transparent proxy or captive portal can produce a similar signature, so
-treat it as a hypothesis: try §3 before reporting "unreachable".
+treat it as a hypothesis: try §3, then §3a, before reporting "unreachable".
 
 Do not pass a bare `-A "Mozilla/5.0"`. A version-less UA is itself a cheap bot tell and
 can *manufacture* the block you are testing for. Send a full realistic UA or none.
@@ -155,7 +155,27 @@ Response root is `manufacturerPartNumberSearchReturn`, or `keywordSearchReturn` 
 
 ---
 
-## 3. Programmatic browser fetch
+## 3. Before reaching for a browser: try the vendor's asset host
+
+A WAF is deployed per hostname, and a vendor's **document/asset host is frequently not
+behind the one guarding its main site**. Check that before spending effort on §3a.
+
+Measured: `www.analog.com` completed the TLS handshake and then dropped the request for
+every curl invocation tried, while **`mds.analog.com`** — which serves ADI's Package
+Index outline drawings — returned a 39 KB PDF on a plain `curl` with no UA, no cookies
+and no browser. Same vendor, same session, same minute.
+
+So when the main site blocks you, look for the host that actually serves the asset:
+follow the link target from a distributor API's `datasheets[]` or from a search result
+rather than assuming it lives on `www.`. Media/CDN subdomains (`mds.`, `media.`,
+`docs.`, `www*.`) are worth one `curl -I` each — it costs seconds and can save the whole
+browser dance.
+
+This also explains a confusing symptom: **a vendor can look "blocked" and "reachable" at
+the same time**, depending which hostname each attempt used. Record the exact URL with
+any reachability claim.
+
+## 3a. Programmatic browser fetch
 
 `SKILL.md` gives a shell recipe (`open -na 'Google Chrome'` with a throwaway profile
 that forces PDFs to download). Use that when you just need the file. Use the snippet
