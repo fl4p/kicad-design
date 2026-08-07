@@ -143,6 +143,22 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   110 V while the arithmetic uses 100 V, the protection check has failed even if ERC and DRC pass.
 - **Do not join two possible power sources directly.** State which connector powers which rail,
   or add ORing, current limiting or isolation that makes either connection order safe.
+- **A series limiter belongs at the connector, and the pull-up on the exposed side of it.**
+  What is exposed is usually the *run*, not just the pin: an open-collector status output on a
+  +110 V op-amp sat **0.670 mm** from the 0–100 V output land — a spacing that only meets
+  IPC-2221B under the conformal coating — and its track then crossed the board 1.02 mm from the
+  output track, ending at a Raspberry Pi GPIO with nothing in series. Put the limiter at the
+  *device pin* and that whole run is downstream of it, so a bridge or coating void onto the run
+  simply bypasses it. Everything **upstream** of the limiter is what gets protected, so it goes
+  last, beside the connector, with the clamp.
+  The pull-up then has to move to the exposed side, and this is the part that is easy to get
+  backwards. Leave it at the connector and it forms a divider with the limiter, so a valid
+  `V_OL` caps the limiter at a few kΩ — and 100 V across 3 kΩ is 32 mA and 4 W, a fusible
+  rather than a resistor. Moving the pull-up upstream removes the divider entirely and lets the
+  limiter be large enough (47 kΩ → 2 mA, 0.196 W) that nothing in the path becomes a fuse.
+  Size the pull-up against the receiver's **worst-case** input leakage, not its typical:
+  100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is what bounds how large the pair can
+  get. Record which side each part is on and why, or the next tidy-up moves the pull-up back.
 
 
 ## The verification ladder
@@ -346,6 +362,22 @@ numbers including package and performance grade. Verify the selected ordering co
 same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
 an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
 
+**A value is not a part until value × voltage × package has been checked together.** Each of
+the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
+was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
+survived**, because the fix was applied to the instance rather than the class. At 250 V an
+0805 tops out in the tens of nF — TDK's 0805/250 V C0G part is 6.8 nF, AVX's high-voltage X7R
+0805 range ends at 47 nF, and the 100 nF/250 V X7R that does exist is a **1210**
+(`CGA5L3X7R2E104K160AE`). Then derate: a 250 V X7R at 110 V of bias keeps roughly a third of
+its nominal value, so put the effective capacitance next to the nominal one rather than
+letting a decoupling calculation quietly use the label.
+
+Worse than missing it outright: a later review *did* examine that capacitor and confirmed its
+**creepage** — leaving a record of attention with the question never asked. When you fix one
+instance of a defect class, sweep the BOM for siblings **by predicate** (here: every part
+whose value carries a voltage suffix, checked against its package) and state what the sweep
+covered. A fix that lands on one row and a sweep that lands on the class cost about the same.
+
 **Put the BOM in the generator and enforce it in both directions** — a placed part with no BOM
 row fails the build, and a BOM row with no placed part fails it too. Emit `MPN`,
 `Manufacturer` and a compact `Spec` as symbol properties so the requirement travels on the
@@ -394,6 +426,14 @@ table. Every one of these was a real error caught by doing so:
 - **Datasheets contradict themselves.** One part listed abs max as both 150 V and 160 V in
   different sections. Quote the conservative one and say why.
 - **Recommended operating ≠ absolute maximum.** And an absolute maximum is not a design target.
+- **The datasheet outranks the vendor's own SPICE model.** Trust order: datasheet *table* >
+  datasheet *chart* > vendor `.lib`. A model is a *derivative* of the datasheet, usually
+  auto-fitted, so it cannot hold more information — only lose or distort it, and the
+  temperature block (`TRS1`/`TRS2`, `EG`, `XTI`) is the least validated part. One Schottky's
+  vendor model matched its own datasheet at 25 °C but gave 0.863 V against a 0.66 V typ at
+  125 °C / 15 A — 200 mV in the wrong direction, and worse at higher current. It contradicted
+  the datasheet it shipped with. Validate any model at the operating point **and** at
+  temperature before relying on it; if it disagrees, fit from the datasheet.
 - **Stock KiCad footprints are not safety-checked.** A stock exposed-pad footprint left
   0.200 mm between a −15 V pad and a +110 V pin. Always measure pad-to-pad clearance for HV
   parts; TI land drawings often carry a note explicitly permitting a narrower pad for creepage.

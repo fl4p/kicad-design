@@ -103,6 +103,13 @@ practice: `ZONE` has no `SetDoNotAllowZoneFills`; `LSET & LSET` is not supported
 `SHAPE::Collide` wants a real `VECTOR2I`, not a tuple. Distances come back in internal units —
 `pcbnew.ToMM()` everything before comparing.
 
+**KiCad's bundled `pcbnew` imports Altium boards.** `PCB_IO_Mgr` converts a `.PcbDoc` to
+`.kicad_pcb` programmatically, so an Altium design can be pulled into a scripted KiCad
+pipeline rather than re-drawn. Expect to fix up layer mapping afterwards — the import does
+not always land copper, mask and silk on the layers you would have chosen — and re-run the
+full ladder on the result, because a converted board has had none of your generator's
+invariants applied to it.
+
 **A schematic edit that changes no nets can still break `--schematic-parity`.** Renaming a
 symbol's *Value* field desyncs it from the value stored in the `.kicad_pcb` footprint. Re-run
 the layout script after any schematic change, not only after connectivity changes.

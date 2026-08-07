@@ -236,6 +236,13 @@ pdftotext -layout x.pdf - | grep -ci "<MPN>" || true   # the part number actuall
                                                        #   (grep exits 1 on no match)
 ```
 
+**Judge the file by those three checks, never by the tools' stderr.** Poppler prints
+`Syntax Error (…): Can't revert non decrypt streams` on some vendors' encrypted-stream
+PDFs while parsing them perfectly — one such file reported its 23 pages correctly and
+was byte-identical (same MD5) to a copy downloaded by hand. Gating on "pdfinfo printed
+an error" rejects a good datasheet, which is the stub problem inverted: same mistake,
+judging the file by the wrong signal.
+
 **Never guess a datasheet id** — take it from the API's `datasheets[]` field.
 
 For what to do once the PDF is open — where package drawings hide, how to read a
