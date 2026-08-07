@@ -276,6 +276,46 @@ table. Every one of these was a real error caught by doing so:
   logic rail up before an HV rail.
 - **Logic-level compatibility**: a 5 V pull-up into a 3.3 V-only GPIO destroys it.
 
+### Getting the PDF: vendor WAFs, and the part substitution they cause
+
+Several vendor sites (Analog Devices and ST among them) sit behind **Akamai Bot Manager**. The
+signature is distinctive: the TLS handshake completes normally, then `curl` **hangs** on
+HTTP/1.1 and gets `INTERNAL_ERROR` on HTTP/2, while a browser gets a 403 whose body carries an
+`errors.edgesuite.net` reference. Handshake success rules out certs, network and auth — the
+WAF is dropping you on fingerprint.
+
+**A headless browser does not help.** Playwright's default Chrome advertises
+`HeadlessChrome/<version>` in its User-Agent and Akamai 403s on that token alone —
+`navigator.webdriver` was already `false`, so stealth patches miss the point. Verified against
+both a product page and the direct `…/media/…/*.pdf` path: 403 on each.
+
+What works is a **headed** browser with a throwaway profile that forces PDFs to download
+instead of opening in the built-in viewer:
+
+```sh
+P=/tmp/dl-profile; D=/tmp/dl; rm -rf $P $D; mkdir -p $P/Default $D
+printf '%s' '{"download":{"default_directory":"'$D'","prompt_for_download":false},
+  "plugins":{"always_open_pdf_externally":true}}' > $P/Default/Preferences
+open -na 'Google Chrome' --args --user-data-dir=$P --no-first-run --new-window "<pdf-url>"
+```
+
+Wait for the `.crdownload` to disappear, then check `file -b --mime-type` and `pdfinfo` —
+Chrome's viewer shell and vendor stub pages both masquerade as a download. Do **not** use CDP
+`Network.getResponseBody` on a PDF tab; it returns the viewer's HTML, not the document.
+
+Also check whether the project stores **distributor API credentials** (DigiKey v4 and similar
+serve datasheets and bypass the WAF entirely). One agent grepped only `~/.claude`, `~/.config`
+and the environment, reported "no distributor API key configured", and never looked inside the
+repo it was working in — where three rotating API keys were sitting.
+
+**A part substituted because you could not read its datasheet is a design change made for
+tooling reasons, and it must be labelled as one.** Blocked on two ADI fixed-output LDOs, an
+agent switched to *adjustable* TI parts — correctly refusing to quote specs from memory, but
+the swap added eight divider resistors and moved a rail from an exact −2.500 V to −2.446 V.
+That is a real change to the board, justified by nothing electrical. Exhaust the access routes
+above first; if you still must substitute, say plainly in the design doc that the reason was
+access, not engineering, so it can be revisited.
+
 ### Reading the PDF: three failures that each cost a rework
 
 - **Package and land drawings live at the END, after the application notes.** An agent read
