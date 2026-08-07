@@ -39,7 +39,16 @@ Generator hygiene, each learned the hard way:
 - **Derive UUIDs from stable identity**, never from a counter. Counter-derived UUIDs meant
   inserting one resistor changed 78 of 81 symbol UUIDs, and KiCad matches footprints to
   symbols by that path — so a one-part edit re-orphans the whole board. Hash the reference
-  designator / net name / coordinates instead.
+  designator / net name / coordinates instead. On the board side this **cannot** be done
+  through the API: `pcbnew` gives every item it creates a random UUID and exposes `m_Uuid`
+  **read-only** (there is no `SetUuid`), so it takes a post-save rewrite of the `.kicad_pcb`.
+  [`PCB.md`](PCB.md) covers that and the second, less obvious cause of a wobbling md5.
+- **Verify the generator actually ran before believing a reproducibility check.** Re-running it
+  under an interpreter that cannot import `pcbnew` leaves the file untouched, so the two md5s
+  match and the check reports PASS having tested nothing. Assert the exit status is 0 *and*
+  that the output file's mtime moved — comparing hashes alone cannot distinguish "reproducible"
+  from "never regenerated". (Cost: a confident "reproducibility verified" on a board whose
+  generator had not executed once.)
 - **Export the netlist after every structural edit and read it.** Two separate reroutes
   silently merged nets (SCLK+SDI+~CS, then VREF10+GND) because stub endpoints share a column.
   ERC reported *a* problem but not which nets had merged; only the netlist showed that.
@@ -67,6 +76,12 @@ one message, before any placement:
 - **Conformal coating** — it changes which IPC-2221B column applies (A6 0.8 mm
   uncoated vs A7 0.4 mm coated), so it decides HV geometry, not just finish.
 - **Connector types and pinout** — usually fixed by what plugs into it.
+
+**If the user forbids questions** ("don't ask me anything", or an autonomous run), you still
+owe them the decision — you just cannot collect it. Make each call yourself, state it in the
+brief you hand any downstream agent, and record it in the design doc as a *decision with its
+rationale*, not as an emergent property of the layout. A choice made silently and a choice made
+explicitly cost the same to make and wildly different amounts to revisit.
 
 Converting a finished board between layer counts is very doable when a generator
 is the source of truth — expect a handful of DRC violations, not a redesign — but
@@ -99,6 +114,11 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
    highest-value check.
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
+   Pass **`--exclude-drawing-sheet`** on board exports: the worksheet frame and title block
+   plot in the same colour family as copper, and their rules run edge-to-edge — on an isolated
+   board they look exactly like copper marching straight across your isolation barrier. Nearly
+   cost a false "serious violation" finding; settle it by asking the *file* whether anything
+   lives on a copper layer, not by squinting at a render.
 5. **Domain guards** for anything the tools don't model (see *Guards*, below).
 
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
@@ -113,6 +133,7 @@ clearance — are in [`PCB.md`](PCB.md).
 | **Raw newlines in quoted strings** | Break the parser. `Failed to load schematic`, no line number. Escape as `\n`. Cost: a 175-violation file that turned out to be unparseable. |
 | **Symbol Y axis is inverted** | Library Y is up, schematic Y is down. Global pin pos = `(X + px, Y - py)` for angle 0. |
 | `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. |
+| `Device:R_Pack02` | Elements are **1↔4 and 2↔3**, bodies drawn *vertically*. Not 1↔2 / 3↔4. Get it backwards on a matched filter pair and you short the source across one resistor and the ADC inputs across the other — netlist and ERC both stay clean. Resistor packs are the natural way to make a matched pair un-mismatchable, so this row earns its keep. |
 | `Connector_Generic:Conn_01xNN` | Pins face **left**, at `(X-5.08, Y + 2.54*(n-1))`. |
 | **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
@@ -143,6 +164,16 @@ def pn(ref, num):                        # -> exact global coords of that pin
 ```
 
 Then wire with `poly(pn("U3","2"), pn("U5","5"))` and the coordinates cannot drift.
+
+**Parse balanced blocks per item; never pair two fields with one regex.** A reviewer checking a
+resistor pack's element mapping wrote `\(at ([-\d.]+) ([-\d.]+).*?\(number "(\d+)"` with
+`DOTALL` and got coordinates that belonged to a *property's* `(at …)` paired with a later
+*pin's* `(number …)` — two self-consistent, entirely fictional pin positions, which then
+"proved" a correct filter was shorted. The same regex run over the instance and the library
+definition disagreed, which was the only reason it was caught. Walk parens to extract each
+`(pin …)` block, then read `(at …)` and `(number …)` from *inside that block*. This is the
+mismatched-pairing cousin of "bounded searches lie": the search returned data, and the data
+was invented.
 
 ### Assert what you can, and know what the assert misses
 
@@ -244,6 +275,31 @@ table. Every one of these was a real error caught by doing so:
 - **Diode-clamped pins need series current limiting** — think about power sequencing, e.g. a
   logic rail up before an HV rail.
 - **Logic-level compatibility**: a 5 V pull-up into a 3.3 V-only GPIO destroys it.
+
+### Reading the PDF: three failures that each cost a rework
+
+- **Package and land drawings live at the END, after the application notes.** An agent read
+  pages 1–6 of an 18-page datasheet, found no land pattern, and reported the footprint
+  "unresolvable — the drawing has merged multi-pin pads and is marked not-to-scale". The
+  recommended land pattern was on page **16**, fully dimensioned, with twelve *individual*
+  pads. It had also misread three separate same-net pads as one merged pad. **Before concluding
+  a datasheet lacks something, `pdftotext` the whole file and grep it** — "LAND PATTERN",
+  "PACKAGE INFORMATION", "RECOMMENDED". A bounded read produced a confident false negative and
+  blocked the board.
+- **"DRAWING IS NOT TO SCALE" does not mean the vectors are worthless.** Extract the page's
+  geometry (`pdftocairo -svg`) and check whether a view is *internally* to scale by testing a
+  known callout against it — one bottom view came out at 19.837 pt/mm, confirmed by the body
+  outline to better than 0.5 %. Then assign callouts to features by matching feature-to-feature
+  distances against the callout values. Use the picture **only** to decide which callout points
+  at which feature; take every *number* from the callout text. This turns an unreadable drawing
+  into a checkable one.
+- **Vendors merge same-net lands and mark the split with a notch.** One MPS LGA merges each
+  same-net pin pair into a single 0.90 mm land with a 0.30 × 0.125 mm notch. Model it as two
+  pads that *overlap slightly* (0.45 + 0.02) so their union is bit-for-bit the recommended
+  land and no gerber hairline appears between them, with each half containing its own pin's
+  nominal centre. Cross-check the pairing against the pin-function table **without using
+  either to derive the other** — if geometry and netlist agree independently, the mapping is
+  right; if they disagree, stop rather than renumbering.
 
 
 ## Guards (checks, validators, audits)
