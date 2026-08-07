@@ -94,6 +94,31 @@ that no longer exist. Derive the layer set from `board.GetCopperLayerCount()` an
 assert it equals what the audit was written for.
 
 
+## Close every external interface before calling the schematic complete
+
+Write an electrical contract for every connector pin: signal direction, normal and fault
+voltage/current, power domain, reference/return, whether the signal is raw or already scaled,
+who sources power, and behaviour when either side is unpowered. Put the same truth on the
+schematic, board silkscreen and integration document. A name such as `VIN` does not implement
+a divider, and a `5V` pin is unsafe until its input/output direction is unambiguous.
+
+- **Trace every claimed function to components and nets.** If the brief says "divided voltage
+  input", point to the divider and protection, or label the connector explicitly as a
+  pre-scaled low-voltage input with its limit. Labels and prose are not circuitry.
+- **Give every floating measurement domain an intentional DC reference.** For each isolated
+  analog domain, prove how its ground and the source common mode are established relative to
+  the converter input range. Capacitors, input leakage and protection diodes do not count as
+  a DC reference. If several sensors cannot share that reference, revisit the topology rather
+  than hoping differential inputs will absorb the common-mode difference.
+- **Build a power-state matrix for independently powered domains.** Check every combination of
+  supplies on and off. Follow driven outputs into unpowered receivers, clamp diodes and exposed
+  power pins; compute or bound injection current, back-powering and rail contention. Apply an
+  isolator's default-state table to the voltage actually present at VCCI/VCCO — "host off" is
+  not the same as "isolator side unpowered" when a separate brick still feeds it.
+- **Do not join two possible power sources directly.** State which connector powers which rail,
+  or add ORing, current limiting or isolation that makes either connection order safe.
+
+
 ## The verification ladder
 
 Each rung catches what the one below cannot. Climb all of it; stopping early is how
@@ -124,6 +149,11 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
 Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
 clearance — are in [`PCB.md`](PCB.md).
+
+Treat verification summaries as cached output. Regenerate ERC, DRC, parity and audit reports
+before release, then derive or check the documented counts against those files. A design note
+that says "two warnings" beside a current zero-warning report is a failed verification step,
+not harmless stale prose.
 
 
 ## KiCad file-format gotchas
@@ -251,6 +281,17 @@ number you computed (trace-to-plane stray, return-path coupling) silently assume
 
 
 ## Datasheet discipline
+
+Build a requirement ledger while reading each datasheet. Record every mandatory or explicitly
+recommended supply, reference, bypass, protection, sequencing and exposed-pad requirement,
+then map it to concrete refdeses and nets. Check the ledger against the exported netlist; a
+pair of rail-to-ground capacitors is not a substitute for a specifically required direct
+rail-to-rail capacitor. Do not declare the design complete with an unmapped requirement.
+
+Before release, replace descriptive BOM placeholders with exact, orderable manufacturer part
+numbers including package and performance grade. Verify the selected ordering code against the
+same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
+an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
 
 **Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
 table. Every one of these was a real error caught by doing so:

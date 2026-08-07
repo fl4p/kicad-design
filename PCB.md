@@ -25,6 +25,24 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
 - **Re-run the layout script after *any* schematic change**, not just after
   connectivity changes — see the parity note below.
 
+## Decoupling is a current loop, not a placement radius
+
+Validate every datasheet-critical bypass by following actual copper from the IC supply pin to
+the capacitor and back to the specified return pin or plane entry. Check both capacitor pads,
+vias and layer changes. Centre-to-centre or hot-pad-to-pin Euclidean distance can pass a long,
+inductive return path and cannot prove that the capacitor is connected across the required
+two nodes.
+
+- Place the smallest/highest-frequency capacitor first and route its loop short and direct;
+  keep bulk capacitors from displacing it.
+- Verify topology as well as distance. Two capacitors in series through a ground net do not
+  implement a datasheet-required direct rail-to-rail capacitor.
+- Derive any numeric audit limit from a datasheet, package/application geometry or an explicit
+  loop-inductance target. Do not raise a failed limit to the distance the finished placement
+  happens to provide and then describe that value as verified.
+- Make the audit fail when it cannot reconstruct the complete loop. Reporting only the nearest
+  pad-to-pin distance creates a precise number for the wrong property.
+
 ## No vias in pads — and DRC will not tell you
 
 KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
@@ -158,6 +176,12 @@ reason. Set the floor *at* the standard, calibrate it by injecting a known-bad g
 scope any package-bridging exemption (an isolator or DC/DC straddles the barrier by
 construction) to pairs where **both** items belong to that package **and** touch its pads —
 bounded by its own measured floor, so a new object cannot inherit the excuse.
+
+An exemption does **not** satisfy the original requirement. If a package's own measured floor
+is below the stated board minimum, report the normal clearance and package deviation
+separately and fail release unless the design records an approved waiver or a revised derived
+requirement tied to that exact part and working voltage. Never print an overall `PASS >= 4 mm`
+for a design whose approved geometry includes 3.5 mm; bounded is not compliant.
 
 **Do not slot a plane to steer digital return current on a precision analog board.** It is
 the textbook move and it is usually wrong here: the converter datasheet asks for a
