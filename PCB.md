@@ -24,6 +24,16 @@ $K pcb drc --severity-all --schematic-parity -o drc.rpt x.kicad_pcb
   real clearance (binary-search `SHAPE::Collide`) rather than asking the rules.
 - **Re-run the layout script after *any* schematic change**, not just after
   connectivity changes — see the parity note below.
+- **Only KiCad's own connectivity is authoritative.** Third-party analyzers
+  rebuild nets with their own union-find over pads, tracks, vias and fills, and
+  on a 2-layer board they routinely report "GND plane split, 2 islands, signals
+  crossing" for F.Cu fragments that are bridged through the B.Cu pour — alarming,
+  and entirely normal. Check any connectivity claim against
+  `board.GetConnectivity().GetUnconnectedCount(True)` and DRC's unconnected count
+  before acting on it. The same class of tool flags *membership* of a rule area
+  without reading its restriction flags: a via inside a keepout that explicitly
+  permits vias is not a violation. Triage third-party findings before promoting
+  any of them to a blocker, and say in the review which ones you dismissed and why.
 
 ## Decoupling is a current loop, not a placement radius
 
@@ -110,6 +120,22 @@ not always land copper, mask and silk on the layers you would have chosen — an
 full ladder on the result, because a converted board has had none of your generator's
 invariants applied to it.
 
+**A pad named as a route endpoint carries no net with it.** A router helper that resolves
+`"R11.2"` to coordinates will happily let you route net *A* to a pad belonging to net *B*: the
+track lands on the neighbouring land, and the only symptom is a DRC `shorting_items` that
+reads like a clearance problem rather than the wiring error it is. Getting a two-pad part's
+pad-1 direction letter backwards is enough to trigger it. Check the net at the endpoint, not
+just its position:
+
+```python
+if isinstance(p, str) and self.pad_net(p) != netname:
+    sys.exit(f"track({netname!r}): endpoint {p} is on net {self.pad_net(p)!r}")
+```
+
+Calibrate by re-introducing the swapped pad number and watching it exit non-zero. Expect this
+to be free on an existing board — it found no false positives on ~60 routed polylines — which
+is the point: it costs nothing and removes a whole silent failure mode from the generator.
+
 **A schematic edit that changes no nets can still break `--schematic-parity`.** Renaming a
 symbol's *Value* field desyncs it from the value stored in the `.kicad_pcb` footprint. Re-run
 the layout script after any schematic change, not only after connectivity changes.
@@ -168,6 +194,15 @@ ever returns a *subset* of the true neighbours, every clearance check built on i
 starts passing — absence of evidence encoding absence of the problem. Calibrate it as a
 **superset** property against brute force on a real board, not on a toy case.
 
+**An empty geometry result reads exactly like a clean one.**
+`fp.GetCourtyard(pcbnew.F_CrtYd).BBox()` returns `(0, 0, 0, 0)` when the footprint has no
+courtyard on that layer. A neighbour scan that computes gaps from those boxes then finds no
+overlaps anywhere and prints nothing — which is indistinguishable from "nothing is in the
+way", and was very nearly reported as "the larger part fits". Assert the box is
+non-degenerate before using it, and make a scan that examined **zero** candidates say so
+rather than falling through to silence. Cheap general fix: print the number of items
+considered next to the verdict, so a scan of nothing cannot masquerade as a scan that passed.
+
 
 ## Isolated designs: the binding clearance is zone-to-zone, and DRC is not asked
 
@@ -216,3 +251,30 @@ for layer, name in ((pcbnew.F_Cu,"copper"), (pcbnew.F_Mask,"mask"), (pcbnew.F_Pa
 Also: **never print paste over an open via barrel** — solder wicks down it. If thermal vias
 sit inside the pad's mask opening, either shape the apertures to miss them, or specify
 plugged/filled vias (IPC-4761) in the fab notes.
+
+
+## Substituting a larger package: make the change, don't reason about it
+
+Parts grow for real reasons — 0805 → 1210 for a voltage rating, 0805 → 2512 for fault power.
+"Does it still fit" is answered by **doing it on a copy of the board and running DRC**, not by
+measuring the neighbours you thought of.
+
+A review that reasoned about the space around a capacitor concluded an 1812 would drop in
+"without moving C8, J1 or the +110 V rail", citing ≥3 mm of clear board **north and east**. It
+was wrong: the binding neighbours were **west** (an 0805 at 2.5 mm centre-to-centre, where the
+new part needed 3.25 mm) and **south-east** (a connector courtyard). Dropping it in produced
+seven violations and the corner had to be re-laid out. The failure mode is checking the
+directions that have room — and it is the same shape as an empty-scan false pass, one level up.
+
+```sh
+cp board.kicad_pcb /tmp/t.kicad_pcb    # then swap the footprint via pcbnew,
+                                       # keeping position, rotation and pad nets
+$K pcb drc --severity-error --severity-warning -o /tmp/drc.json /tmp/t.kicad_pcb
+```
+
+Thirty seconds, and it settles courtyard, clearance and silkscreen at once. Re-run any
+independent geometric audit on the copy too: a bigger package usually **improves** creepage
+(a 1210's terminations are ~1.5 mm apart against an 0805's 0.9 mm), so the substitution can
+drop the part out of a package-exception list entirely. That is worth knowing before you argue
+for it, and worth recording after — an exception that no longer needs to exist should be
+deleted, not left standing as a precedent for the next part.
