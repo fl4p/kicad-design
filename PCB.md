@@ -22,6 +22,21 @@ $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x
   board it never checked. See *The verification ladder* in `SKILL.md`.
 - **`--schematic-parity` is not optional.** It is the only check that the board
   still matches the netlist.
+- **`--severity-all` does not mean "all rules".** It selects error + warning +
+  exclusions; it does **not** resurrect a rule set to `ignore` in
+  `.kicad_pro` → `board.design_settings.rule_severities`. Calibrated: with a
+  footprint's courtyard deleted, `--severity-all` reported **no**
+  `missing_courtyard` while the rule was `ignore`, and reported it as soon as the
+  same run had it at `error`. So "DRC: 0 violations" is a statement about the
+  current severity map as much as about the board — and one real project quietly
+  carried five rules at `ignore` (`footprint_filters_mismatch`,
+  `footprint_type_mismatch`, `missing_courtyard`, `npth_inside_courtyard`,
+  `pth_inside_courtyard`). Worse, that map lives in the `.kicad_pro` that
+  `SKILL.md` warns a generator can rewrite wholesale, so it is a guard
+  precondition that moves silently. **Before believing a green DRC, diff
+  `rule_severities` against defaults and list every `ignore` in the release
+  report.** (On the project above, flipping all five back produced no additional
+  violations — the mechanism is real, that instance was clean.)
 - **A rule area that relaxes a constraint is keyed on *position*.** Anything that
   later moves into it silently stops being held to the strict value, and DRC
   stays green. Any relaxation needs an independent geometric audit that measures
