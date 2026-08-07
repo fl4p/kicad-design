@@ -195,7 +195,10 @@ assert the violation count; never take `$?` alone as the verdict.
 2. **ERC = 0.** Necessary, nowhere near sufficient.
 3. **Read the netlist.** ERC cannot tell you that a feedback tap is on the wrong side of a
    resistor. Print every net with its nodes and read them against intent. This is the single
-   highest-value check.
+   highest-value check. **Assert the component count before reading anything else** — an
+   export that instantiated nothing still exits 0 and still writes a plausible-looking file
+   (827 bytes, `(nets))`, no `(comp …)` at all). "No nets look wrong" is trivially true of a
+   netlist with no nets in it.
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
    Keep the worksheet frame out of board renders: it plots in the same colour family as copper
@@ -265,6 +268,7 @@ when they are no longer current.
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
 | **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
 | **Multi-pad nets in footprints** | An exposed pad and its thermal vias often share one pad number. Take the **largest** pad, not the first. |
+| **`lib_symbols` entry names** | Must be the full `lib_id` (`"Device:R"`), not the bare name you grabbed out of the source library (`"R"`). KiCad never says *symbol not found*: the same one-line mismatch either **segfaults `kicad-cli` (exit 139, no output file)** or writes a netlist with **zero components and exit 0**, depending on unrelated details of the same file. Both reproduced on 9.0.4 from one string. Rename on the way in, and assert the netlist's component count. |
 | **`PWR_FLAG`** | Needed once per net whose only source is a passive connector pin, else `power_pin_not_driven`. Put them in an isolated block — branching off a live stub collides with neighbouring pins. |
 
 ### Derive geometry from the library, never from arithmetic
@@ -296,11 +300,11 @@ Then wire with `poly(pn("U3","2"), pn("U5","5"))` and the coordinates cannot dri
 on most boards.** KiCad mirrors *after* rotating. Mirror-first and rotate-first agree at 0°
 and 180° — an axis mirror commutes with a half-turn — and disagree at 90° and 270°, where
 they exchange **pin 1 and pin 2 of every two-pin part**. Clean ERC, clean netlist, swapped
-part. An earlier version of this snippet had it backwards and scored 164/164 pins landing
-exactly on their wire endpoints on a real board, because that board happened to contain no
-mirrored symbols at all: the perfect score tested none of the broken branch. Calibrate `pn()`
-by placing one part at 90° **with** `(mirror y)`, exporting the netlist, and checking which
-pin reached which net — not by confirming the board you already have is fine.
+part. Calibrate `pn()` by placing one part at 90° **with** `(mirror y)`, exporting the
+netlist, and checking which pin reached which net — never by confirming that the board you
+already have comes out right; an earlier version of this snippet had the order backwards and
+still scored 164/164 on a real board. See *A perfect score on your own design may have tested
+nothing* under **Guards** for why.
 
 **Parse balanced blocks per item; never pair two fields with one regex.** A reviewer checking a
 resistor pack's element mapping wrote `\(at ([-\d.]+) ([-\d.]+).*?\(number "(\d+)"` with
@@ -593,6 +597,24 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   classes your loop actually visits — properties, symbol graphics, zone fills and
   drawing-sheet items are the usual omissions. Calibrating with a fault built from the
   class you already iterate will never reveal this.
+- **A perfect score on your own design may have tested nothing.** The `pn()` transform above
+  was validated at **164/164 pins** on a real board and was still wrong for a third of its
+  input space: that board contained no mirrored symbols, so four of the twelve rotation ×
+  mirror combinations were never exercised, and those four swap pin 1 with pin 2. Your design
+  is a *sample*, and the branches it never reaches are precisely the ones nobody has looked
+  at. For any helper with a small discrete parameter space — rotation × mirror, layer set,
+  package variant, pad shape, unit number — **enumerate the space and check every cell against
+  ground truth** (here: place one part per combination, export the netlist, ask KiCad which pin
+  reached which net). Report coverage, not pass rate: "164/164" and "16/24" were the same code.
+- **Read the shape of a failure, not its count — and test your theory of it.** A harness
+  reporting **0/24** is almost never telling you the thing under test is maximally wrong; it is
+  telling you the harness did not run. A wrong coordinate transform puts labels on the *other
+  pin*; it does not make them land on nothing. Distinguish "wrong answer" from "no answer"
+  before concluding anything. Then be equally sceptical of your diagnosis: *"the invalid sheet
+  UUID broke it"* was a confident, plausible and entirely wrong explanation of one such failure
+  — a mismatched sheet UUID netlists fine, and the real cause was a `lib_symbols` name that did
+  not match its `lib_id`. Isolating the two took one minute and reversed the conclusion. A
+  cause you did not test is a guess you are about to write down as a fact.
 - **Bounded searches lie.** A `\(text "([^"]{5,600})"` regex silently returned 19 of 26 text
   items and produced a confident "not found" for content that was present. If a search reports
   absence, verify the search could have seen the thing.
