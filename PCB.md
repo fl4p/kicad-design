@@ -152,8 +152,28 @@ practice, with the name that actually works — all three confirmed on KiCad 9.0
 | `ZONE.SetDoNotAllowZoneFills(...)` | `AttributeError` | `ZONE.SetDoNotAllowCopperPour(...)` |
 | `LSET & LSET`, `LSET \| LSET` | `TypeError: unsupported operand type(s)` | `LSET.AddLayerSet()` / `RemoveLayerSet()` / `Contains()` |
 | `SHAPE::Collide((x, y), …)` | rejects the tuple | pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine |
+| `PAD.GetPos0()` / `SetPos0(...)` | `AttributeError` | `PAD.GetFPRelativePosition()` / `SetFPRelativePosition(...)` — and note it moves the pad's global position too, so don't "correct" that afterwards |
+| `board.GetNetsByName().get(name)` | `NETNAMES_MAP` has no `.get` | `board.FindNet(name)`, and check for `None` |
 
 Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
+
+**`LoadBoard` → `Save` round-trips bit-identically** on a board KiCad 9 wrote (verified: zero
+diff lines on a 12 000-line `.kicad_pcb`). That is worth knowing because it makes *surgical*
+scripted edits viable on a board you did **not** generate — someone's hand-drawn layout — with
+a diff a human can actually review. The "generate, never hand-place" rule in `SKILL.md`
+assumes you own the file; when you don't, a script that loads, changes exactly the objects it
+asserted it found, re-fills and saves gives you most of the same reproducibility without
+seizing ownership of someone else's board. Assert the round-trip on the specific file first —
+it is the cheap precondition for trusting the diff.
+
+**A probe that returns "nothing" for every input has failed, not answered.**
+`board.GetConnectivity().GetConnectedPads(pad)` returned an empty list for *every* pad on a
+partly-routed board, including pads whose nets were fully routed. Read as data that would
+have meant "the board has no connectivity at all"; read correctly it means the call needs
+setup the SWIG binding does not do. This is the `0/24` shape from `SKILL.md` in `pcbnew`
+form. Fall back to something that is definitely computed: `kicad-cli pcb drc` writes the
+ratsnest as `[unconnected_items]` **pairs**, and diffing that list before and after a change
+tells you exactly which connections closed.
 
 **KiCad's bundled `pcbnew` imports Altium boards.** `PCB_IO_MGR` (all caps — `PCB_IO_Mgr` is an `AttributeError`) converts a `.PcbDoc` to
 `.kicad_pcb` programmatically, so an Altium design can be pulled into a scripted KiCad
@@ -244,6 +264,56 @@ way", and was very nearly reported as "the larger part fits". Assert the box is
 non-degenerate before using it, and make a scan that examined **zero** candidates say so
 rather than falling through to silence. Cheap general fix: print the number of items
 considered next to the verdict, so a scan of nothing cannot masquerade as a scan that passed.
+
+
+## Symmetry and matching are invisible to DRC
+
+A board can be DRC-clean, parity-clean and **completely asymmetric**. Nothing in KiCad checks
+that a differential pair is matched, that two halves of a current path mirror, or that a
+matched-resistor pair sits symmetrically in a thermal gradient. If the design's accuracy rests
+on any of that, it rests on a guard you write, and the design docs must say *that* guard — not
+DRC — is what enforces it, or the next tidy-up deletes it as redundant.
+
+Four traps, all met on one precision current-sense board:
+
+- **Derive the mirror's net map from the schematic, not from the net names.** Under a
+  left/right mirror the nets swap in pairs, and the pairing is a circuit fact: `Shunt+ ↔
+  Shunt-` is obvious, but on that board `Net-(JP1-A) ↔ GND` too, because those were the
+  shunt's two Kelvin sense terminals. Assume every net maps to itself and the audit reports
+  the correctly-mirrored sense pair as broken while missing the pours.
+
+- **A footprint's `(at …)` is a proxy for where the part is; the pads are the truth.**
+  `Wuerth_PowerPlus_M5_Nut` carries its origin **1.5 mm off its own pad cluster**, so two lugs
+  at x = 109.5 and 132.5 — apparently centred on 121.0 — actually have their pad clusters at
+  108.0 and 131.0, i.e. exactly symmetric about the board centre at 119.5. An origin-based
+  check reports a false asymmetry. Worse, the *same* proxy error had already reached a design
+  review, which derived "the symmetry axis is x ≈ 121" from those origins and concluded the
+  wrong one of two matched resistor networks was the thermally exposed one. Compare pad sets.
+
+- **Audit the zone FILL, not the zone outline.** The outline is intent; the fill is what ships,
+  and it is shaped by pads, tracks, clearances and the board edge. On that board the two
+  current pours had outlines that differed only cosmetically while their *fills* differed by
+  3.4 mm².
+
+- **Compare fills geometrically, never by vertex equality.** KiCad segments arcs into chords,
+  and two mirror-image arcs get their chords in different places even when the shapes are
+  identical — so point-set equality reports pure noise as a defect. Measure (a) filled area and
+  (b) the largest distance from any mirrored vertex to the other polygon's boundary. Measured
+  on that board: chord noise **~0.005 mm**, real defects **0.8 – 2.5 mm**. Put the tolerance an
+  order of magnitude above the noise and state both numbers next to it, so the next reader can
+  see the check has headroom rather than being tuned to pass.
+
+Asymmetries hide in places a placement check never looks. On that board the last one left,
+after every coordinate matched, was **pad 1 of a 4-terminal shunt being `rect` while pad 4 was
+`circle`** — same size, same drill, the ordinary pin-1 marker. It was 1.65 mm² of extra copper
+on one terminal and it carved a correspondingly larger void out of the opposing current plane.
+Before changing it, check the part still has a pin-1 marker somewhere else (silkscreen), and
+make the script *refuse* if it does not — symmetry is not worth losing orientation over.
+
+Finally: a symmetry audit is exactly the kind of guard that must fail closed. An unreadable
+outline, an object class the parser never visited, or a pair that could not be compared has to
+raise — "0 asymmetries" out of a scan that examined nothing is the anti-monotone false PASS,
+and it is very easy to write here because the happy path prints the same thing.
 
 
 ## Isolated designs: the binding clearance is zone-to-zone, and DRC is not asked
