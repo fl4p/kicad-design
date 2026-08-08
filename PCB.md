@@ -166,6 +166,15 @@ asserted it found, re-fills and saves gives you most of the same reproducibility
 seizing ownership of someone else's board. Assert the round-trip on the specific file first —
 it is the cheap precondition for trusting the diff.
 
+**`board.Remove()` invalidates the SWIG proxies of the items you did *not* remove.** A later
+`board.GetTracks()` raises `'SwigPyObject' object is not iterable`, and — the nastier half —
+a proxy you snapshotted into a Python list *before* the removal silently loses its downcast,
+so `t.GetStart()` starts returning a bare `SwigPyObject` with no `.x`. Snapshotting is not
+the fix. **Resolve every lookup first, then mutate; and do in-place edits before removals**,
+because an edit after a `Remove()` is operating on a proxy that may already be stale. The
+failure is loud on the second loop iteration, which makes it easy to misread as "my first
+edit corrupted the board" rather than "the binding invalidated my handles".
+
 **A probe that returns "nothing" for every input has failed, not answered.**
 `board.GetConnectivity().GetConnectedPads(pad)` returned an empty list for *every* pad on a
 partly-routed board, including pads whose nets were fully routed. Read as data that would
@@ -302,6 +311,20 @@ Four traps, all met on one precision current-sense board:
   on that board: chord noise **~0.005 mm**, real defects **0.8 – 2.5 mm**. Put the tolerance an
   order of magnitude above the noise and state both numbers next to it, so the next reader can
   see the check has headroom rather than being tuned to pass.
+
+**Symmetry is not the whole objective — check the loop area too.** A mirror-symmetric
+differential pair can still be a large pickup loop, and the audit that proves the symmetry
+will happily pass it. On that board the sense pair was laid out perfectly symmetric at 4.2 mm
+spacing, enclosing **143 mm²** between the two conductors; re-laying it at 0.6 mm inside the
+existing 1.0 mm gap between the two current pours cut that to **26.5 mm²** with no change to
+the symmetry verdict, no new DRC violations, and *more* pour copper than before, because the
+pair now runs in a gap that already existed instead of slicing a fresh void through each pour.
+Compute the enclosed area explicitly — shoelace over `[source pad A, …trace A…, load, …trace B
+reversed…, source pad B]` — and put the number in the design doc, because nothing else will
+ever tell you it is too big. Two corollaries: the fan-out from the source's pad pitch is often
+the dominant remaining term, so converge it steeply rather than at a tidy 45°; and running the
+pair down the gap between two pours *guards* it, provided each conductor is flanked by the
+pour nearest its own potential rather than the other one's.
 
 Asymmetries hide in places a placement check never looks. On that board the last one left,
 after every coordinate matched, was **pad 1 of a 4-terminal shunt being `rect` while pad 4 was
