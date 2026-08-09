@@ -13,7 +13,7 @@ create and review KiCad schematics and PCBs. It has no test suite and nothing
 executes it. **A wrong fact in it becomes a wrong board**, and it will do so
 silently, because the agent reading it will not doubt it.
 
-Files: `SKILL.md` (~750 lines, schematic + shared), `PCB.md` (board side),
+Files: `SKILL.md` (schematic + shared; `wc -l` it rather than trusting a number here -- it grows), `PCB.md` (board side),
 `SETUP.md` (datasheet-access preflight), `README.md` (index).
 
 ## Environment — verify, do not reason
@@ -58,25 +58,36 @@ The history so far, which tells you what to expect:
 | review 1 → `612b4cf` | 36 findings, applied |
 | review 2 | found that **`612b4cf` introduced new bugs**, two of which made the file worse than before it |
 | fixes → `9330f63` | applied |
-| **you** | audit `9330f63` the same way |
+| review 3 → `8d85146` | the KiCad 9→10 upgrade + a design session: 5 additions |
+| review 4 | found **`8d85146` introduced 3 new bugs** — a mis-scoped API row, a wrong crash diagnosis, and a cross-reference pointing the wrong way — *and* that a pre-existing paragraph licensing scripted edits to third-party boards had become flatly false |
+| fixes → *(latest commit)* | applied |
+| **you** | audit the latest commit the same way |
 
-A fix applied from a review is **unreviewed code**. `612b4cf` shipped a `pn()`
-rewrite that `KeyError`s on 191 stock symbols, a code sample that `NameError`s on
-every run, a new guard with no non-degeneracy check, and a comment naming the
-wrong symbol — all while correctly fixing nine other things. Assume `9330f63`
-has the same character.
+A fix applied from a review is **unreviewed code**, and this has now held for
+three consecutive rounds. `612b4cf` shipped a `pn()` rewrite that `KeyError`s on
+191 stock symbols, a code sample that `NameError`s on every run, a new guard with
+no non-degeneracy check, and a comment naming the wrong symbol — all while
+correctly fixing nine other things. `8d85146` re-probed a five-row API table
+after a major-version bump, corrected the row that had inverted, and **stamped a
+second row "unchanged" on the strength of probing one subclass** — the row was
+wrong for every other subclass. Assume the latest commit has the same character,
+and note the pattern in both: the error was never in the headline finding, it was
+in the *neighbouring claim that rode along on the same confidence*.
 
 Specific things to re-derive rather than trust:
 
-- The unit-0 union claim: 664 `NAME_0_*` sub-symbols with pins, 191 symbols with
-  *all* pins in unit 0. Is the prescribed union rule actually correct, including
-  body style 0 vs 1/2?
+- The unit-0 union claim: 666 `NAME_0_*` sub-symbols with pins, 193 symbols with
+  *all* pins in unit 0 (10.0.5; they were 664/191 on 9.0.4). Is the prescribed
+  union rule actually correct, including body style 0 vs 1/2?
 - `GetEnabledLayers().CuStack()` — does it return what the snippet assumes, in
   stack order, on a 2- and a 6-layer board? Does the rewritten via-in-pad snippet
   now run? (`bad` initialised, `pcbnew.FromMM` correct, pair count honest?)
-- The glyph-bbox numbers: Earth_Protective 5.080, +VDC 4.318, Earth_Clean 3.810,
-  −VDC 3.175, GNDPWR 2.032 and asymmetric at −1.270..+1.016. Recompute from
-  `power.kicad_sym`.
+- The glyph-bbox numbers: **six** symbols exceed the 2.54 height —
+  Earth_Protective 5.080, +VDC 4.318, Earth_Clean 3.810, AC and VAC 3.807,
+  −VDC 3.175 — plus GNDPWR 2.032 and asymmetric at −1.270..+1.016, and
+  Earth_Clean as the width outlier at ±2.540. Recompute from `power.kicad_sym`,
+  and **include the polyline `(xy …)` points**: a pass that counted only
+  `start`/`mid`/`end` reported "exactly four" and missed AC and VAC entirely.
 - `Conn_02x01` exists; the five suffixed variants; "positions per row".
 - The IPC column reassignment in `PCB.md` — is the 0.430 mm figure now ruled
   against the right column, and is the 0.675 mm figure still ruled against B?
@@ -153,7 +164,7 @@ checkable source. Particular rot:
 
 ## Priority 4 — structure
 
-~750 lines of dense prose, no table of contents. Round 2 flagged an **ordering
+Many hundreds of lines of dense prose, no table of contents. Round 2 flagged an **ordering
 trap**: the file-format table hands the agent hardcoded pin arithmetic for
 `Device:R` and `Conn_01xNN` *before* the section that says never to hardcode pin
 arithmetic. An agent reading top-to-bottom does the wrong thing and never learns

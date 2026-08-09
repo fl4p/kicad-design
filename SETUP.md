@@ -293,7 +293,31 @@ judging the file by the wrong signal.
 
 **Never guess a datasheet id** — take it from the API's `datasheets[]` field.
 
-For what to do once the PDF is open — where package drawings hide, how to read a
+**These three checks prove the file has *a* text layer. They say nothing about whether the
+number you need is in it.** A real case: `ECS-2025-2033.pdf` passes all three cleanly —
+`application/pdf`, 2 pages, the MPN four times, and `pdftotext -layout` returns every
+parameter table — while **both** figures, the package drawing and the Suggested Land Pattern,
+are 150-dpi JPEG rasters with no text at all. Every dimension in the part is unreachable, and
+the preflight is green. That green was read as "the datasheet does not specify a land pattern"
+and a wrong footprint shipped on the strength of it.
+
+So when the parameter you want is a **drawing callout** — pad geometry, package dimensions,
+land patterns — the preflight is not finished until you have confirmed it is *readable*:
+
+```sh
+# Is the figure text, or a picture of text?
+pdfimages -list x.pdf | awk 'NR>2 && $3=="image"'   # any rows -> there are rasters
+pdftotext -layout x.pdf - | grep -cE '<a dimension you can see in the figure>'
+# 0 hits while the figure plainly shows it => the drawing is a raster. RENDER it:
+pdftoppm -r 400 -png -f <page> -l <page> x.pdf out   # then look at out-<page>.png
+```
+
+`pdftocairo -svg` will not rescue this either — there are no vectors to extract. See
+`SKILL.md` § *Reading the PDF*, fourth bullet, for what to do with the rendered image and for
+the line between a **printed callout** (a datasheet number, usable) and a length **scaled off
+the picture** (a model, and it must be labelled as one).
+
+For the rest of what to do once the PDF is open — where package drawings hide, how to read a
 not-to-scale land drawing — see `SKILL.md` § *Reading the PDF*.
 
 ---

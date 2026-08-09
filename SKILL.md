@@ -231,9 +231,12 @@ document is about, sitting in its own ladder. Either pass the flag, or parse the
 assert the violation count; never take `$?` alone as the verdict.
 
 **`--severity-all` is not optional for ERC either, and "ERC = 0" is a statement about the
-severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities` —
-43 rules on KiCad 9.0.4 — plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC
-map that `PCB.md` treats as a first-class guard precondition. A rule set to `ignore` is not
+severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities`,
+plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC map that `PCB.md` treats as
+a first-class guard precondition. (This used to say "43 rules on KiCad 9.0.4". Do not quote a
+count: the map is **sparse** — KiCad writes only entries it has reason to write, so the number
+is a property of that file's edit history, not of KiCad. Measured across four real projects on
+one machine: 0, 0, 33 and 44 entries.) A rule set to `ignore` is not
 resurrected by `--severity-all`, and one real project silently carried four at `ignore`
 (`footprint_filter`, `four_way_junction`, `simulation_model_issue`, `single_global_label`).
 Worse, that map lives in the same `.kicad_pro` that a generator can rewrite wholesale — see
@@ -244,6 +247,19 @@ rules above *are* the stock defaults, so a diff reports no difference and the gu
 supposed to catch them fires never. Diffing is the secondary check, for spotting a map that
 someone changed; enumerating the `ignore`s is the one that works, and do the same for `pin_map`, which decides whether
 two outputs driving each other is an error at all.
+
+**And the enumeration has its own false PASS, which a review of this file found in this very
+paragraph.** Because `erc.rule_severities` is sparse, it is frequently **absent entirely** —
+two of the four projects measured above have no map at all. Enumerate `ignore`s over a missing
+map and you get `[]`, which reports *"no rules are ignored"* at the exact moment you know
+least, while KiCad's built-in defaults — including the four named above — are fully in force.
+Absence of the map encodes absence of the problem: the same anti-monotone shape this section
+exists to prevent, sitting inside the remedy for it. **A missing or empty `rule_severities` is
+`unverified`, not clean.** Resolve the enumeration against KiCad's built-in default map and
+report the effective severity of every rule, or say the severity map could not be established
+and refuse to call the ERC green. (`PCB.md`'s DRC half is not exposed to this: the same board
+had 62 entries in `board.design_settings.rule_severities` — but that is luck, not structure,
+so give the DRC side the same tri-state.)
 
 1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
 2. **ERC = 0.** Necessary, nowhere near sufficient — and see the severity-map caveat above.
@@ -269,6 +285,12 @@ two outputs driving each other is an error at all.
    count to equal it, and require every net to have at least one node. Then write the matcher
    whitespace-agnostically (`\(net\s`, `\s+` between tokens) so it spans both formats — verify
    that by parsing an old committed netlist *and* a fresh export.
+
+   **Do that matching in Python `re` over the whole file, never in a line-based tool.** The
+   whitespace after `(net` is now a *newline*, so `grep -cE '\(net\s'` returns **0** on a 10.x
+   export while the identical pattern in `re.findall` over the file returns 51 — an agent that
+   implements the opener-count in shell reproduces the exact bug this bullet is about. Count
+   `\(net\s` and not a bare `(net`, which also matches the enclosing `(nets`.
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
    Keep the worksheet frame out of board renders: it plots in the same colour family as copper
@@ -383,17 +405,30 @@ get a wire onto a neighbouring pin, or a dangle, in silence. Unit 3 is where pin
 which is the whole *Decoupling is a current loop* section.
 
 **Unit 0 is "common to all units" and you must union it in, or the fix becomes a regression.**
-Measured on the stock 9.0.4 libraries: **664 `NAME_0_*` sub-symbols carry pins, and 191
-symbols keep *all* their pins there** — `Driver_Haptic:DRV2510-Q1` has a `DRV2510-Q1_0_0`
-with 17 pins and no `_1_1` at all. A strict `LIBPINS[(lid, unit)]` lookup raises `KeyError`
+Measured on the stock **10.0.5** libraries (2026-08-09): **666 `NAME_0_*` sub-symbols carry
+pins, and 193 symbols keep *all* their pins there** — `Driver:DRV2510-Q1` has a
+`DRV2510-Q1_0_0` with 17 pins and no `_1_1` at all. (On 9.0.4 these were 664 and 191, and that
+part lived in `Driver_Haptic`, a library **10.0.5 no longer ships** — it was folded into
+`Driver.kicad_sym`. A stale `lib_id` in a worked example is not cosmetic here: by the
+`lib_symbols` row above it either segfaults `kicad-cli` at exit 139 or writes a 0-component
+netlist at exit 0.) A strict `LIBPINS[(lid, unit)]` lookup raises `KeyError`
 on every one of those, and on a genuine multi-unit part with shared supply pins in unit 0 it
 drops them silently — worse than the flat lookup it replaced. So: pins for unit *u* =
 `NAME_0_*` **∪** `NAME_u_*`, and the same for body style (0 is common to 1 and 2). Then raise
 if the pin is in neither, rather than searching the other units. Add unit number to the enumerated parameter space under *Guards* as a **required**
 dimension.
 
-**Resolve `extends` before embedding.** **12 007 of the 22 387 top-level symbols in the stock
-9.0.4 libraries (53.6 %) are `(extends "PARENT")`** and carry no pins and no graphics of their
+**Resolve `extends` before embedding.** **12 249 of the 22 784 top-level symbols in the stock
+10.0.5 libraries (53.8 %, 223 libraries) are `(extends "PARENT")`** — one line to re-measure,
+so re-measure rather than quoting this:
+
+```
+cd .../SharedSupport/symbols
+grep -h -c $'^\t(symbol "'    *.kicad_sym | paste -sd+ - | bc     # 22784
+grep -h -c $'^\t\t(extends '  *.kicad_sym | paste -sd+ - | bc     # 12249
+```
+
+These carry no pins and no graphics of their
 own — `Amplifier_Operational:LM358` is literally `(symbol "LM358" (extends "LM2904") …)`. A
 parser that reads only the named entry gets **zero pins for over half the library**, and
 copying that bare entry into the `.kicad_sch` is exactly the one-line `lib_symbols` defect in
@@ -483,12 +518,18 @@ def check_rail_orientation():   # graphic must point AWAY from the attached wire
     for libid, x, y, graphic_down, gbox in _RAILS:
         # gbox is the symbol's OWN graphic bbox -- min/max over the library
         # entry's polyline/rectangle/circle primitives, excluding property text
-        # -- NOT a hardcoded 1.27 x 2.54.  Measured on power.kicad_sym, exactly
-        # four glyphs exceed that box: Earth_Protective (h 5.080), +VDC (4.318),
-        # Earth_Clean (3.810), -VDC (3.175).  GNDPWR is SMALLER (h 2.032) but is
-        # the one symbol whose glyph is not x-symmetric about the pin
-        # (x -1.270..+1.016), so take x0/x1 from the bbox's real min/max rather
-        # than from a width centred on the connection point.
+        # -- NOT a hardcoded 1.27 x 2.54.  Measured on power.kicad_sym (101
+        # symbols, KiCad 10.0.5, 2026-08-09): SIX glyphs exceed that height --
+        # Earth_Protective (5.080), +VDC (4.318), Earth_Clean (3.810), AC and
+        # VAC (3.807 each), -VDC (3.175).  An earlier revision of this comment
+        # said "exactly four" and omitted AC and VAC; it had been computed
+        # without the polyline (xy ...) points, which are most of the geometry.
+        # Earth_Clean is also the WIDTH outlier at x -2.540..+2.540, twice the
+        # box.  GNDPWR is SMALLER (h 2.032) but is the one symbol whose glyph is
+        # not x-symmetric about the pin (x -1.270..+1.016), so take x0/x1 from
+        # the bbox's real min/max rather than from a width centred on the
+        # connection point.  Recompute rather than trusting these six: the
+        # enumeration is what moves, the rule (use the real bbox) is what holds.
         if gbox.w <= 0 or gbox.h <= 0:      # the (0,0,0,0) BBox failure, again
             raise ValueError(f"UNVERIFIED: degenerate glyph box for {libid}")
         x0, x1, h = x + gbox.x0, x + gbox.x1, gbox.h
@@ -761,7 +802,8 @@ access, not engineering, so it can be revisited.
   no text layer at all, so `pdftotext` yielded the parameter tables and silently dropped every
   dimension. The first pass concluded the land pattern "could not be read out of the
   datasheet" and shipped a footprint chosen by vendor-and-body-size instead. It was the wrong
-  land (see *A stock footprint that matches by vendor and size can still be wrong*, below).
+  land (see *A stock footprint that matches by vendor and body size can still be the wrong
+  land*, **above**, under *Never quote a spec from memory*).
   `pdftocairo -svg` also gives you nothing here — there are no vectors to extract.
 
   **Render and read it**: `pdfimages -png` (or `pdftoppm -r 300`) the page, then *look*. The

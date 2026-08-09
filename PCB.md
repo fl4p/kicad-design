@@ -151,36 +151,95 @@ practice, with the name that actually works — **re-probed on KiCad 10.0.5 on 2
 |---|---|---|
 | `ZONE.SetDoNotAllowCopperPour(...)` | `AttributeError` **on 10.0.5** | `ZONE.SetDoNotAllowZoneFills(...)` — **this pair REVERSED between 9.0.4 and 10.0.5.** On 9.0.4 it was exactly the other way round, and this table said so. Probe both names and use whichever answers; do not hard-code either. |
 | `LSET & LSET`, `LSET \| LSET` | `TypeError: unsupported operand type(s)` | `LSET.AddLayerSet()` / `RemoveLayerSet()` / `Contains()` — unchanged on 10.0.5 |
-| `SHAPE::Collide((x, y), …)` | rejects the tuple | pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine — unchanged on 10.0.5 |
+| `SHAPE::Collide((x, y), …)` | rejects the tuple | On the **base `SHAPE`** you get from `pad.GetEffectiveShape(layer)`, pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine. **The concrete SWIG subclasses do not share one signature** — `SHAPE_CIRCLE.Collide` exposes *only* `SEG` overloads on 10.0.5, so `SHAPE_CIRCLE.Collide(VECTOR2I, 0)` is a `TypeError` too. Probe the class you actually hold; a stamp on this row that says "works" is only ever true of the type it was probed with. |
 | `PAD.GetPos0()` / `SetPos0(...)` | `AttributeError` | `PAD.GetFPRelativePosition()` / `SetFPRelativePosition(...)` — and note it moves the pad's global position too, so don't "correct" that afterwards. Unchanged on 10.0.5 |
 | `board.GetNetsByName().get(name)` | `NETNAMES_MAP` has no `.get` | `board.FindNet(name)`, and check for `None` — unchanged on 10.0.5 |
 
 **Four of five survived the major-version bump and one inverted, which is the worst possible
 ratio**: it is exactly high enough to make "the table still holds" the natural assumption, and
 the one that moved fails as an `AttributeError` at the call site rather than as a wrong number,
-so it is loud when hit — but only if that branch is exercised. Re-probe the table on any
-version change; it costs one script.
+so it is loud when hit — but only if that branch is exercised.
+
+A stamp is only as good as what it was probed with. The first pass at this table stamped row 3
+"unchanged on 10.0.5" having probed a single `SHAPE` subclass, and a review found the row was
+wrong for every *other* subclass — the same shape as "a record of attention with the question
+never asked" in `SKILL.md`. Re-probe on any version change, name the type you probed, and use
+the script below rather than a fresh ad-hoc one:
+
+```python
+# kicad10-api-probe.py  --  run with the bundled python3 and -u
+import pcbnew
+print("build", pcbnew.GetBuildVersion())
+def row(name, fn, expect):          # expect: "works" | "raises"
+    try:    fn(); got = "works"
+    except Exception as e: got = "raises(%s)" % type(e).__name__
+    print(("PASS " if got.startswith(expect) else "FAIL "), name, "->", got)
+bd = pcbnew.BOARD(); z = pcbnew.ZONE(bd)          # bind parents; never nest constructors
+l1, l2 = pcbnew.LSET(), pcbnew.LSET()
+row("ZONE.SetDoNotAllowZoneFills",  lambda: z.SetDoNotAllowZoneFills(True),  "works")
+row("ZONE.SetDoNotAllowCopperPour", lambda: z.SetDoNotAllowCopperPour(True), "raises")
+row("LSET & LSET",                  lambda: l1 & l2,                         "raises")
+row("LSET.AddLayerSet",             lambda: l1.AddLayerSet(l2),              "works")
+row("NETNAMES_MAP.get",             lambda: bd.GetNetsByName().get("X"),     "raises")
+row("BOARD.FindNet",                lambda: bd.FindNet("X"),                 "works")
+sc = pcbnew.SHAPE_CIRCLE(pcbnew.VECTOR2I(0, 0), 1000)
+row("SHAPE_CIRCLE.Collide(VECTOR2I)", lambda: sc.Collide(pcbnew.VECTOR2I(0, 0), 0), "raises")
+row("SHAPE_CIRCLE.Collide(SEG)",
+    lambda: sc.Collide(pcbnew.SEG(pcbnew.VECTOR2I(0, 0), pcbnew.VECTOR2I(1, 1)), 0), "works")
+# PAD needs a real parent; see the lifetime note above
+fp = pcbnew.FOOTPRINT(bd); p = pcbnew.PAD(fp)
+row("PAD.GetPos0",                  lambda: p.GetPos0(),                     "raises")
+row("PAD.GetFPRelativePosition",    lambda: p.GetFPRelativePosition(),       "works")
+```
 
 **Probing `pcbnew` safely.** Two things will waste an hour otherwise:
 
 - **Run the probe with `python3 -u`.** A `pcbnew` call that crashes the interpreter takes
   buffered stdout with it, and you get a bare non-zero exit with *no output at all* and no clue
   which line died. Unbuffered, the last line printed is the line before the crash.
-- **Probe against a real `LoadBoard()`, not a synthetic object.** Constructing an orphan
-  `pcbnew.PAD(pcbnew.FOOTPRINT(board))` and calling `GetFPRelativePosition()` on it **SIGBUSes
-  the interpreter** (exit 138) on 10.0.5; the same call on a pad from a loaded board returns
-  fine. A crash while probing is not evidence that the API is missing.
+- **Never pass a freshly-constructed `pcbnew` object straight into another constructor — bind
+  every parent to a variable first.** SWIG does not keep the parent alive, so a temporary is
+  refcount-freed the instant the child's constructor returns and the child is left holding a
+  dangling pointer:
+
+  ```python
+  pcbnew.PAD(pcbnew.FOOTPRINT(pcbnew.BOARD())).GetFPRelativePosition()   # SIGBUS, exit 138
+  bd = pcbnew.BOARD(); fp = pcbnew.FOOTPRINT(bd); pcbnew.PAD(fp).GetFPRelativePosition()  # (0,0)
+  ```
+
+  Both measured on 10.0.5. This applies to every parented class, not just `PAD`. A crash while
+  probing is not evidence that the API is missing — it is usually this.
 
 Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
 
-**`LoadBoard` → `Save` round-trips bit-identically** on a board KiCad 9 wrote (verified: zero
-diff lines on a 12 000-line `.kicad_pcb`). That is worth knowing because it makes *surgical*
-scripted edits viable on a board you did **not** generate — someone's hand-drawn layout — with
-a diff a human can actually review. The "generate, never hand-place" rule in `SKILL.md`
-assumes you own the file; when you don't, a script that loads, changes exactly the objects it
-asserted it found, re-fills and saves gives you most of the same reproducibility without
-seizing ownership of someone else's board. Assert the round-trip on the specific file first —
-it is the cheap precondition for trusting the diff.
+**`LoadBoard` → `Save` DOES NOT round-trip bit-identically on 10.0.5.** This paragraph used to
+claim it did, verified as zero diff lines on a 12 000-line `.kicad_pcb` under 9.0.4. Re-tested
+on 10.0.5, it is false on every board tried, by two separate mechanisms:
+
+- **Item order is scrambled, and unstably.** On a 10.0-written board the raw diff was 25 000
+  lines while `diff <(sort a) <(sort b)` was **zero** — content preserved, order not. Saving
+  twice gives two different orders, so this is the UUID-ordering nondeterminism documented
+  below, reaching the whole file rather than just zone fills.
+- **A 9.x board is silently MIGRATED — saving is a format upgrade.** Measured on a
+  9.0-written board:
+
+  ```
+  src: (version 20241229) (generator_version "9.0")
+  out: (version 20260206) (generator_version "10.0")
+  injected: (epsilon_r 4.5) (loss_tangent 0.02) (material "FR4") (thickness 1.51) …
+  ```
+
+  **Loading someone's 9.x board through the bundled Python and saving it fabricates a stackup
+  they never specified** — which is exactly what "The stackup is part of the design, not a fab
+  preference" above says must never be left to a default. Opening a board you do not own is a
+  *write*, and a lossy one.
+
+What survives is the guard, not the claim: **assert the round-trip on the specific file before
+trusting any diff from it.** That assertion was written as a cheap precondition for surgical
+scripted edits on a board you did not generate; on 10.0.5 it correctly *refuses*, which is the
+guard working. Until that assertion passes on your file and your version, treat scripted edits
+to someone else's board as unavailable rather than as reviewable — the diff a human was
+supposed to be able to read is 25 000 lines of reordering with the real change buried in it.
 
 **`board.Remove()` invalidates the SWIG proxies of the items you did *not* remove.** A later
 `board.GetTracks()` raises `'SwigPyObject' object is not iterable`, and — the nastier half —

@@ -7,7 +7,7 @@ Every rule here exists because the failure it describes actually shipped and had
 be caught — not because it is general advice. Each one names the failure it prevents,
 and keeps the concrete numbers where they make the rule easier to apply.
 
-Three files, so schematic-only work does not have to load the board material:
+Four files, so schematic-only work does not have to load the board material:
 
 | File | Read it when |
 |---|---|
@@ -18,7 +18,7 @@ Three files, so schematic-only work does not have to load the board material:
 Topics covered:
 
 - **Generate, never hand-place** — the schematic and board as generator output, and the
-  hygiene rules that keeps honest (byte-reproducibility, stable-identity UUIDs, netlist
+  hygiene rules that keep it honest (byte-reproducibility, stable-identity UUIDs, netlist
   export after structural edits, never writing a file another generator owns).
 - **Verification ladder** — what ERC catches, what DRC catches, and the large class of
   defects that neither does.
