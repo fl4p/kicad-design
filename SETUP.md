@@ -89,6 +89,33 @@ yourself. Observed once, from one residential IP in 2026-08: Analog Devices and 
 showed the fingerprint-rejection signature; onsemi returned a plain 403 to curl but
 loaded fine in a browser; TI, Mouser, Farnell and Vishay were fine on plain curl.
 
+### macOS TCC can block LOCAL files, not just vendors
+
+Not every access failure is a network one. On macOS, a sandboxed shell is denied
+`~/Documents`, `~/Desktop` and `~/Downloads` by TCC unless the terminal has been granted
+Full Disk Access — and the failure is easy to misread, because **`test -d` succeeds while
+`ls` does not**:
+
+```sh
+$ [ -d ~/Documents/KiCad/9.0/footprints/open-pe.pretty ] && echo yes   # yes  (stat only)
+$ ls  ~/Documents/KiCad/9.0/footprints/open-pe.pretty                  # Operation not permitted
+$ ls  ~/Documents/                                                     # Operation not permitted
+```
+
+This bites here because **KiCad's user symbol and footprint libraries live under
+`~/Documents/KiCad/<version>/`** by default. A global `fp-lib-table` entry can point at a
+perfectly present library that this environment cannot read, so the library reads as
+missing and the natural next move — substituting a different footprint — is the
+tooling-driven design change `SKILL.md` warns about.
+
+If a path stats but will not read, say so as a permissions result rather than a missing
+file, and take one of: ask the user to run the copy themselves (in Claude Code, `! cmd`
+puts the output in the conversation), have them grant Full Disk Access, or source the data
+from somewhere readable and **label where it came from**. Vendoring footprints out of the
+`.kicad_pcb` is a legitimate fallback — it provably matches what will be fabricated — but
+it cannot capture a correction made in the original library since those instances were
+placed, and the write-up has to say that.
+
 ---
 
 ## 1. Ask the user for what is missing

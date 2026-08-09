@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
 ---
 
 # KiCad schematic and PCB design
@@ -25,9 +25,14 @@ engineering.
 ## Working on the board? Read `PCB.md`
 
 This file covers what is shared plus schematic capture. **PCB layout, footprints,
-land patterns, `pcbnew` scripting, zones, DRC, stackup and creepage live in
-[`PCB.md`](PCB.md)** — read that file as well when the task touches the board, and
-skip it entirely for schematic-only work.
+land patterns, `pcbnew` scripting, zones, DRC, stackup, creepage, surface leakage
+and fab output live in [`PCB.md`](PCB.md)** — read that file as well when the task
+touches the board, and skip it entirely for schematic-only work.
+
+**"Is this ready to fab / ready to order?" is a board question**: go straight to
+`PCB.md`'s last section, which separates *manufacturable* from *final* and gives
+the export-and-measure checklist. Answering it from DRC alone gets it wrong in
+both directions.
 
 ## Core principle: generate, never hand-place
 
@@ -52,6 +57,28 @@ Generator hygiene, each learned the hard way:
   settings, net classes and custom-rules linkage. The PCB script carefully protected the
   *schematic's* keys from itself; the protection was one-directional. DRC then ran on KiCad
   defaults and went green on a board that was not compliant. Seed shared files only if absent.
+
+  **When you must ADD a key to a shared file, merge — never rewrite.** Seeding-if-absent is
+  right for a fresh checkout and does nothing for the file that already exists, so a setting
+  introduced later never reaches any current project. Load the JSON, `setdefault` the one key,
+  and write it back **preserving insertion order** (no `sort_keys`, or the diff is the whole
+  file and the next reviewer cannot see what changed). Report what moved:
+
+  ```python
+  pro = json.load(open(path))
+  changed = []
+  sev = pro.setdefault("erc", {}).setdefault("rule_severities", {})
+  for rule, level in WANT.items():
+      if sev.get(rule) != level:
+          changed.append(f"{rule}: {sev.get(rule, '<KiCad default>')} -> {level}")
+          sev[rule] = level
+  if changed:
+      json.dump(pro, open(path, "w"), indent=2)     # NOT sort_keys
+  ```
+
+  Verify it was surgical rather than assuming: on one project this landed as **+12 lines**
+  with all 13 top-level keys and the board's 62 DRC severity entries untouched. Check that,
+  and the failure this bullet is about cannot recur through the back door.
 - **Derive UUIDs from stable identity**, never from a counter. Counter-derived UUIDs meant
   inserting one resistor changed 78 of 81 symbol UUIDs, and KiCad matches footprints to
   symbols by that path — so a one-part edit re-orphans the whole board. Hash the reference
@@ -71,6 +98,13 @@ Generator hygiene, each learned the hard way:
   Keep `assert` for genuine can't-happen invariants only, and put
   `if not __debug__: sys.exit("refusing to run under -O: the guards are gone")` at the top of
   any generator that has guards worth having.
+
+  **A guard suite's own calibrations cannot detect this**, which is why it survives review in
+  well-guarded projects. Calibrations inject a *non-empty* fault and watch the check fire; `-O`
+  removes the check for *every* input, and the empty-input branch was never exercised anyway.
+  Measured on a project with fifteen calibrated checks: `python3 -O audit_pcb.py` printed all
+  15 calibrations `FIRED`, all 9 checks `PASS`, and exited **0**, having evaluated nothing.
+  The more thorough the calibration story, the more convincing that output is.
 - **Export the netlist after every structural edit and read it.** Two separate reroutes
   silently merged nets (SCLK+SDI+~CS, then VREF10+GND) because stub endpoints share a column.
   ERC reported *a* problem but not which nets had merged; only the netlist showed that.
@@ -871,6 +905,25 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   with no existence check meant renaming the net silently removed the entire rail from the
   audit — which still printed PASS. Same flaw in the matching `.kicad_dru` rules, so DRC went
   green in lockstep. Assert the named nets are present, or key on a netclass instead.
+- **Then make the guard survive a rename, or it becomes the thing that gets deleted.** The
+  bullet above is necessary and not sufficient. A symmetry audit that hardcoded
+  `"Net-(JP1-A)" ↔ "GND"` did assert its subject, and when the net was renamed to `/sense+` it
+  correctly refused with `UNVERIFIED` rather than reporting a clean board — the guard working
+  exactly as designed. But a rename is not a design change, and a guard that demands a code
+  edit every time one happens is the guard someone eventually "fixes" by removing the
+  assertion. **Derive the name from the thing that defines it.** Those two nets are whatever
+  sits on R1 pads 2 and 3, by definition of a 4-terminal shunt:
+
+  ```python
+  pos, neg = pads["2"].GetNetname(), pads["3"].GetNetname()
+  need(pos and neg and pos != neg, "R1's Kelvin taps are unnamed or shorted")
+  SWAP[pos], SWAP[neg] = neg, pos
+  ```
+
+  Now a rename cannot unclassify anything, and the guard still fails closed on a missing part,
+  an unnamed net, or both taps on one net. Note [`PCB.md`](PCB.md)'s *derive the mirror's net
+  map from the schematic* already said this in spirit — and the implementation still hardcoded
+  strings, which is why it is worth saying as a mechanic and not only as a principle.
 - **An exemption must be scoped to the pair, not to one object.** A "package floor" that fires
   when *either* object belongs to that package is a mute button: a router-placed HV track
   0.70 mm from an exposed pad inherited a 0.60 mm package excuse and passed both DRC and the

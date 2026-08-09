@@ -2,7 +2,8 @@
 
 Companion to `SKILL.md`. **Read this file when the task involves the board** —
 `.kicad_pcb`, `.kicad_mod`, `pcbnew` scripting, DRC, zones, footprints, land
-patterns, stackup or creepage. Schematic-only work does not need it.
+patterns, stackup, creepage, surface leakage, or **fab output and release**
+("is this ready to order?"). Schematic-only work does not need it.
 
 Everything in `SKILL.md` still applies here: generate rather than hand-place,
 climb the whole verification ladder, and write guards that fail when they cannot
@@ -160,6 +161,41 @@ ratio**: it is exactly high enough to make "the table still holds" the natural a
 the one that moved fails as an `AttributeError` at the call site rather than as a wrong number,
 so it is loud when hit — but only if that branch is exercised.
 
+A **second** table, met on 10.0.5 while writing a footprint library out of a board and while
+auditing vias and zones. These were not probed against 9.0.4, so no claim is made about the
+bump — they are simply the next six that cost a round trip each:
+
+| you reach for | what happens | use |
+|---|---|---|
+| `PCB_IO_MGR.PluginFind(...)` | `AttributeError` on the class | `PCB_IO_MGR.FindPlugin(PCB_IO_MGR.KICAD_SEXP)` |
+| `io.FootprintLibCreate(path)` / `io.CreateLibrary(path)` | `AttributeError: 'PCB_IO' object has no attribute 'CreateLibrary'` | there is nothing to create — a `.pretty` **is** a directory. `os.makedirs(lib, exist_ok=True)` then `io.FootprintSave(lib, fp)` |
+| `fp.Duplicate(False, True)` | `TypeError … argument 3 of type 'BOARD_COMMIT *'` | `Duplicate(bool)` or `Duplicate(bool, BOARD_COMMIT*)`; the return is a **`BOARD_ITEM`**, so `pcbnew.Cast_to_FOOTPRINT(...)` it or the next `SetOrientationDegrees` is an `AttributeError` |
+| `via.GetWidth()` | wx assert on stderr: *"PCB_VIA::GetWidth called without a layer argument"* | `via.GetWidth(via.TopLayer())` — a via's width is now per-layer |
+| `board.GetDesignSettings().GetDefault()` | `AttributeError` | read the netclass off an item, or the `.kicad_pro` JSON |
+| `pcbnew.VIATYPE_BLIND_BURIED` | `AttributeError` — the name is not what the C++ enum suggests | enumerate `[n for n in dir(pcbnew) if n.startswith("VIATYPE_")]` and map values yourself |
+| `cc.GetNetItems(code, pcbnew.PCB_PAD_T)` | `TypeError … argument 3 of type 'std::vector< KICAD_T >'` | avoid; use `kicad-cli pcb drc`'s unconnected pairs, per the note above |
+
+**Exporting footprints out of a board into a `.pretty`** is the workflow those first three block,
+and it is worth having: it vendors a library that resolves only through some machine's global
+`fp-lib-table` at an absolute path, and it guarantees the result matches what will be
+fabricated. Reset the instance-specific state before saving, or the library carries one
+placement's baggage:
+
+```python
+io = pcbnew.PCB_IO_MGR.FindPlugin(pcbnew.PCB_IO_MGR.KICAD_SEXP)
+os.makedirs(lib, exist_ok=True)
+cp = pcbnew.Cast_to_FOOTPRINT(fp.Duplicate(False))
+cp.SetPosition(pcbnew.VECTOR2I(0, 0)); cp.SetOrientationDegrees(0)
+cp.SetReference("REF**"); cp.SetPath(pcbnew.KIID_PATH())
+for p in cp.Pads():
+    p.SetNetCode(0)                     # or the library ships this board's nets
+io.FootprintSave(lib, cp)
+```
+
+Then **read back what was written**: assert the `.kicad_mod` contains no `(net ` and has
+balanced parens, and that every footprint you meant to export produced a file. A silent
+half-export leaves a library that resolves for most parts and fails for one.
+
 A stamp is only as good as what it was probed with. The first pass at this table stamped row 3
 "unchanged on 10.0.5" having probed a single `SHAPE` subclass, and a review found the row was
 wrong for every *other* subclass — the same shape as "a record of attention with the question
@@ -292,6 +328,27 @@ zones are re-filled, so any geometric measurement afterwards is against stale co
 false negative when *calibrating* a clearance guard: tightening the rule to force a violation
 appears to do nothing, and the guard looks broken when in fact the test was.
 
+**A zone SETTING can destroy copper asymmetrically, and nothing checks settings.**
+`island_removal_mode` on a current-path plane had reverted from `NEVER` to `ALWAYS`, and with
+it went **37 mm² from one inner plane and not its mirror** — In1 856.21 mm² against In2
+825.65, a 30.56 mm² imbalance where the two had previously been bit-identical. No layout
+changed. The mechanism is the one under *A via that lands outside its pour*, one level up: a
+foreign-net via cuts a corner off both planes, then on one plane the stitching row is that
+plane's own net and re-anchors the orphan, while on the other it is a keepout — so one plane
+keeps the block and the other deletes it. DRC is silent, every geometric audit passes, and the
+decision to disable island removal was recorded in prose with nothing enforcing it.
+
+Two consequences worth carrying:
+
+- **Put zone settings in the audit, not just zone geometry.** Fill settings, pad connection
+  mode and island removal are all load-bearing and all revert invisibly — a `.kicad_pro`
+  rewrite, a GUI round-trip, or a zone copied from elsewhere.
+- **Turning island removal off trades the copper for `isolated_copper` violations** (12 of
+  them here). That is the right trade on a plane whose job is thermal — an electrically
+  orphaned island still conducts heat, and deleting 31 mm² from one side only is exactly the
+  gradient the symmetry rule exists to prevent. Resolve it with **mirrored stitching vias**,
+  never by lowering the rule's severity.
+
 - **A thermal pad wants solid copper, not thermal relief.** Zones default to
   `ZONE_CONNECTION_THERMAL`; spokes on an exposed-pad land starve exactly the
   connection the island exists to make. DRC's `starved_thermal` check catches it
@@ -414,6 +471,76 @@ raise — "0 asymmetries" out of a scan that examined nothing is the anti-monoto
 and it is very easy to write here because the happy path prints the same thing.
 
 
+## Surface leakage: measure the PATH, not the gap
+
+Clearance asks *how far apart are these two nets*. Guarding asks *is there anything at a
+harmless potential in between* — a different question with a different answer. Two nets 4 mm
+apart with open laminate between them are worse than two 0.75 mm apart with a guard trace
+interposed, because a guard absorbs the leakage and what reaches the victim is set only by the
+**guard-to-victim** potential difference.
+
+This matters wherever a high-impedance node meets a rail. The arithmetic is short: leakage
+through `R_leak` into a source impedance `R_s`, referred to the input, is `V_driver · R_s /
+R_leak`. On a 1 kΩ source with a 3.3 V rail 0.75 mm away and a flux- or humidity-degraded
+surface insulation resistance of 10⁹ Ω, that is 3.3 nA → **3.3 µV**, which on a ±35 mV
+converter is ~94 ppm — the same order as the silicon's own input-current term, and *offset*
+rather than gain, so calibration does not remove it and it moves with humidity. Clean masked
+FR4 at 10¹² Ω makes the same geometry irrelevant. **The budget therefore lives in the assembly
+process, not the layout**: say whether the board is washed, and whether it is coated.
+
+Sort the paths by what they cost you:
+
+- Leakage **inside the feedback network** (output to summing node, divider to tap) is in
+  parallel with a feedback element, so it is a **gain** error — `Rf / R_leak` — and calibrates
+  out. 100 kΩ against a contaminated 3 × 10⁹ Ω is 33 ppm, and 0.1 ppm clean.
+- Leakage **from a rail** is signal-independent, so it is an **offset**. That is the one to
+  engineer against.
+
+### Measuring it
+
+Rasterise the layer, flood-fill from the victim net through everything that is **not** guard
+copper, and report the geodesic length of the shortest surviving path to each driver net. The
+flood routes *around* the guard, which is the point — a straight line does not.
+
+Do not substitute a proxy. Sampling the straight line between two nets and reporting "what
+fraction of it is covered by guard copper" looks reasonable and is not: measured on one board
+it gave 1.170 mm where the flood-fill gave **0.72 mm**, wrong in the *optimistic* direction,
+because the line test walked tracks only while the real shortest approach was to a **pad**.
+Include pads.
+
+Fail closed, or this becomes the anti-monotone false PASS in its purest form — "nothing
+reached the victim" is exactly what a rasteriser that found no victim copper also reports:
+
+```python
+if not src:    raise SystemExit("UNVERIFIED: rasteriser found no victim copper")
+if not nguard: raise SystemExit("UNVERIFIED: rasteriser found no guard copper")
+```
+
+Report the geodesic per driver rather than a verdict, because the useful output is a
+before/after. On the board above, pushing the guard between the summing node and the rails
+moved `+5V` from 0.72 mm to **10.64 mm** and `V−` from 10.16 to 21.20 mm, while the paths that
+stayed short were all inside the feedback network — which is the correct end state, not a
+failure. Note that **no driver will ever be fully blocked**: a closed guard ring is impossible
+on the layer the victim's own traces have to leave by, so ~10 mm is the practical maximum and
+"BLOCKED" is not the target.
+
+Two corollaries that decide what to do about it:
+
+- **More copper, not less.** A guard is only a guard while it is adjacent. On a low-level
+  front end the input nodes sit within tens of millivolts of ground, so ground pour beside them
+  has ~20 mV of driving voltage against 2–5 V for the output and rails — two decades less. The
+  instinct to "keep copper away from the sensitive node" is backwards here.
+- **A driven guard usually is not worth it.** At 20 mV of signal a plain ground guard is within
+  20 mV of the victim, and its residual works out to `I · R_s / R_leak` — a fixed ppm **of
+  reading**, i.e. a gain term, 1 ppm at 10⁹ Ω and 1 ppb clean. Driven guards earn their keep at
+  gigaohm source impedances or with volts of common mode, neither of which applies.
+
+**The package usually sets the floor anyway.** Before re-routing a pin escape to buy 0.1 mm,
+measure the part's own pad-to-pad gap: on a SOT-23 divider the pads are 0.656 mm apart, so a
+trace approach of 0.512 mm was chasing a number the package had already capped. Measure pad
+copper edge to pad copper edge, not centre to centre.
+
+
 ## Isolated designs: the binding clearance is zone-to-zone, and DRC is not asked
 
 On a board with primary and secondary domains, the minimum copper-to-copper distance almost
@@ -511,3 +638,109 @@ independent geometric audit on the copy too: a bigger package usually **improves
 drop the part out of a package-exception list entirely. That is worth knowing before you argue
 for it, and worth recording after — an exception that no longer needs to exist should be
 deleted, not left standing as a precedent for the next part.
+
+### When placement refuses, enumerate — do not nudge and retry
+
+Adding one 0603 to a full board took four refusals, and each one named a *different*
+constraint: 0.670 mm into a connector's courtyard; then the only lane wide enough for that
+connector's hazard warning; then 1.550 × 1.970 mm into an isolator's courtyard; then a
+header's pin-label column, where the label could no longer be placed. Nudging after each would
+have kept finding the next one at random.
+
+Enumerate instead. Grid the region and reject a candidate that collides with **any** of:
+
+1. every footprint courtyard (`GetCourtyard(F_CrtYd).BBox()` — and assert it is non-degenerate,
+   per *An empty geometry result reads exactly like a clean one* above);
+2. **every existing `F.Silkscreen` item's bounding box** — see below;
+3. any lane a generator reserves for text it has not placed yet, such as a connector's
+   per-pin label column at `pad_x − offset`;
+4. a real margin, not zero. A 0.3 mm margin turned "fits" into "does not" on two candidates
+   that were clearing a neighbour by 0.01 mm.
+
+The output is the useful thing: on that board the entire primary side had **nine** free
+positions for one 0603, all at the same spot. That is a fact worth knowing before arguing
+about where the part should go, and it converts "find somewhere" into "there is one place".
+
+**Silkscreen is territory.** This is the non-obvious one. A placement can be geometrically
+legal, route cleanly, pass DRC — and still be wrong because it took the only lane on that side
+of the board wide enough for a hazard warning. Silk has no courtyard and DRC will not defend
+it; only a generator that *refuses when a `Silk` property fails to place* will catch it, which
+is an argument for having that check before you need it.
+
+When the part genuinely cannot go where it belongs, say so with the number that makes it
+acceptable rather than moving it quietly. A series damping resistor 18.5 mm from its connector
+instead of beside it is fine at a 10 ns edge — FR4 propagates at ~6.7 ps/mm, so that is ~250 ps
+round trip, ~2.5 % of the edge, and the resistor still damps the cable, which is the reflection
+that matters. Write the derivation down; the next reader will otherwise see only that it is in
+the wrong place.
+
+
+## Is it ready to fab? — manufacturable and final are different questions
+
+A board can be DRC-clean, parity-clean and perfectly manufacturable and still be the **wrong
+board to order**. Separate the two questions, because they have different blockers and people
+conflate them:
+
+- **Manufacturable** — can a fab build this from the data. Geometry, exports, stackup.
+- **Final** — is this the revision you want in your hand. Any pending change that lands on the
+  *fabricated artefact* is a blocker here, and that includes **silkscreen**, not just copper.
+  A missing revision marker or a dropped hazard warning is a respin exactly like a missing
+  resistor is.
+
+Everything that is neither — the BOM's MPNs, an interface contract, a schematic note's
+numbering — is an assembly or release concern. Say which bucket each finding is in when asked
+"is it ready", or the answer collapses into an unhelpful "no".
+
+### The manufacturability test is the export, not an opinion
+
+Run it. It costs seconds and it is the only check that proves the data a fab receives is
+complete:
+
+```sh
+$K pcb export gerbers --output fab  x.kicad_pcb
+$K pcb export drill   --output fab/ x.kicad_pcb
+$K sch export bom --output fab/bom.csv --group-by 'Value,Footprint,MPN' \
+     --fields 'Reference,Value,Footprint,MPN,Manufacturer,${QUANTITY}' x.kicad_sch
+$K pcb export pos --output fab/cpl.csv --format csv --units mm --side both x.kicad_pcb
+```
+
+Check every exit status **and** grep the logs — and confirm the copper layer count you expect
+actually appears, since a 4-layer board that emits two copper gerbers is a stackup problem, not
+an export problem.
+
+Then measure the handful of numbers a fab quotes against, from the board rather than from
+memory: min track width, via pad and drill, **annular ring** `(pad − drill) / 2`, min pad
+drill, board outline extent, and an explicit `(stackup …)` block.
+
+**Assert the outline is closed.** Count Edge.Cuts endpoints: every one must be shared by
+exactly two shapes. An open outline still exports a plausible `.gm1`, and the fab discovers it.
+
+```python
+pts = collections.Counter()
+for d in board.GetDrawings():
+    if board.GetLayerName(d.GetLayer()) != "Edge.Cuts": continue
+    if d.GetShape() in (pcbnew.SHAPE_T_RECT, pcbnew.SHAPE_T_CIRCLE): continue  # closed already
+    pts[k(d.GetStart())] += 1; pts[k(d.GetEnd())] += 1
+open_ends = [p for p, c in pts.items() if c != 2]
+```
+
+### The BOM trap: MPN fields live in the schematic, not the footprint
+
+Testing `footprint.HasFieldByName("MPN")` on a board reported **71 of 71 components missing an
+MPN**, which was wrong and briefly went into a review. Symbol fields do not propagate to
+footprints unless the project is configured to push them. Read MPNs from `netlist.net` or the
+schematic — the same board had 67 of 71, the exceptions being mounting holes, which need none.
+
+This is *"bounded searches lie"* in a new costume: the test returned data, the data was
+uniform, and uniformity read as a finding rather than as a broken probe. A result that
+condemns *everything* deserves the same suspicion as one that condemns nothing.
+
+While there, flag components whose Value is still a placeholder — a library name like
+`R_Small` or a bare `R` on a fitted part means nobody can build it.
+
+### Commit the outputs with the hash they came from
+
+Export, then record the board md5 alongside the gerbers, and commit both. Otherwise there is no
+way to prove later which copper is in the boards on the bench — and a board file that has been
+opened and re-saved in the GUI since the export will not match, for reasons that are pure
+reordering (see *`LoadBoard` → `Save` does not round-trip*) and therefore invisible in a diff.
