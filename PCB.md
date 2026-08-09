@@ -145,15 +145,31 @@ venv:
 ```
 
 It prints a harmless `create wxApp before calling this` assert; ignore it. API traps met in
-practice, with the name that actually works — all three confirmed on KiCad 9.0.4:
+practice, with the name that actually works — **re-probed on KiCad 10.0.5 on 2026-08-09**:
 
 | you reach for | it does not exist | use |
 |---|---|---|
-| `ZONE.SetDoNotAllowZoneFills(...)` | `AttributeError` | `ZONE.SetDoNotAllowCopperPour(...)` |
-| `LSET & LSET`, `LSET \| LSET` | `TypeError: unsupported operand type(s)` | `LSET.AddLayerSet()` / `RemoveLayerSet()` / `Contains()` |
-| `SHAPE::Collide((x, y), …)` | rejects the tuple | pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine |
-| `PAD.GetPos0()` / `SetPos0(...)` | `AttributeError` | `PAD.GetFPRelativePosition()` / `SetFPRelativePosition(...)` — and note it moves the pad's global position too, so don't "correct" that afterwards |
-| `board.GetNetsByName().get(name)` | `NETNAMES_MAP` has no `.get` | `board.FindNet(name)`, and check for `None` |
+| `ZONE.SetDoNotAllowCopperPour(...)` | `AttributeError` **on 10.0.5** | `ZONE.SetDoNotAllowZoneFills(...)` — **this pair REVERSED between 9.0.4 and 10.0.5.** On 9.0.4 it was exactly the other way round, and this table said so. Probe both names and use whichever answers; do not hard-code either. |
+| `LSET & LSET`, `LSET \| LSET` | `TypeError: unsupported operand type(s)` | `LSET.AddLayerSet()` / `RemoveLayerSet()` / `Contains()` — unchanged on 10.0.5 |
+| `SHAPE::Collide((x, y), …)` | rejects the tuple | pass a real `VECTOR2I`; `Collide(shape, clearance)` is fine — unchanged on 10.0.5 |
+| `PAD.GetPos0()` / `SetPos0(...)` | `AttributeError` | `PAD.GetFPRelativePosition()` / `SetFPRelativePosition(...)` — and note it moves the pad's global position too, so don't "correct" that afterwards. Unchanged on 10.0.5 |
+| `board.GetNetsByName().get(name)` | `NETNAMES_MAP` has no `.get` | `board.FindNet(name)`, and check for `None` — unchanged on 10.0.5 |
+
+**Four of five survived the major-version bump and one inverted, which is the worst possible
+ratio**: it is exactly high enough to make "the table still holds" the natural assumption, and
+the one that moved fails as an `AttributeError` at the call site rather than as a wrong number,
+so it is loud when hit — but only if that branch is exercised. Re-probe the table on any
+version change; it costs one script.
+
+**Probing `pcbnew` safely.** Two things will waste an hour otherwise:
+
+- **Run the probe with `python3 -u`.** A `pcbnew` call that crashes the interpreter takes
+  buffered stdout with it, and you get a bare non-zero exit with *no output at all* and no clue
+  which line died. Unbuffered, the last line printed is the line before the crash.
+- **Probe against a real `LoadBoard()`, not a synthetic object.** Constructing an orphan
+  `pcbnew.PAD(pcbnew.FOOTPRINT(board))` and calling `GetFPRelativePosition()` on it **SIGBUSes
+  the interpreter** (exit 138) on 10.0.5; the same call on a pad from a loaded board returns
+  fine. A crash while probing is not evidence that the API is missing.
 
 Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
 

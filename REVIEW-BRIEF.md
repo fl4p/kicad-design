@@ -18,7 +18,17 @@ Files: `SKILL.md` (~750 lines, schematic + shared), `PCB.md` (board side),
 
 ## Environment — verify, do not reason
 
-KiCad **9.0.4** is installed. Run things rather than recalling them:
+KiCad **10.0.5** is installed. It was **9.0.4** until 2026-08-09, and that
+upgrade silently changed observable behaviour that this skill had recorded as
+settled — one `pcbnew` call **reversed** (`PCB.md`, trap 1) and the netlist
+export format changed shape (`SKILL.md`, "The netlist export format is not
+stable across major versions"). Neither announced itself; both surfaced as
+downstream code that suddenly matched nothing.
+
+Treat every version-stamped claim in these files as **provisional**, including
+this line: check `kicad-cli --version` and `pcbnew.GetBuildVersion()` at the
+start of a session rather than trusting the number written here. Run things
+rather than recalling them:
 
 ```
 python   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3

@@ -147,6 +147,23 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   power pins; compute or bound injection current, back-powering and rail contention. Apply an
   isolator's default-state table to the voltage actually present at VCCI/VCCO — "host off" is
   not the same as "isolator side unpowered" when a separate brick still feeds it.
+- **A part that auto-detects a resource and silently falls back has moved a guard off the
+  board and onto the host — say so, in the interface contract.** The ADS1262 takes an external
+  clock, and SBAS661C §9.4.8 is explicit: *"If no external clock is detected, the ADC
+  automatically selects the internal oscillator."* No error, no flag on any pin. A cut clock
+  wire, an unfitted oscillator or an unplugged link does not stop conversions — the part keeps
+  emitting well-formed, plausible, *unsynchronised* data, and nothing in the numbers looks
+  wrong. Absence of the resource encodes "resource fine", which is the anti-monotone shape,
+  living inside the silicon where no schematic or netlist guard can reach it.
+  The schematic can still guard what it owns (is the pin on the right net, is that net
+  *driven*, does the source exist) — do all of that, it catches the build errors. But the
+  runtime case has exactly one answer: find the **status bit that reports which resource is in
+  use** (here `EXTCLK`, bit 5 of the STATUS byte), require the host to read it **on every
+  device at the start of every acquisition**, and make a run that could not confirm it
+  `unverified` rather than good. Check what *enables* that status register too — on this part
+  the byte only appears if `INTERFACE` bit 2 is set, so a host that skips it gets no error and
+  no evidence, which is the same failure one level up. Write all of this into the interface
+  contract; a host integrator cannot infer any of it from the pinout.
 - **A rail clamp is not a current sink.** For every clamp path, identify what absorbs the
   current with the receiving rail both powered and unpowered. A logic rail that normally
   consumes more than the injected current is not proof: its load may be absent, disabled or
@@ -236,6 +253,22 @@ two outputs driving each other is an error at all.
    export that instantiated nothing still exits 0 and still writes a plausible-looking file
    (827 bytes, `(nets))`, no `(comp …)` at all). "No nets look wrong" is trivially true of a
    netlist with no nets in it.
+
+   **The netlist export format is not stable across major versions.** KiCad 9 wrote it
+   compactly — `(net (code "1") (name "X")` with each `(node (ref "U1") (pin "3"))` on one
+   line. KiCad 10.0.5 pretty-prints **every token onto its own line**. Any regex written
+   against the 9.x shape — anything needing a literal space after `(net`, or `(node (ref …)
+   (pin …))` on one line — matches **nothing** against a 10.x export. Observed live: a
+   verifier that had passed all session began reporting every net "absent", and a second,
+   independent parser in the same project broke the same way in the same hour.
+
+   That failure was loud only by luck. The parser returned a near-empty dict, and it looked
+   like a failure solely because the expectations table was non-empty; with an empty table it
+   would have reported a clean pass over a file it had entirely failed to read. **A parser
+   must assert it understood its input**: count the `(net` openers and require the parsed net
+   count to equal it, and require every net to have at least one node. Then write the matcher
+   whitespace-agnostically (`\(net\s`, `\s+` between tokens) so it spans both formats — verify
+   that by parsing an old committed netlist *and* a fresh export.
 4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
    symbols drawn over their own wires, and collided labels are invisible to every CLI check.
    Keep the worksheet frame out of board renders: it plots in the same colour family as copper
@@ -520,6 +553,23 @@ numbers including package and performance grade. Verify the selected ordering co
 same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
 an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
 
+**The datasheet cannot tell you whether a part is still made, and "orderable" is a lifecycle
+question, not a document question.** A datasheet lists every ordering code the part ever had;
+discontinued ones stay on the page. TI PDN 20240530001.3 (2024-05-31) discontinued the *tube*
+part numbers across the whole ISO776x family — *"TI will no longer support the tube part
+number. The recommended replacement product is an exact replacement device shipped in large
+tape and reel."* `ISO7762DW` is Obsolete; `ISO7762DWR` is Active. Same die, same package, same
+footprint, **one letter apart**, and SLLSER1H lists both as perfectly valid devices. Checking
+the ordering code against the datasheet — which is what the paragraph above asks for — cannot
+catch this. Check **Part Status** (Active / NRND / Obsolete) and real stock at a distributor.
+
+**Never derive one MPN by copying a suffix from another, including from the design in front of
+you.** A part number proposed for a new position was built by lifting the packaging suffix off
+the incumbent part already in the schematic. Both were the obsolete tube variant: the
+incumbent string *was itself the stale one*, so the copy looked like consistency and was a
+second instance of the same bug. An existing string in the repo is evidence of what was
+ordered once, never evidence of what is orderable now.
+
 **A value is not a part until value × voltage × package has been checked together.** Each of
 the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
 was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
@@ -597,6 +647,27 @@ table. Every one of these was a real error caught by doing so:
 - **Land pattern vs stencil.** The same number appears on both pages meaning different things.
   On a TI PowerPAD the *land* page gives metal and solder-mask opening; the *stencil* page
   gives a paste aperture. Read the "EXAMPLE BOARD LAYOUT" page, not "EXAMPLE STENCIL DESIGN".
+- **A stock footprint that matches by vendor and body size can still be the wrong land.**
+  KiCad ships `Oscillator_SMD_ECS_2520MV-xxx-xx-4Pin_2.5x2.0mm`. An ECS-2033 is the same
+  vendor, the same 4-pad package, the same 2.5 × 2.0 mm body — and the wrong land:
+
+  | | ECS-2033 datasheet | KiCad `ECS_2520MV` |
+  |---|---|---|
+  | pad size | 1.10 × 0.90 | 0.80 × 0.90 |
+  | pad centres | (±0.90, ±0.70) | (±0.725, ±0.925) |
+  | pin 1, top view | bottom-left | top-left |
+
+  The stock land is the same family drawn at **90°** with pads 0.30 mm narrower, giving a
+  **negative 0.125 mm toe fillet** — the terminal hangs off the end of its own pad. That is
+  not conservative, it is unsolderable, and it passes DRC and every netlist check silently,
+  because a footprint's *identity* is never checked against the part it is assigned to.
+
+  So: **matching by name, vendor and body size is a hypothesis, not a verification.** Compare
+  **pad size, pad centres and the pin-1 corner** against the datasheet's Suggested Land
+  Pattern before accepting any stock footprint for a part it is not named after. When you must
+  generate the correct land, make the stock one the **calibration case** — the generator
+  should reproduce the stock geometry from the stock part's numbers, so you know it is
+  building lands correctly and not just building *a* land.
 - **Datasheets contradict themselves.** One part listed abs max as both 150 V and 160 V in
   different sections. Quote the conservative one and say why.
 - **Recommended operating ≠ absolute maximum.** And an absolute maximum is not a design target.
@@ -660,7 +731,7 @@ That is a real change to the board, justified by nothing electrical. Exhaust the
 above first; if you still must substitute, say plainly in the design doc that the reason was
 access, not engineering, so it can be revisited.
 
-### Reading the PDF: three failures that each cost a rework
+### Reading the PDF: four failures that each cost a rework
 
 - **Package and land drawings live at the END, after the application notes.** An agent read
   pages 1–6 of an 18-page datasheet, found no land pattern, and reported the footprint
@@ -684,6 +755,24 @@ access, not engineering, so it can be revisited.
   nominal centre. Cross-check the pairing against the pin-function table **without using
   either to derive the other** — if geometry and netlist agree independently, the mapping is
   right; if they disagree, stop rather than renumbering.
+- **The figure may be a RASTER, and then `pdftotext` returns nothing — which reads exactly
+  like "the datasheet does not specify it".** A small-vendor oscillator datasheet (ECS
+  2025/2033) has its package drawing *and* its Suggested Land Pattern as embedded images with
+  no text layer at all, so `pdftotext` yielded the parameter tables and silently dropped every
+  dimension. The first pass concluded the land pattern "could not be read out of the
+  datasheet" and shipped a footprint chosen by vendor-and-body-size instead. It was the wrong
+  land (see *A stock footprint that matches by vendor and size can still be wrong*, below).
+  `pdftocairo -svg` also gives you nothing here — there are no vectors to extract.
+
+  **Render and read it**: `pdfimages -png` (or `pdftoppm -r 300`) the page, then *look*. The
+  callouts are printed in the image and are perfectly legible at 300 dpi. Then hold the line
+  the previous bullet draws, because it is the whole difference between evidence and a guess:
+  a **dimension callout printed in the figure** is a datasheet number and may be used; a
+  length **scaled off the picture** is a model and must be labelled as one wherever it lands.
+  In the same drawing the pad dimensions were callouts (used, and they overturned the
+  footprint) while two unlabelled mechanical terminals had no callout anywhere — those were
+  scaled, recorded as "≈", and every downstream tolerance was widened by more than the
+  scaling error could be.
 
 
 ## Guards (checks, validators, audits)
