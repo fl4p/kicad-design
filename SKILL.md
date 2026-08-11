@@ -91,6 +91,36 @@ Generator hygiene, each learned the hard way:
   version.) Cost: a confident "reproducibility verified" on a board whose generator had not
   executed once. Note this applies to **your own script's** exit status; `kicad-cli`'s means
   almost nothing unless you pass `--exit-code-violations` — see *The verification ladder*.
+- **Never let a DIAGNOSTIC write the real artefact. Probe on a copy.** The generated file is
+  usually not what the API would write: `pcb_design.py`-style scripts finish with a
+  canonicalisation pass (`canonical_order(canonical_uuids(...))`) that makes the `.kicad_pcb`
+  a deterministic function of its inputs. Any ad-hoc `board.Save(PCB)` or
+  `pcbnew.SaveBoard(PCB, b)` re-serialises through pcbnew and **silently drops that pass** —
+  KiCad's own item order instead of the canonical one, and a file that no longer reproduces
+  its own md5.
+
+  Note what does *not* break, because it is the reason this is easy to miss: the **UUIDs
+  survive**. `canonical_uuids` writes uuid5-derived ids into the file and pcbnew reads them
+  back, so the damaged and repaired boards held the **same 1859 unique ids, identical set
+  hash**. Only `canonical_order` was lost. Every UUID-based check you might reach for to
+  reassure yourself will pass on the damaged file.
+
+  Cost, measured: chasing which tool was stripping a `.kicad_pro`, a probe was run in the
+  obvious form — load the board, save it, re-read the project — with its write pointed at the
+  tracked board instead of a scratch path. That took the verified `b285f321…` to
+  `d4e5fc2a…`, and the damaged blob was committed before the mistake was noticed. The
+  diagnostic answered its question correctly and destroyed the artefact it was asking about.
+
+  ```python
+  b = pcbnew.LoadBoard(str(PCB))
+  pcbnew.SaveBoard("/tmp/probe.kicad_pcb", b)   # <- scratch path, ALWAYS
+  ```
+
+  **The tell is diff size against change size.** A field edit that touched 15 lines produced a
+  **23,770-line** diff; a whole-file churn where you made a local change means the file was
+  rewritten by something other than the generator. Check `git diff --stat` on generated
+  artefacts before staging them, and re-derive the md5 you verified rather than trusting that
+  the file on disk is still the one you checked.
 - **Do not put a load-bearing check behind a bare `assert`.** `python -O` / `PYTHONOPTIMIZE=1`
   deletes every `assert` statement in the file, silently and with no message — so a generator
   invoked from a Makefile or CI wrapper that happens to set `-O` emits the same artefact with
@@ -294,6 +324,38 @@ report the effective severity of every rule, or say the severity map could not b
 and refuse to call the ERC green. (`PCB.md`'s DRC half is not exposed to this: the same board
 had 62 entries in `board.design_settings.rule_severities` — but that is luck, not structure,
 so give the DRC side the same tri-state.)
+
+**And the map can vanish without the BOARD-side sources naming the file — so "who owns
+`.kicad_pro`" is not a question you can settle by grepping the layout script.** The bullet
+above frames this as one generator rewriting another's file wholesale, which is the version
+you can find by reading code. Measured on a real project: running the **board** generator
+emptied the whole `erc` object — `rule_severities` **46 → 0**, plus `erc_exclusions`, `meta`
+and the 12×12 `pin_map`, **224 lines of JSON** — reproduced once under control, with the map
+restored to 46 immediately beforehand, KiCad closed and both `~*.lck` files gone, and observed
+emptied after earlier runs too. Nothing in the board generator or its modules references
+`kicad_pro` or `.pro`; the *schematic* generator does name it, and its `ensure_project_erc()`
+merge is correct and preserved the block every time. Each of `pcbnew.LoadBoard` +
+`SaveBoard`, `board.Save(path)`, `kicad-cli sch erc`, `kicad-cli pcb drc --schematic-parity`,
+`kicad-cli sch export netlist` and the project's own `pcbnew`-based audit **preserves** it in
+isolation. The mechanism was not identified; a settings flush on the pcbnew/`SETTINGS_MANAGER`
+path is the suspect and remains a hypothesis.
+
+**Then measure what the map is actually worth before claiming a consequence — the first
+draft of this entry got it backwards.** That map stored 20 rules at `error`, 23 at `warning`
+and 3 at `ignore`, which reads like a large loss. Compared against a shipped KiCad template,
+almost all of it restates defaults: `label_dangling` and `missing_power_pin` are **already
+`error`** without any map, and the three `ignore`s are **already ignored**. The single rule
+that genuinely deviates is `single_global_label`, which the project raises to `warning` from
+a default of `ignore` — so losing the map *re-ignores that one rule* and changes nothing
+else on this board. The direction is the opposite of the intuitive one, and you cannot know
+which without doing the comparison. That is precisely why the verdict is **`unverified`**
+rather than "green" or "disaster": absent the map you do not know the effective severities,
+and the sparse-map caveat above means you cannot infer them from the entry count either.
+
+Practical consequence, and it is cheap: **treat `.kicad_pro` as an OUTPUT of every board
+run.** `git diff --stat` it after the layout script, restore it before running ERC, and make
+the severity-map enumeration a precondition of the ERC rung rather than something checked once
+per project. Do not conclude the file is safe because no code you can find writes it.
 
 1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
 2. **ERC = 0.** Necessary, nowhere near sufficient — and see the severity-map caveat above.
@@ -645,6 +707,26 @@ incumbent string *was itself the stale one*, so the copy looked like consistency
 second instance of the same bug. An existing string in the repo is evidence of what was
 ordered once, never evidence of what is orderable now.
 
+**And the converse: purchase history is evidence of a purchase, not of stock on hand.**
+"Do I already have this part?" is not the question order history answers, and the gap is
+silent in three places. *History cannot know what was consumed* — parts bought three years
+ago went onto three years of boards. *Substring-matching a BOM value against distributor
+description strings false-PASSes* — a `\b1K\b` predicate matched `"RES 5.1K OHM 1% 1/10W
+0603"` and reported a 1 kΩ 0603 in stock that did not exist; use the parametric fields, per
+the query rule below, never the human-readable string.
+
+*And "not shipped" is usually just missing data.* 7 lines across a 14-order history read
+`QuantityShipped: 0`, which looks like cancellations and is not: all 7 sit in the four
+oldest orders (2022-09 … 2023-05), where **every** line reads 0 while the order status is
+`Shipped`, `QuantityReserved == QuantityOrdered`, and a real `InvoiceId`, UPS ship method
+and nonzero total are present — a retention cliff in `ItemShipments`, all-or-nothing per
+order and perfectly age-correlated, not four invoiced orders that never arrived. The naive
+remedy — "aggregate `QuantityShipped` instead" — is worse than the disease: it reports four
+paid orders as undelivered. This is the mirror image of the anti-monotone failure and just
+as wrong: absence of a shipment *record* is not absence of a *shipment*. When
+`ItemShipments` is empty on an old order the honest verdict is `unverified`, not zero — and
+"found in history" stays unverified until someone looks in the drawer.
+
 **A value is not a part until value × voltage × package has been checked together.** Each of
 the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
 was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
@@ -806,7 +888,7 @@ That is a real change to the board, justified by nothing electrical. Exhaust the
 above first; if you still must substitute, say plainly in the design doc that the reason was
 access, not engineering, so it can be revisited.
 
-### Reading the PDF: four failures that each cost a rework
+### Reading the PDF: five failures that each cost a rework
 
 - **Package and land drawings live at the END, after the application notes.** An agent read
   pages 1–6 of an 18-page datasheet, found no land pattern, and reported the footprint
@@ -849,6 +931,45 @@ access, not engineering, so it can be revisited.
   footprint) while two unlabelled mechanical terminals had no callout anywhere — those were
   scaled, recorded as "≈", and every downstream tolerance was widened by more than the
   scaling error could be.
+- **"The datasheet does not specify X" needs the same evidence as "it specifies X" — and the
+  row is often filed under its TEST METHOD, not under the parameter you are grepping for.**
+  The bullet above is the raster route to a false negative; this is the one that happens when
+  the text extracts perfectly.
+
+  Cost: comparing an X7R against a C0G capacitor, `grep -i "insulation resistance"` over both
+  datasheets was read as showing only a room-temperature row, and that absence was written
+  into a design doc as a load-bearing claim — *"Murata publishes only the room-temperature IR,
+  so there is no datasheet basis for saying C0G holds IR better."* A review caught it. The
+  aged limits were in the same specification table all along, on the following pages, as
+  numbered rows headed **"15 Damp heat, steady state"** and **"16 Endurance"**.
+
+  The grep failed **three different ways at once**, which is why the absence looked solid:
+  it returned 9 hits in one file and 7 in the other, so it did not look empty; the aged rows
+  name the quantity **`IR`** and **`I.R.`**, not the spelled-out phrase; and in the other
+  datasheet the extracted text splits `Insulation` and `Resistance` onto separate lines, so
+  even the initial row did not match. Grepping the abbreviation and reading the table would
+  each have caught it independently.
+
+  Two lessons, and the second is the load-bearing one:
+
+  * **Search the table vocabulary, not the parameter name.** Vendors file environmental limits
+    under `Damp heat`, `Endurance`, `Humidity`, `Life`, `High Temperature Resistance`,
+    `Temperature Cycling`, `Robustness`, or a bare `Specifications and Test Methods` grid with
+    numbered rows. Grep those too, and page through the specification table rather than
+    trusting one keyword. Same discipline as *bounded searches lie* under **Guards**: if a
+    search reports absence, verify the search could have seen the thing.
+  * **An absence claim in a document is a claim, and it will be quoted.** Prose that says the
+    vendor "does not specify" something reads as a fact the next reader will act on. Either
+    cite the pages you actually checked, or write "not found in <file>, not verified against
+    the full sheet" — never promote a failed grep to a property of the part.
+
+  The finding, worth carrying because it kills a strong intuition: **X7R and C0G specify the
+  SAME insulation resistance, initial and aged.** Samsung `CL10B104JB8NNNC` (X7R) and Murata
+  `GRM3195C1H104JA05D` (C0G) both give 500 MΩ×µF / 500 Ω·F initial, 50 Ω·F after 1000 h
+  endurance and 25 Ω·F after 500 h damp heat — identical numbers under near-identical methods
+  (1 MΩ×µF ≡ 1 Ω·F; the two vendors just use different units, which is itself enough to make
+  the pair look incomparable at a glance). At 100 nF that is 5 GΩ / 500 MΩ / 250 MΩ. "C0G
+  leaks less" is exactly the remembered fact *Never quote a spec from memory* exists to stop.
 
 
 ## Guards (checks, validators, audits)
