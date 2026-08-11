@@ -278,6 +278,22 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
 Each rung catches what the one below cannot. Climb all of it; stopping early is how
 plausible-but-wrong artefacts ship.
 
+> **Reusable helpers live in [`scripts/`](scripts/README.md)** — project-agnostic modules
+> for the tasks below: `kicad_verify.py` (ERC/DRC + severity maps, with the report-derived
+> ignore list as the primary source and `.kicad_pro` as cross-check), `kicad_netlist.py`
+> (parse an exported netlist, assert component counts), `kicad_symlib.py` (read pin
+> geometry from `.kicad_sym` instead of computing it), `kicad_repro.py` (digest-based
+> reproducibility, including the concurrent-writer case). Read
+> [`scripts/README.md`](scripts/README.md) for what each guard returns when it *cannot
+> evaluate its input* — several deliberately raise rather than pass.
+>
+> **One calibration gap, carried deliberately:** `kicad_symlib.transform_pin()` is **not
+> calibrated against KiCad**. Non-90° angles are rejected and all 12 angle/mirror cells
+> are enumerated, but nothing compares a cell's output against what KiCad actually nets
+> up, and no unit test can — the only ground truth is an exported netlist. Run
+> `calibration_plan()` in the project at hand before trusting the transform, and do not
+> treat its output as verified geometry until you have.
+
 ```sh
 K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli   # not on PATH by default
 $K sch export pdf --black-and-white -o out.pdf x.kicad_sch  # 1. does it even parse?
@@ -924,8 +940,13 @@ usable verdict signal — check the title.
 
 Mouser's `/datasheet/*.pdf` returns real headers (`200 application/pdf`,
 `content-length: 1308247`) but reading the response body yields **536 bytes of viewer HTML** —
-the PDF-viewer trap below. Use the download path, not a body read. Failing all this, the
-Mouser Search API in [`SETUP.md`](SETUP.md) needs no browser at all.
+the PDF-viewer trap below. Two routes do work from the warmed profile, both verified
+byte-identical (md5 `76311bfe…`, 1308247 B, valid 16-page datasheet, MPN present):
+`context.request.get()` with the profile's cookies, and a real `expect_download()` after
+patching `always_open_pdf_externally` into the profile prefs. Prefer `request.get()` — see
+[`SETUP.md`](SETUP.md) §3a detail 4, which also records that its "`request.get()` always
+403s" claim holds only for fingerprint-based walls like ADI's, not cookie-based ones like
+this. Failing all of it, the Mouser Search API needs no browser at all.
 
 **⚠ Every WAF here signals refusal with a 2xx in at least one configuration.** Three distinct
 false-success shapes, all of which pass `code < 400`:

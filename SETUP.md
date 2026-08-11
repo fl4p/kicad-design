@@ -312,9 +312,31 @@ Four details matter; skipping any one fails:
 3. **Navigate to a page on the *same origin* as the PDF first.** This seeds clearance
    cookies, and it is a hard requirement for step 4: a cross-origin in-page `fetch`
    **throws** rather than returning a status, so the error path below never runs.
-4. **Fetch from inside the page.** Playwright's `context.request.get()` is a separate
-   HTTP client that shares cookies but **not** the browser's TLS/HTTP2 fingerprint, and
-   still gets 403. Only an in-page `fetch()` via `page.evaluate()` gets through.
+4. **Fetch from inside the page — when the wall is fingerprint-based.** Playwright's
+   `context.request.get()` is a separate HTTP client that shares cookies but **not** the
+   browser's TLS/HTTP2 fingerprint, so against ADI/ST it still gets 403 and only an
+   in-page `fetch()` via `page.evaluate()` gets through.
+
+   **This is WAF-specific, not a general rule.** Where the clearance is carried by a
+   *cookie* rather than a fingerprint, `context.request.get()` works fine — measured on
+   Mouser with the warmed profile: `200`, 1308247 B, a valid 16-page datasheet, and
+   byte-identical to what a real download produced. So try `request.get()` first (it is
+   far simpler and streams instead of base64-ing through CDP), and fall back to the
+   in-page `fetch()` only if it 403s.
+
+   For a PDF that must land on disk, prefer a genuine download over any body read —
+   `page.goto()` on a PDF returns correct headers while the *body* is 536 bytes of
+   viewer HTML:
+
+   ```python
+   # patch the profile's Default/Preferences BEFORE launching:
+   #   plugins.always_open_pdf_externally = True
+   #   download.default_directory = <dir>, download.prompt_for_download = False
+   ctx = p.chromium.launch_persistent_context(..., accept_downloads=True)
+   with pg.expect_download(timeout=90000) as dl:
+       pg.evaluate("u => { window.location.href = u }", PDF_URL)
+   dl.value.save_as(out)          # then check %PDF magic and pdfinfo Pages
+   ```
 
 ```python
 from playwright.sync_api import sync_playwright
