@@ -31,11 +31,15 @@ was supposed to catch them fires never.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
+import sys
+import pathlib
 from pathlib import Path
 
 __all__ = [
@@ -52,6 +56,28 @@ class VerifyError(AssertionError):
     """A rung of the ladder could not be run, or its result cannot be trusted."""
 
 
+def _read_utf8(path, err_cls):
+    """Read a KiCad text file as UTF-8, STRICTLY.
+
+    KiCad writes UTF-8 on every platform. `Path.read_text()` without an
+    encoding uses `locale.getpreferredencoding()`, which on a typical Windows
+    host is cp1252 -- so `10 uF +-10%` written as UTF-8 comes back as mojibake
+    ("10 AuF A+-10%"), and `errors="replace"` guarantees that happens SILENTLY.
+    A guard comparing such a value then mismatches for a reason nothing
+    reports. Decode strictly and raise: undecodable input is unreadable input,
+    not input that happens to contain replacement characters.
+    """
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise err_cls(
+            "%s is not valid UTF-8 at byte %d (%s). KiCad writes UTF-8; a file "
+            "that does not decode is unreadable, not partially readable."
+            % (path, e.start, e.reason))
+    except OSError as e:
+        raise err_cls("cannot read %s: %s" % (path, e))
+
+
 #: Rules observed at ``ignore`` in KiCad's own built-in defaults. Provenance:
 #: measured on KiCad 9.0.4 during the review that produced this module. These
 #: are *stock* defaults, which is precisely why diffing a project's map against
@@ -64,21 +90,55 @@ KNOWN_STOCK_IGNORES = (
     "single_global_label",
 )
 
-_CANDIDATE_CLI = (
-    "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
-    "/usr/bin/kicad-cli",
-    "/usr/local/bin/kicad-cli",
-)
+def _version_key(path):
+    """Sort key that orders 10.0 ABOVE 9.0.
+
+    Reverse *lexical* sorting gives 9.0, 8.0, 10.0 and picks an old install.
+    """
+    import re as _re
+    return [int(x) for x in _re.findall(r"\d+", str(path))] or [0]
+
+
+def _candidate_clis():
+    """Well-known install locations, per platform.
+
+    `shutil.which` is tried first and handles PATHEXT on Windows, but KiCad's
+    Windows installer does not put its bin directory on PATH, so the glob
+    below is what actually finds it there.
+    """
+    if sys.platform == "darwin":
+        return ["/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"]
+    if os.name == "nt":
+        out = []
+        for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     os.environ.get("ProgramFiles(x86)", "")):
+            if base:
+                out += [str(q) for q in
+                        sorted(Path(base).glob("KiCad/*/bin/kicad-cli.exe"),
+                               key=_version_key, reverse=True)]
+        return out
+    # NOTE: the Flatpak GUI export (org.kicad.KiCad) is NOT kicad-cli; the
+    # real invocation is `flatpak run --command=kicad-cli org.kicad.KiCad`,
+    # which this discovery cannot express as a single path. Pass it via the
+    # `cli` argument if you use Flatpak.
+    return ["/usr/bin/kicad-cli", "/usr/local/bin/kicad-cli",
+            "/snap/bin/kicad.kicad-cli"]
 
 
 def _is_kicad_cli(path):
     """Prove the thing at `path` really is kicad-cli, not just a file."""
     p = Path(path)
-    if not (p.is_file() and os.access(p, os.X_OK)):
+    # os.access(X_OK) is meaningless on Windows (it reports True for any
+    # existing file), which is why identity is proved by running --version
+    # below rather than by the mode bits.
+    if not p.is_file():
+        return False
+    if os.name != "nt" and not os.access(p, os.X_OK):
         return False
     try:
         out = subprocess.run([str(p), "--version"], capture_output=True,
-                             text=True, timeout=20)
+                             text=True, encoding="utf-8",
+                             errors="replace", timeout=20)
     except (OSError, subprocess.SubprocessError):
         return False
     return out.returncode == 0 and bool(
@@ -100,13 +160,14 @@ def find_kicad_cli(explicit=None):
     onpath = shutil.which("kicad-cli")
     if onpath and _is_kicad_cli(onpath):
         return onpath
-    for c in _CANDIDATE_CLI:
+    for c in _candidate_clis():
         if _is_kicad_cli(c):
             return c
     raise VerifyError(
-        "kicad-cli not found. Pass its path explicitly; on macOS it lives at "
-        "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli and is NOT on "
-        "PATH.")
+        "kicad-cli not found on PATH or at any known install location for "
+        "%s. Pass its path explicitly. (macOS: inside KiCad.app/Contents/"
+        "MacOS; Windows: Program Files\\KiCad\\<ver>\\bin\\kicad-cli.exe -- "
+        "neither is on PATH by default.)" % sys.platform)
 
 
 #: DRC writes "** Found N unconnected pads **"; ERC writes
@@ -126,7 +187,7 @@ def _counts_from_report(path, kind=None):
     p = Path(path)
     if not p.exists():
         raise VerifyError("report %s was not written" % p)
-    txt = p.read_text(errors="replace")
+    txt = _read_utf8(p, VerifyError)
 
     found = {}
     for m in _COUNT_DRC.finditer(txt):
@@ -197,7 +258,7 @@ def ignored_checks_from_report(path):
     p = Path(path)
     if not p.exists():
         raise VerifyError("report %s was not written" % p)
-    lines = p.read_text(errors="replace").splitlines()
+    lines = _read_utf8(p, VerifyError).splitlines()
     idx = next((i for i, ln in enumerate(lines)
                 if _IGNORED_HDR.search(ln.rstrip())), None)
     if idx is None:
@@ -213,7 +274,8 @@ def ignored_checks_from_report(path):
 
 
 def _run(cmd):
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -297,7 +359,7 @@ def severity_report(kicad_pro):
     if not p.exists():
         raise VerifyError("%s does not exist" % p)
     try:
-        pro = json.loads(p.read_text())
+        pro = json.loads(_read_utf8(p, VerifyError).lstrip("\ufeff"))
     except json.JSONDecodeError as e:
         raise VerifyError("%s is not valid JSON: %s" % (p, e))
 
@@ -368,9 +430,11 @@ if __name__ == "__main__":
         print("  !!", sev["note"])
 
     bad = sev["state"] == "unverified"
+    tmp = tempfile.mkdtemp(prefix="kicad_verify_")
+    atexit.register(shutil.rmtree, tmp, True)   # success AND exception paths
     for label, art, runner, rpt in (
-            ("ERC", sch, run_erc, "/tmp/_erc.rpt"),
-            ("DRC", pcb, run_drc, "/tmp/_drc.rpt")):
+            ("ERC", sch, run_erc, str(Path(tmp) / "erc.rpt")),
+            ("DRC", pcb, run_drc, str(Path(tmp) / "drc.rpt"))):
         if not art.exists():
             print("%s: %s missing -- UNVERIFIED" % (label, art.name))
             bad = True

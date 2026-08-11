@@ -140,6 +140,49 @@ Everything the second review left open has since been fixed and re-verified:
 - **Node refs are cross-checked** against the component list, and a pin on two
   nets is rejected.
 
+### Round four — portability, and a parser bug it exposed
+
+Asked whether these ran on Linux/Windows, the answer was no. Four breaks, one
+of them silent:
+
+- **Every text read used the locale encoding.** `read_text()` without
+  `encoding=` uses `locale.getpreferredencoding()` — UTF-8 on macOS/Linux,
+  typically **cp1252 on Windows**. KiCad writes UTF-8 everywhere, so
+  `10 µF ±10%` would arrive as `10 ÂµF Â±10%`, and `errors="replace"`
+  guaranteed it could never raise. All reads now go through `_read_utf8()`,
+  which decodes strictly and raises with the byte offset.
+- `kicad-cli` discovery was macOS/Linux only, and reverse *lexical* sorting
+  ordered `9.0` above `10.0`, picking an old install. Now per-platform with a
+  numeric version key. The Flatpak GUI export is **not** `kicad-cli`
+  (`flatpak run --command=kicad-cli org.kicad.KiCad` is), so it is documented
+  rather than offered as a path.
+- `library_stats()` had the same two defects, plus a missing
+  `ProgramFiles(x86)`; a `KICAD_SYMBOL_DIR` override was added.
+- `/tmp/...` was hardcoded, and `mkdtemp()` leaked on both success and
+  exception paths (two stale directories were found). Now `tempfile` plus
+  `atexit`.
+
+**The parser bug the portability review turned up is the important one.** The
+paren walkers respected string literals, but the `finditer` that *locates
+candidate openers* did not. A netlist containing
+
+```
+(value "Exposed pad is FLOATING (net TPAD), not ground")
+```
+
+counted a phantom `(net ` opener and failed to parse — **two real project
+netlists were affected**. Opener scans now run over `_mask_strings()`, which
+blanks quoted contents while preserving offsets.
+
+Also: BOM-prefixed `.kicad_pro` is tolerated (RFC 8259 §8.1 lets parsers ignore
+it), `subprocess` output is decoded as UTF-8 rather than by locale, and a
+non-existent body style is rejected instead of returning `[]`.
+
+Independently swept during that review: all 223 stock libraries and all 212
+KiCad artifacts under `~/dev` (60 PCB, 53 project, 72 schematic, 15 symbol,
+3 netlist, 9 report) decode as strict UTF-8 — zero invalid, zero BOMs, three
+CRLF. So strict decoding is sound for modern KiCad, not an overshoot.
+
 ## Remaining limitation
 
 One, and it is a property of the approach rather than a bug:
