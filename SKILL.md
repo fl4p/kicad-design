@@ -885,25 +885,39 @@ because the TLS/HTTP2 fingerprint is wrong too. You need a real browser *and* a 
 **First: identify the WAF, because the rung that works differs per vendor.** One `curl -I`
 tells you. Measured 2026-08-11 across ~30 vendor/distributor hosts:
 
-| `server:` header | WAF | vendors seen | what it keys on | cheapest rung |
-|---|---|---|---|---|
-| `AkamaiGHost` | Akamai Bot Manager | ADI, ST, Microchip, TDK, Toshiba, Littelfuse, Panasonic, Omron | UA token **and** TLS/HTTP2 fingerprint | browser, non-`HeadlessChrome` UA |
-| `cloudflare` (+ `cf-ray`) | Cloudflare | Diodes, TME, DigiKey, SnapEDA, componentsearchengine, Bourns, Renesas | UA↔fetch-metadata *coherence* | `curl` + 2 headers |
-| `CloudFront` (+ `x-amzn-waf-action`) | AWS WAF Bot Control | Infineon | UA token only | `curl` + UA |
+| cheapest rung that works | hosts | signature of the block |
+|---|---|---|
+| **`curl` + realistic UA** | Infineon (`CloudFront`/AWS WAF), ROHM | `202` + `x-amzn-waf-action` / plain `403` |
+| **`curl` + UA + `Sec-Fetch-Mode: navigate`** | Diodes, DigiKey, SnapEDA, componentsearchengine, TME, Bourns (all `cloudflare` + `cf-ray`) | `403` |
+| **any browser** (default headless is enough) | Nexperia | `200` titled *"Challenge Validation"* — a JS challenge no `curl` header set can satisfy |
+| **browser + non-`HeadlessChrome` UA** | ADI, ST (`AkamaiGHost`) | connection dropped after TLS; `403` w/ `errors.edgesuite.net` |
+| **none found** | Mouser (`AkamaiGHost`) | `200` titled *"Access to this page has been denied"* |
 
-**⚠ AWS WAF's block is an HTTP `202`, which naive code reads as success.** The challenge
-response is `202 Accepted`, `server: CloudFront`, `x-amzn-waf-action: challenge`, and a
-**zero-byte body**. Any fetcher whose check is `if code >= 400: fail` — or `resp.ok`, or
-`curl -f` — treats that as a successful download of an empty file. Gate on
-`x-amzn-waf-action` absence, a `%PDF` magic check and a nonzero length, never on the status
-code alone. Measured on Infineon: bare `curl` → `202`/0 B; `curl -A '<Chrome UA>'` →
-`200`/1074169 B, a valid 11-page datasheet.
+`server:` identifies the vendor's WAF but **does not predict the rung** — Mouser and ADI are
+both `AkamaiGHost`, yet one yields to a browser and the other resisted every rung tried
+(headless, headed-ephemeral, headed-persistent), including on `/datasheet/*.pdf`. For Mouser,
+use the Search API in [`SETUP.md`](SETUP.md) instead of fetching pages.
 
-**AWS WAF keys on the UA token alone — no browser needed.** UA-only `curl` → 200 (5/5);
-`Sec-Fetch-Mode: navigate` with curl's own UA → still 202; a `HeadlessChrome` UA → still 202.
-So it shares Akamai's token sensitivity but not Akamai's fingerprint requirement. Note also
-that Infineon's **asset path is behind the same wall** — `/dgdl/*.pdf` 202s on bare `curl` —
-so the §3 asset-host shortcut does *not* apply to every vendor.
+**⚠ Every WAF here signals refusal with a 2xx in at least one configuration.** Three distinct
+false-success shapes, all of which pass `code < 400`:
+
+| shape | host | length | caught by |
+|---|---|---|---|
+| `202` + **zero-byte** body | Infineon | 0 B | length check, or `x-amzn-waf-action` header |
+| `200` + full HTML deny page | Mouser | 18681 B | **title only** |
+| `200` + JS-challenge page | Nexperia | 1911 B | **title only** |
+
+Two of the three survive a nonzero-length check, so gate on **content**: `%PDF` magic for a
+PDF, and the `<title>` for HTML. Do not keyword-sweep the body — `www.bourns.com` scores 16
+hits for "captcha" on its *legitimate* homepage, from an embedded Telerik `RadCaptcha` contact
+form. A body keyword grep would have wrongly condemned a working host.
+
+**AWS WAF (Infineon) keys on the UA token alone — no browser needed.** UA-only `curl` → 200
+(5/5), and a valid 11-page 1074169 B datasheet from `/dgdl/*.pdf`; `Sec-Fetch-Mode: navigate`
+with curl's own UA → still 202; a `HeadlessChrome` UA → still 202 (3/3). So it shares Akamai's
+token sensitivity but not Akamai's fingerprint requirement. Note that Infineon's **asset path
+is behind the same wall** — `/dgdl/*.pdf` 202s on bare `curl` — so the §3 asset-host shortcut
+is vendor-specific, not a general escape.
 
 **Cloudflare's discriminator is the opposite of Akamai's, and it is cheaper to satisfy.**
 Measured on `www.diodes.com` (403 to bare `curl`, 5/5 reproducible):

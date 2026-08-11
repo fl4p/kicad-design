@@ -90,7 +90,14 @@ Vendor reachability is per-IP, per-date and per-WAF-ruleset. Treat any list of "
 vendors" as an example of the *pattern*, not a status table — always run check 2
 yourself. Observed once, from one residential IP in 2026-08: Analog Devices and ST
 showed the fingerprint-rejection signature; onsemi returned a plain 403 to curl but
-loaded fine in a browser; TI, Mouser, Farnell and Vishay were fine on plain curl.
+loaded fine in a browser; TI, Farnell and Vishay were fine on plain curl.
+
+That volatility is not hypothetical: **Mouser was recorded here as "fine on plain curl"
+and is now the single hardest host measured** (2026-08-11) — bare `curl` is dropped, and a
+UA-corrected `curl` gets a `200` carrying an "Access to this page has been denied" page.
+It stayed 403 at every browser rung including a headed persistent profile, and its
+`/datasheet/*.pdf` path serves the same deny page. **Do not scrape `www.mouser.com`; use
+the Mouser Search API below**, for which a key is already provisioned.
 
 ### macOS TCC can block LOCAL files, not just vendors
 
