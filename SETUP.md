@@ -31,6 +31,9 @@ ls <datasheet-dir>/ | grep -i <part-family>
 #    redirect all look like success here, and 3 explains that the host that matters
 #    is the ASSET host (mds.analog.com), not www.  Proving you can fetch a datasheet
 #    means fetching a known PDF URL and running it through 4's validation.
+# Identify the WAF first -- the fix differs. `server: cloudflare` + `cf-ray` => Cloudflare,
+# which usually yields to two curl headers (SKILL.md); `AkamaiGHost` => Akamai, which needs a
+# browser with a non-HeadlessChrome UA.  curl -I https://<host>/ | grep -iE 'server|cf-ray'
 for h in www.analog.com www.ti.com www.st.com www.onsemi.com www.vishay.com; do
   printf "%-22s " "$h"
   curl -sS -o /dev/null -w "http=%{http_code} t=%{time_total}s\n" --max-time 12 "https://$h/"

@@ -882,9 +882,40 @@ Two consequences worth internalising:
 Rung 1 failing while rung 3 succeeds is the useful shape: a Chrome UA on `curl` is not enough,
 because the TLS/HTTP2 fingerprint is wrong too. You need a real browser *and* a real UA.
 
-This is a gradient, not a binary — other vendors and other WAFs (Cloudflare in particular,
-which is **not** what ADI/ST run and has not been measured here) may need rungs the ADI/ST
-pair never exercised. Record the rung and the exact URL with any reachability claim.
+**First: identify the WAF, because the rung that works differs per vendor.** One `curl -I`
+tells you — `server: cloudflare` plus a `cf-ray` header means Cloudflare, `server: AkamaiGHost`
+means Akamai. Measured 2026-08-11 across 20 vendor/distributor hosts: Akamai on ADI, ST,
+Microchip, TDK, Toshiba; **Cloudflare on Diodes Inc, TME, DigiKey, SnapEDA,
+componentsearchengine, Renesas**; CloudFront on Infineon.
+
+**Cloudflare's discriminator is the opposite of Akamai's, and it is cheaper to satisfy.**
+Measured on `www.diodes.com` (403 to bare `curl`, 5/5 reproducible):
+
+| attempt | result |
+|---|---|
+| bare `curl` | 403 |
+| `curl -A '<Chrome UA>'` | 403 |
+| `curl -A '<Chrome UA>'` + `Accept` + `Accept-Language` + `Accept-Encoding` | 403 |
+| `Sec-Fetch-*` headers, no UA | 403 |
+| `sec-ch-ua` client hints, no UA | 403 |
+| **`curl -A '<Chrome UA>' -H 'Sec-Fetch-Mode: navigate'`** | **200** (5/5) |
+| `curl` default UA + `Sec-Fetch-Mode: navigate` | 403 |
+
+So Cloudflare wants **coherence**: a UA claiming to be Chrome must also send the
+fetch-metadata a real Chrome sends. Neither half alone suffices. That two-header `curl` also
+returned 200 on DigiKey, SnapEDA and componentsearchengine, and unblocked TME (to a 302) —
+**no browser needed at any of them**. Conversely a *default headless* browser, `HeadlessChrome`
+token and all, sails through Cloudflare — the exact rung that Akamai rejects. Do not carry the
+Akamai fix to a Cloudflare host or vice versa; check `server:` first.
+
+**And check the asset path before any of this** (§3 in [`SETUP.md`](SETUP.md)): `www.diodes.com`
+403s on its homepage while `www.diodes.com/assets/Datasheets/*.pdf` returns **200 to a bare
+`curl` with no UA and no headers at all** — verified byte-identical (md5 `19c4010e…`, 602814 B,
+8 pages) to the library copy of `DMTH83M2SPSWQ`. A Cloudflare-fronted host can leave its
+document tree wide open.
+
+This is a gradient, not a binary, and the ladder is per-WAF. Record the WAF, the rung and the
+exact URL with any reachability claim.
 
 If you do need a **headed** browser, use a throwaway profile that forces PDFs to download
 instead of opening in the built-in viewer — never the user's live profile:
