@@ -178,6 +178,23 @@ Response root is `manufacturerPartNumberSearchReturn`, or `keywordSearchReturn` 
 `GET /products/v4/search/<MPN>/productdetails` with `Authorization: Bearer …` and
 `X-DIGIKEY-Client-Id`. No callback port, no token store, ~40 lines of `urllib`.
 
+**That two-legged shortcut covers `products/*`, not the account-scoped APIs.** Order
+history at `GET /orderstatus/v4/orders` needs a **three-legged** token, so there is a
+callback and there is a token store. (`/mylists/v1/lists` is presumably the same, but
+two-legged returns a 401 with an *empty body* there, which cannot distinguish "needs
+three-legged" from "not subscribed" — inferred, not measured.) Two traps:
+
+- **Refreshing ROTATES the refresh token and invalidates the old one** — verified by
+  replaying a rotated token: `401 "Invalid RefreshToken"`. If another tool on the
+  machine owns that token store, a refresh you did in passing silently breaks it.
+  Write the new token back to the store you read it from, in the same format, or do
+  not refresh at all.
+- **The two token flows have very different lifetimes and neither is labelled.**
+  Three-legged access token `expires_in: 1798` (~30 min); two-legged
+  `client_credentials` `expires_in: 599` (10 min), measured on three apps; refresh
+  token `7775999` (90 d). A long session hits `401` mid-batch — refresh and retry
+  rather than reading it as a bad key.
+
 ### Failures that do not look like failures
 
 - **Mouser returns HTTP 200 with a populated `Errors[]`.** `Invalid unique identifier`
@@ -191,8 +208,41 @@ Response root is `manufacturerPartNumberSearchReturn`, or `keywordSearchReturn` 
   start around 1 call/s and back off on 403 rather than concluding the key is bad.
 - **DigiKey rate limits per key** — watch the `X-RateLimit-Remaining` header and back
   off; several registered apps can be rotated.
+- **DigiKey `401 "Invalid Client-Id / You are not subscribed to this API"` is a
+  SUBSCRIPTION failure wearing an auth error.** The credentials are fine; the
+  registered app simply is not subscribed to that API *product* in the developer
+  portal. Measured: identical 401 from all three registered apps on the whole v3
+  `OrderDetails` product (`/History` *and* `/Status/{id}`), while the same tokens
+  returned 200 on `products/v4/search`, and the one app holding a three-legged token
+  returned 200 on `orderstatus/v4/orders`. Rotating keys will never fix it — subscribe
+  the app, or find the API version that is subscribed. Same shape as the Mouser bullet
+  above: read the *body*, and let a success elsewhere on the same token tell you the
+  key is not the problem. **The wording varies, which is what makes it misreadable:**
+  the same underlying failure also appears as `401 "Invalid clientId.
+  X-DIGIKEY-Client-Id invalid for requested resource"` (an app not subscribed to
+  `orderstatus/v4`) and as `400 "Invalid Account ID / Account ID must not be 0"` (an
+  app that *is* subscribed, handed a two-legged token). Three wordings, one question:
+  is this key, token type, or subscription?
+- **`orderstatus/v4/orders` silently truncates when you omit `startDate`/`endDate`.**
+  No dates returned **1** order; `startDate=2020-01-01&endDate=<today>` returned **14**.
+  Not a page-size default either — `limit=100` and `pageSize=100` still return 1. The
+  window is undocumented and one account's data could not bound it tighter than "under
+  a year", so **do not write a number here**; explicit windows of 30/45/60/90/120/180 d
+  all returned 1 and 365 d returned 4. Nothing in the response says it truncated: the
+  anti-monotone shape, where a date-less query looks like a complete answer. Always send
+  an explicit range and state the range you used.
 - **Distributor parametric rows can be wrong.** Use the API to resolve MPNs, stock and
   datasheet URLs; take *specifications* from the PDF.
+- **A malformed DigiKey parametric filter is IGNORED, not rejected — HTTP 200 with the
+  UNFILTERED list.** `FilterOptionsRequest.ParameterFilterRequests` was silently
+  dropped in every form tried (inside/outside `FilterOptionsRequest`, `Id` vs
+  `ValueId`, string vs int): `ProductsCount` stayed at the unfiltered 875126 and
+  `AppliedParametricFiltersDto` stayed `[]`, while `ManufacturerFilter` and
+  `MinimumQuantityAvailable` in the *same* object worked. So "here are the 100 nF C0G
+  0603 parts" can silently be the top of the whole catalogue — X7R 0402s. **Assert
+  `AppliedParametricFiltersDto` is non-empty and `ProductsCount` actually dropped**, or
+  your parametric query did nothing. Without that assertion the query prescribed in
+  SKILL.md § BOM is a mute button.
 
 ---
 
@@ -222,14 +272,14 @@ any reachability claim.
 that forces PDFs to download). Use that when you just need the file. Use the snippet
 below when a script has to fetch and check many PDFs unattended.
 
-Note the apparent conflict: `SKILL.md` says *"a headless browser does not help"*. That
-is about **default headless Chromium**, whose UA advertises `HeadlessChrome`. **Headed
-real Chrome with a persistent profile** is a different fingerprint and does work.
-
 Four details matter; skipping any one fails:
 
 1. **`channel="chrome"`** — real Chrome, not bundled Chromium.
-2. **`launch_persistent_context(...)` with `headless=False`.**
+2. **A User-Agent without the `HeadlessChrome` token.** Either run headed, or stay
+   headless and pass `user_agent=` — measured equivalent against ADI and ST, see the
+   ladder in `SKILL.md`. `headless=True` with a corrected UA is the cheapest rung that
+   works and the only one that survives SSH and CI; the persistent profile and
+   `headless=False` below are the belt-and-braces version, not a requirement.
 3. **Navigate to a page on the *same origin* as the PDF first.** This seeds clearance
    cookies, and it is a hard requirement for step 4: a cross-origin in-page `fetch`
    **throws** rather than returning a status, so the error path below never runs.
@@ -275,6 +325,7 @@ with sync_playwright() as p:
 
 Verified end-to-end against a WAF-blocked vendor: the fetched file was byte-identical
 (same MD5, 2042809 bytes, 23 pages) to a copy downloaded by hand in a normal browser.
+The headless rung-3 variant returns that same 2042809-byte file.
 The base64 round-trip through CDP is slow on large files — a 20 MB datasheet can look
 hung for tens of seconds.
 

@@ -853,16 +853,41 @@ HTTP/1.1 and gets `INTERNAL_ERROR` on HTTP/2, while a browser gets a 403 whose b
 `errors.edgesuite.net` reference. Handshake success rules out certs, network and auth — the
 WAF is dropping you on fingerprint.
 
-**A *default* headless browser does not help — a real one does.** The distinction is
-`channel="chrome"` driving the installed Chrome, and [`SETUP.md`](SETUP.md) has the working
-recipe plus the preflight that proves it is available on this machine; do not read the
-paragraph below as "browsers are useless here". Playwright's default Chrome advertises
-`HeadlessChrome/<version>` in its User-Agent and Akamai 403s on that token alone —
-`navigator.webdriver` was already `false`, so stealth patches miss the point. Verified against
-both a product page and the direct `…/media/…/*.pdf` path: 403 on each.
+**Akamai 403s on the `HeadlessChrome` UA token alone. Overriding the token is the entire
+fix** — climb the escalation ladder from the cheap end and stop at the first rung that
+returns 200. Measured 2026-08-11 against `www.analog.com` (ADP7118, 2042809 B) and
+`www.st.com` (L78, 3251121 B), all browser rungs using `channel="chrome"` plus the
+same-origin-nav + in-page-`fetch()` recipe in [`SETUP.md`](SETUP.md) §3a:
 
-What works is a **headed** browser with a throwaway profile that forces PDFs to download
-instead of opening in the built-in viewer:
+| rung | ADI | ST |
+|---|---|---|
+| 0. plain `curl` | dropped | dropped |
+| 1. `curl -A '<Chrome UA>'` | dropped | dropped |
+| 2. headless, default flags | 403 | homepage won't even load (`ERR_HTTP2_PROTOCOL_ERROR`) |
+| **3. headless + `user_agent=` override** | **200** | **200** |
+| 4. headed, ephemeral profile | 200 | — |
+| 5. headed, persistent dedicated profile | 200 | — |
+
+Two consequences worth internalising:
+
+- **Headless is fine.** Rung 3 returns the byte-identical file that §3a documents obtaining
+  headed-with-a-profile. Rungs 4 and 5 buy nothing here, and they cost a display — they break
+  over SSH and in CI. Prefer rung 3 and escalate only on an actual failure.
+- **`navigator.webdriver` is a red herring.** It is `true` by default (not `false`, as this
+  file previously claimed) and `--disable-blink-features=AutomationControlled` does flip it to
+  `false` — but that flag *alone*, with the UA left untouched, still 403s, while a UA override
+  *alone*, with `webdriver` still `true`, gets 200. Akamai is not reading it. Don't spend
+  effort on stealth patches before fixing the UA.
+
+Rung 1 failing while rung 3 succeeds is the useful shape: a Chrome UA on `curl` is not enough,
+because the TLS/HTTP2 fingerprint is wrong too. You need a real browser *and* a real UA.
+
+This is a gradient, not a binary — other vendors and other WAFs (Cloudflare in particular,
+which is **not** what ADI/ST run and has not been measured here) may need rungs the ADI/ST
+pair never exercised. Record the rung and the exact URL with any reachability claim.
+
+If you do need a **headed** browser, use a throwaway profile that forces PDFs to download
+instead of opening in the built-in viewer — never the user's live profile:
 
 ```sh
 P=/tmp/dl-profile; D=/tmp/dl; rm -rf $P $D; mkdir -p $P/Default $D
