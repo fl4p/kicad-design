@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""Run the KiCad verification ladder so that a PASS means something.
+
+Project-agnostic. Nothing here knows about any particular board.
+
+The two false PASSes this exists to close
+-----------------------------------------
+1.  **``--exit-code-violations`` is not optional.** Without it,
+    ``kicad-cli sch erc`` and ``pcb drc`` write every violation into the report
+    and then **exit 0**. Measured: a board carrying 175 DRC violations exits 0
+    bare and 5 with the flag. A CI step, a ``set -e`` script, or an agent that
+    "asserted the exit status is 0" passes a board it never checked. This
+    module always passes the flag *and* independently parses the counts out of
+    the report, so neither alone is load-bearing.
+
+2.  **"ERC = 0" is a statement about the severity map as much as the
+    schematic.** ``.kicad_pro`` carries ``erc.rule_severities``; a rule set to
+    ``ignore`` is not resurrected by ``--severity-all``. Worse, that map is
+    **sparse and frequently absent entirely** -- measured across four real
+    projects: 0, 0, 33 and 44 entries. Enumerating ``ignore``s over a missing
+    map yields ``[]``, which reports "no rules are ignored" at the exact moment
+    you know least, while KiCad's built-in defaults are fully in force.
+
+    So :func:`severity_report` is **tri-state**. A missing or empty map is
+    ``UNVERIFIED``, never clean.
+
+Do not lead with "diff against defaults": the rules most likely to bite are
+themselves stock defaults, so a diff reports no difference and the check that
+was supposed to catch them fires never.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+__all__ = [
+    "VerifyError",
+    "find_kicad_cli",
+    "run_erc",
+    "run_drc",
+    "severity_report",
+    "KNOWN_STOCK_IGNORES",
+]
+
+
+class VerifyError(AssertionError):
+    """A rung of the ladder could not be run, or its result cannot be trusted."""
+
+
+#: Rules observed at ``ignore`` in KiCad's own built-in defaults. Provenance:
+#: measured on KiCad 9.0.4 during the review that produced this module. These
+#: are *stock* defaults, which is precisely why diffing a project's map against
+#: defaults does not surface them. **Re-verify against your KiCad version**
+#: before relying on the list; it is a prompt to look, not an authority.
+KNOWN_STOCK_IGNORES = (
+    "footprint_filter",
+    "four_way_junction",
+    "simulation_model_issue",
+    "single_global_label",
+)
+
+_CANDIDATE_CLI = (
+    "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+    "/usr/bin/kicad-cli",
+    "/usr/local/bin/kicad-cli",
+)
+
+
+def _is_kicad_cli(path):
+    """Prove the thing at `path` really is kicad-cli, not just a file."""
+    p = Path(path)
+    if not (p.is_file() and os.access(p, os.X_OK)):
+        return False
+    try:
+        out = subprocess.run([str(p), "--version"], capture_output=True,
+                             text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and bool(
+        re.search(r"\d+\.\d+", (out.stdout or "") + (out.stderr or "")))
+
+
+def find_kicad_cli(explicit=None):
+    """Locate `kicad-cli`. It is not on PATH by default on macOS.
+
+    Existence is not identity: the previous version accepted any path that
+    existed, including a README.
+    """
+    if explicit:
+        if not _is_kicad_cli(explicit):
+            raise VerifyError(
+                "%s is not a runnable kicad-cli (--version did not report a "
+                "version)" % explicit)
+        return explicit
+    onpath = shutil.which("kicad-cli")
+    if onpath and _is_kicad_cli(onpath):
+        return onpath
+    for c in _CANDIDATE_CLI:
+        if _is_kicad_cli(c):
+            return c
+    raise VerifyError(
+        "kicad-cli not found. Pass its path explicitly; on macOS it lives at "
+        "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli and is NOT on "
+        "PATH.")
+
+
+#: DRC writes "** Found N unconnected pads **"; ERC writes
+#: "** ERC messages: N  Errors N  Warnings N". Both shapes must parse, and a
+#: file matching NEITHER must raise -- "I found no violation lines" is not the
+#: same as "there are no violations".
+_COUNT_DRC = re.compile(r"\*\*\s*Found\s+(\d+)\s+(.+?)\s*\*\*", re.I)
+_COUNT_ERC = re.compile(
+    r"ERC messages:\s*(\d+)\s+Errors\s+(\d+)\s+Warnings\s+(\d+)", re.I)
+
+
+def _counts_from_report(path, kind=None):
+    """Parse the violation counts out of an ERC or DRC report.
+
+    Returns {label: count}. Raises when neither shape is present.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise VerifyError("report %s was not written" % p)
+    txt = p.read_text(errors="replace")
+
+    found = {}
+    for m in _COUNT_DRC.finditer(txt):
+        label = m.group(2).strip().lower()
+        if label in found and found[label] != int(m.group(1)):
+            raise VerifyError(
+                "%s reports '%s' twice with different counts (%d then %d) -- "
+                "a dict comprehension would keep the last and could turn a "
+                "real violation count into 0" % (p, label, found[label],
+                                                 int(m.group(1))))
+        found[label] = int(m.group(1))
+    # finditer, not search: a report carrying two ERC summaries (a stale
+    # zero one followed by the real one) would otherwise return only the
+    # first and read as clean.
+    ercs = list(_COUNT_ERC.finditer(txt))
+    if ercs:
+        vals = {(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                for m in ercs}
+        if len(vals) > 1:
+            raise VerifyError(
+                "%s carries %d conflicting ERC summaries %s -- refusing to "
+                "pick one" % (p, len(ercs), sorted(vals)))
+        msgs, errs, warns = vals.pop()
+        found["erc messages"], found["errors"], found["warnings"] = (
+            msgs, errs, warns)
+    # A report must carry the labels its tool is known to emit. Without
+    # this, "** Found 0 bananas **" alone parses as a clean DRC run.
+    if kind == "drc":
+        need = {"drc violations", "unconnected pads"}
+        missing = need - set(found)
+        if missing:
+            raise VerifyError(
+                "%s is missing required DRC summary line(s): %s -- a report "
+                "that omits a category cannot be called clean (truncated?)"
+                % (p, ", ".join(sorted(missing))))
+    elif kind == "erc":
+        if "errors" not in found:
+            raise VerifyError(
+                "%s has no 'ERC messages: N Errors N Warnings N' line" % p)
+    if not found:
+        raise VerifyError(
+            "%s matches neither the DRC ('** Found N ... **') nor the ERC "
+            "('ERC messages: N Errors N Warnings N') shape -- cannot "
+            "establish the violation count, so this run is UNVERIFIED rather "
+            "than clean. Did the report format change?" % p)
+    return found
+
+
+#: ERC writes "** Ignored checks:" and DRC writes "** Ignored checks **".
+#: Accept both; requiring the colon silently made every DRC report read as
+#: "no such section", i.e. UNKNOWN, which is the right failure but the wrong
+#: reason.
+_IGNORED_HDR = re.compile(r"\*\*\s*Ignored checks\s*(?::|\*\*)\s*$", re.I | re.M)
+
+
+def ignored_checks_from_report(path):
+    """The checks KiCad reports it actually skipped, from the report itself.
+
+    This is stronger evidence than `.kicad_pro`'s `rule_severities`: the map is
+    sparse and often absent, whereas the report states what the run really
+    applied -- including built-in defaults the map never mentions. Returns a
+    list of human-readable check descriptions (possibly empty, which here
+    genuinely means "none were skipped", because the header is present).
+
+    Returns None if the report has no 'Ignored checks' section at all, i.e.
+    the question is UNANSWERED rather than answered "none".
+    """
+    p = Path(path)
+    if not p.exists():
+        raise VerifyError("report %s was not written" % p)
+    lines = p.read_text(errors="replace").splitlines()
+    idx = next((i for i, ln in enumerate(lines)
+                if _IGNORED_HDR.search(ln.rstrip())), None)
+    if idx is None:
+        return None
+    out = []
+    for ln in lines[idx + 1:]:
+        s = ln.strip()
+        if s.startswith("-"):
+            out.append(s.lstrip("- ").strip())
+        elif s.startswith("**") or (s and not s.startswith("-")):
+            break
+    return out
+
+
+def _run(cmd):
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _run_producing(cmd, report):
+    """Run `cmd`, requiring it to (re)write `report` during this call.
+
+    Otherwise a stale zero-count report left by an earlier run is parsed and
+    reported as a clean result for a tool invocation that wrote nothing.
+    """
+    rp = Path(report)
+    before = rp.stat().st_mtime_ns if rp.exists() else None
+    rc, out, err = _run(cmd)
+    if not rp.exists():
+        raise VerifyError(
+            "%s did not write %s -- nothing to parse, so this run is "
+            "UNVERIFIED" % (cmd[1] if len(cmd) > 1 else cmd[0], rp))
+    if before is not None and rp.stat().st_mtime_ns == before:
+        raise VerifyError(
+            "%s was not rewritten by this run (mtime unchanged) -- refusing "
+            "to report a stale report as a fresh result" % rp)
+    return rc, out, err
+
+
+def run_erc(schematic, report="erc.rpt", cli=None):
+    """ERC with --severity-all --exit-code-violations.
+
+    Returns (rc, counts). Raises if the report is missing or unparseable.
+    Both signals are returned; callers should require rc == 0 AND every count
+    == 0, because each has been seen to be wrong alone.
+    """
+    cli = find_kicad_cli(cli)
+    if not Path(schematic).exists():
+        raise VerifyError("schematic %s does not exist" % schematic)
+    rc, _out, err = _run_producing(
+        [cli, "sch", "erc", "--severity-all", "--exit-code-violations",
+         "-o", str(report), str(schematic)], report)
+    counts = _counts_from_report(report, kind="erc")
+    if rc not in (0, 5):
+        raise VerifyError("kicad-cli sch erc failed (rc=%d): %s" % (rc, err[:400]))
+    return rc, counts
+
+
+def run_drc(board, report="drc.rpt", parity=True, cli=None):
+    """DRC with --severity-all [--schematic-parity] --exit-code-violations.
+
+    `parity` defaults True: footprint/symbol field mismatches are invisible
+    without it, and they are how a schematic-only edit silently leaves the
+    board contradicting the schematic.
+    """
+    cli = find_kicad_cli(cli)
+    cmd = [cli, "pcb", "drc", "--severity-all", "--exit-code-violations",
+           "-o", str(report)]
+    if parity:
+        cmd.append("--schematic-parity")
+    cmd.append(str(board))
+    if not Path(board).exists():
+        raise VerifyError("board %s does not exist" % board)
+    rc, _out, err = _run_producing(cmd, report)
+    counts = _counts_from_report(report, kind="drc")
+    if rc not in (0, 5):
+        raise VerifyError("kicad-cli pcb drc failed (rc=%d): %s" % (rc, err[:400]))
+    return rc, counts
+
+
+def severity_report(kicad_pro):
+    """Tri-state enumeration of the ERC/DRC severity maps.
+
+    Returns a dict::
+
+        {"state": "verified" | "unverified",
+         "erc_ignored": [...], "drc_ignored": [...],
+         "erc_entries": int, "drc_entries": int,
+         "note": str}
+
+    ``state == "unverified"`` when a map is missing or empty. That is NOT a
+    pass: it means KiCad's built-in defaults are in force and this function
+    cannot tell you what they are. Resolve them against your KiCad version --
+    :data:`KNOWN_STOCK_IGNORES` is a starting list, not an authority.
+    """
+    p = Path(kicad_pro)
+    if not p.exists():
+        raise VerifyError("%s does not exist" % p)
+    try:
+        pro = json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        raise VerifyError("%s is not valid JSON: %s" % (p, e))
+
+    erc = (pro.get("erc") or {}).get("rule_severities") or {}
+    drc = (pro.get("board") or {}).get("design_settings", {}) \
+        .get("rule_severities") or {}
+    # some versions put it at the top level of the board section
+    if not drc:
+        drc = (pro.get("board") or {}).get("rule_severities") or {}
+
+    out = {
+        "erc_entries": len(erc),
+        "drc_entries": len(drc),
+        "erc_ignored": sorted(k for k, v in erc.items() if v == "ignore"),
+        "drc_ignored": sorted(k for k, v in drc.items() if v == "ignore"),
+    }
+    if not erc or not drc:
+        out["state"] = "unverified"
+        out["note"] = (
+            "rule_severities is %s -- KiCad's built-in defaults are in force "
+            "and are NOT enumerated here. An empty ignore list from an absent "
+            "map means 'unknown', not 'nothing ignored'. Stock defaults known "
+            "to sit at ignore include: %s (verify against your KiCad version)."
+            % ("absent/empty for " + ", ".join(
+                x for x, y in (("ERC", erc), ("DRC", drc)) if not y),
+               ", ".join(KNOWN_STOCK_IGNORES)))
+    else:
+        legal = {"error", "warning", "ignore", "exclusion", "unset"}
+        bad = {k: v for m in (erc, drc) for k, v in m.items()
+               if not isinstance(v, str) or v not in legal}
+        if bad:
+            out["state"] = "unverified"
+            out["note"] = (
+                "map contains %d entr%s with a value that is not a KiCad "
+                "severity (%s) -- the effective severity of those rules "
+                "cannot be established"
+                % (len(bad), "y" if len(bad) == 1 else "ies",
+                   ", ".join("%s=%r" % kv for kv in sorted(bad.items())[:4])))
+        else:
+            out["state"] = "verified"
+            out["note"] = "both maps present; effective ignores listed above"
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            "usage: kicad_verify.py <project-dir-or-.kicad_pro> "
+            "[schematic] [board]")
+    target = Path(sys.argv[1])
+    pro = target if target.suffix == ".kicad_pro" else next(
+        iter(sorted(target.glob("*.kicad_pro"))), None)
+    if pro is None:
+        raise SystemExit("no .kicad_pro found at %s" % target)
+    base = pro.with_suffix("")
+    sch = Path(sys.argv[2]) if len(sys.argv) > 2 else base.with_suffix(".kicad_sch")
+    pcb = Path(sys.argv[3]) if len(sys.argv) > 3 else base.with_suffix(".kicad_pcb")
+
+    sev = severity_report(pro)
+    print("severity map: %s (ERC %d entries, DRC %d entries)"
+          % (sev["state"].upper(), sev["erc_entries"], sev["drc_entries"]))
+    if sev["erc_ignored"]:
+        print("  ERC ignored:", ", ".join(sev["erc_ignored"]))
+    if sev["drc_ignored"]:
+        print("  DRC ignored:", ", ".join(sev["drc_ignored"]))
+    if sev["state"] == "unverified":
+        print("  !!", sev["note"])
+
+    bad = sev["state"] == "unverified"
+    for label, art, runner, rpt in (
+            ("ERC", sch, run_erc, "/tmp/_erc.rpt"),
+            ("DRC", pcb, run_drc, "/tmp/_drc.rpt")):
+        if not art.exists():
+            print("%s: %s missing -- UNVERIFIED" % (label, art.name))
+            bad = True
+            continue
+        rc, counts = runner(art, rpt)
+        print("%s rc=%d  %s" % (label, rc, counts))
+        bad |= rc != 0 or any(counts.values())
+        skipped = ignored_checks_from_report(rpt)
+        if skipped is None:
+            print("  !! %s report states no 'Ignored checks' section -- "
+                  "effective skips UNKNOWN" % label)
+            bad = True
+        elif skipped:
+            print("  %s actually skipped %d check(s): %s"
+                  % (label, len(skipped), "; ".join(skipped)))
+    raise SystemExit(1 if bad else 0)
