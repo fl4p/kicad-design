@@ -891,12 +891,41 @@ tells you. Measured 2026-08-11 across ~30 vendor/distributor hosts:
 | **`curl` + UA + `Sec-Fetch-Mode: navigate`** | Diodes, DigiKey, SnapEDA, componentsearchengine, TME, Bourns (all `cloudflare` + `cf-ray`) | `403` |
 | **any browser** (default headless is enough) | Nexperia | `200` titled *"Challenge Validation"* — a JS challenge no `curl` header set can satisfy |
 | **browser + non-`HeadlessChrome` UA** | ADI, ST (`AkamaiGHost`) | connection dropped after TLS; `403` w/ `errors.edgesuite.net` |
-| **none found** | Mouser (`AkamaiGHost`) | `200` titled *"Access to this page has been denied"* |
+| **UA override + a once-human-warmed profile** | Mouser (`AkamaiGHost` + DataDome) | `200` titled *"Access to this page has been denied"* |
 
 `server:` identifies the vendor's WAF but **does not predict the rung** — Mouser and ADI are
-both `AkamaiGHost`, yet one yields to a browser and the other resisted every rung tried
-(headless, headed-ephemeral, headed-persistent), including on `/datasheet/*.pdf`. For Mouser,
-use the Search API in [`SETUP.md`](SETUP.md) instead of fetching pages.
+both `AkamaiGHost`, yet ADI yields to any browser with a corrected UA while Mouser needs a
+one-time human CAPTCHA solve on top.
+
+**Mouser stacks two independent walls, and each needs its own fix.** Measured 2026-08-11:
+
+| | default UA | UA override |
+|---|---|---|
+| cold profile | dropped | `403` deny page |
+| warmed profile | dropped (`ERR_HTTP2_PROTOCOL_ERROR`) | **`200`, 270 kB real content, 4/4** |
+
+Wall 1 is the Akamai UA-token drop; wall 2 is an interactive CAPTCHA that the *automation
+itself provokes* — a human browsing Mouser normally never sees it. Neither fix substitutes for
+the other, and **no fully unattended rung exists**: rungs 2/3a/4/5 with a cold profile all
+fail, including a headed persistent one.
+
+The escape is a **one-time human warmup**, then unlimited unattended reuse:
+
+1. Launch headed with a *dedicated* persistent profile (never the live one — it is usually
+   locked by a running Chrome anyway, and it would expose every logged-in session).
+2. A human solves the CAPTCHA once, in that window.
+3. The clearance persists as **cookies**, so it is portable — the profile then works
+   **headless**, in a fresh process, indefinitely. Keep it somewhere durable rather than
+   `/tmp`, and work from a copy so a bad run cannot burn the solve.
+
+Note that a solved profile does **not** make `_abck` "valid": that cookie read as
+`~-1~`/not-validated throughout, including while Mouser served real content. It is not a
+usable verdict signal — check the title.
+
+Mouser's `/datasheet/*.pdf` returns real headers (`200 application/pdf`,
+`content-length: 1308247`) but reading the response body yields **536 bytes of viewer HTML** —
+the PDF-viewer trap below. Use the download path, not a body read. Failing all this, the
+Mouser Search API in [`SETUP.md`](SETUP.md) needs no browser at all.
 
 **⚠ Every WAF here signals refusal with a 2xx in at least one configuration.** Three distinct
 false-success shapes, all of which pass `code < 400`:

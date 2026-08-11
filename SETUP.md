@@ -95,9 +95,28 @@ loaded fine in a browser; TI, Farnell and Vishay were fine on plain curl.
 That volatility is not hypothetical: **Mouser was recorded here as "fine on plain curl"
 and is now the single hardest host measured** (2026-08-11) — bare `curl` is dropped, and a
 UA-corrected `curl` gets a `200` carrying an "Access to this page has been denied" page.
-It stayed 403 at every browser rung including a headed persistent profile, and its
-`/datasheet/*.pdf` path serves the same deny page. **Do not scrape `www.mouser.com`; use
-the Mouser Search API below**, for which a key is already provisioned.
+It stayed 403 at every *cold* browser rung including a headed persistent profile, and its
+`/datasheet/*.pdf` path serves the same deny page. Prefer the **Mouser Search API** below,
+for which a key is already provisioned.
+
+If pages are genuinely needed, Mouser has one working rung — a **one-time human warmup**,
+described in `SKILL.md`. A dedicated profile lives at
+`~/.cache/kicad-dl-profile-mouser`; a human solved its CAPTCHA on 2026-08-11 and it has
+served real content headless ever since. Use it read-mostly:
+
+```python
+# copy first -- a bad run must not burn the human solve
+PROFILE = os.path.expanduser("~/.cache/kicad-dl-profile-mouser")
+ctx = p.chromium.launch_persistent_context(
+    PROFILE, channel="chrome", headless=True,      # headless is FINE once warmed
+    user_agent=UA,                                  # ...but the UA override is mandatory
+    args=["--disable-blink-features=AutomationControlled"])
+```
+
+Dropping `user_agent=` re-triggers wall 1 and the connection is dropped
+(`ERR_HTTP2_PROTOCOL_ERROR`) even with the warmed profile. If the CAPTCHA reappears, the
+clearance has expired — it needs a human again, so do not build an unattended job that
+assumes otherwise.
 
 ### macOS TCC can block LOCAL files, not just vendors
 
