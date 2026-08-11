@@ -345,6 +345,19 @@ ids returned **1-page stubs**, and another mirror returned a **0-page** file. Bo
 reported by a prior agent as "PDF document, version 1.7" — technically true, entirely
 worthless.
 
+**A WAF challenge can arrive as a 2xx.** AWS WAF Bot Control (CloudFront; Infineon) answers
+a blocked request with `202 Accepted` and a **zero-byte body**, so `curl -f`, `resp.ok` and
+`if code >= 400: fail` all call it a success. Never gate on the status code alone — require
+a nonzero length and the `%PDF` magic, and treat an `x-amzn-waf-action` response header as a
+block regardless of status:
+
+```sh
+code=$(curl -sL -D h.txt -o x.pdf -w '%{http_code}' "$URL")
+grep -qi '^x-amzn-waf-action:' h.txt && { echo "WAF challenge (http=$code) -- NOT a download"; exit 1; }
+[ -s x.pdf ] || { echo "empty body, http=$code -- NOT a download"; exit 1; }
+[ "$(head -c4 x.pdf)" = '%PDF' ] || { echo "no %PDF magic, http=$code"; exit 1; }
+```
+
 ```sh
 [ "$(file -b --mime-type x.pdf)" = application/pdf ] || { echo "not a PDF"; exit 1; }
 

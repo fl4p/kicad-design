@@ -883,10 +883,27 @@ Rung 1 failing while rung 3 succeeds is the useful shape: a Chrome UA on `curl` 
 because the TLS/HTTP2 fingerprint is wrong too. You need a real browser *and* a real UA.
 
 **First: identify the WAF, because the rung that works differs per vendor.** One `curl -I`
-tells you — `server: cloudflare` plus a `cf-ray` header means Cloudflare, `server: AkamaiGHost`
-means Akamai. Measured 2026-08-11 across 20 vendor/distributor hosts: Akamai on ADI, ST,
-Microchip, TDK, Toshiba; **Cloudflare on Diodes Inc, TME, DigiKey, SnapEDA,
-componentsearchengine, Renesas**; CloudFront on Infineon.
+tells you. Measured 2026-08-11 across ~30 vendor/distributor hosts:
+
+| `server:` header | WAF | vendors seen | what it keys on | cheapest rung |
+|---|---|---|---|---|
+| `AkamaiGHost` | Akamai Bot Manager | ADI, ST, Microchip, TDK, Toshiba, Littelfuse, Panasonic, Omron | UA token **and** TLS/HTTP2 fingerprint | browser, non-`HeadlessChrome` UA |
+| `cloudflare` (+ `cf-ray`) | Cloudflare | Diodes, TME, DigiKey, SnapEDA, componentsearchengine, Bourns, Renesas | UA↔fetch-metadata *coherence* | `curl` + 2 headers |
+| `CloudFront` (+ `x-amzn-waf-action`) | AWS WAF Bot Control | Infineon | UA token only | `curl` + UA |
+
+**⚠ AWS WAF's block is an HTTP `202`, which naive code reads as success.** The challenge
+response is `202 Accepted`, `server: CloudFront`, `x-amzn-waf-action: challenge`, and a
+**zero-byte body**. Any fetcher whose check is `if code >= 400: fail` — or `resp.ok`, or
+`curl -f` — treats that as a successful download of an empty file. Gate on
+`x-amzn-waf-action` absence, a `%PDF` magic check and a nonzero length, never on the status
+code alone. Measured on Infineon: bare `curl` → `202`/0 B; `curl -A '<Chrome UA>'` →
+`200`/1074169 B, a valid 11-page datasheet.
+
+**AWS WAF keys on the UA token alone — no browser needed.** UA-only `curl` → 200 (5/5);
+`Sec-Fetch-Mode: navigate` with curl's own UA → still 202; a `HeadlessChrome` UA → still 202.
+So it shares Akamai's token sensitivity but not Akamai's fingerprint requirement. Note also
+that Infineon's **asset path is behind the same wall** — `/dgdl/*.pdf` 202s on bare `curl` —
+so the §3 asset-host shortcut does *not* apply to every vendor.
 
 **Cloudflare's discriminator is the opposite of Akamai's, and it is cheaper to satisfy.**
 Measured on `www.diodes.com` (403 to bare `curl`, 5/5 reproducible):
