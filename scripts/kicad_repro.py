@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """Prove a generator is reproducible -- and that it actually RAN.
 
+REPRODUCIBILITY IS NOT EQUIVALENCE, AND THIS MODULE ONLY DOES THE FIRST.
+`run_and_check_reproducible` runs the SAME command twice, so it answers "is
+this generator deterministic". It does not, and cannot, answer "is my change
+to the generator safe", which is a different question people reach for a hash
+to settle -- run before, change code, run after, compare digests. That
+comparison is worth making and is much stronger than comparing violation
+counts, but its result is: STRONG EVIDENCE THAT THE ARTEFACT OF THE TESTED RUN
+IS UNCHANGED, NEVER PROOF THAT THE MECHANISM PRODUCING IT IS CORRECT.
+Measured, not supposed: a router cache A/B'd with a deliberately UNSOUND key
+produced a byte-identical board, because the unsound branch was never
+exercised in a verdict-changing way on that input. A wrong verdict on a
+candidate that is never selected leaves no trace in the output. See PCB.md,
+"A slow generator", for the full statement.
+
 Project-agnostic. Nothing here knows about any particular board.
 
 Comparing two hashes cannot distinguish "reproducible" from "never
