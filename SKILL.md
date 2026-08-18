@@ -25,9 +25,10 @@ engineering.
 ## Working on the board? Read `PCB.md`
 
 This file covers what is shared plus schematic capture. **PCB layout, footprints,
-land patterns, `pcbnew` scripting, zones, DRC, stackup, creepage, surface leakage
-and fab output live in [`PCB.md`](PCB.md)** — read that file as well when the task
-touches the board, and skip it entirely for schematic-only work.
+land patterns, routing and autorouting, `pcbnew` scripting, zones, DRC, stackup,
+creepage, surface leakage and fab output live in [`PCB.md`](PCB.md)** — read that
+file as well when the task touches the board, and skip it entirely for
+schematic-only work.
 
 **"Is this ready to fab / ready to order?" is a board question**: go straight to
 `PCB.md`'s last section, which separates *manufacturable* from *final* and gives
@@ -1158,55 +1159,6 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   different question than the one that mattered. Keep an independent audit that re-measures
   real geometry, and say in the docs that *the audit*, not DRC, enforces the figure, so nobody
   deletes it as redundant.
-- **Calibrate against a known-bad input.** Copy the board, inject the exact fault the guard
-  exists to catch (e.g. widen the EP land back to the unsafe stock size), and watch it exit
-  non-zero. A guard never seen to fire is not a guard.
-- **Calibrate a branch BEFORE you fix the defect that has been exercising it.** A check with
-  two branches had a calibration for one of them. The other — orphaned pour islands — had none,
-  and nobody noticed, because the real board *had* orphans and the branch fired on every run.
-  That is genuine evidence, and it **expires the moment you fix the board**: remove the islands
-  and the branch goes silent, untested, still reporting PASS — and the loss is invisible
-  precisely because the output improved. When you are about to remove the condition that has
-  been exercising a guard, writing that guard's calibration is part of the fix, not follow-up
-  work. Write it first, watch it fire while the defect is still there, then fix the defect.
-- **On a board that ALREADY exhibits the fault, a calibration must be DIFFERENTIAL.** Having
-  written that missing calibration, the obvious form is: inject the fault, assert the check
-  raises, assert the message matches. On a board carrying 16 orphaned islands already, **that
-  passes without testing the injection at all** — the check raises because of the 16, the
-  message matches because it always would, and the harness reports FIRED having proved nothing.
-  The naive form is wrong on exactly the boards where the guard matters most. Count the fault
-  instances *without* the injection, count them *with* it, and require the count to rise **by
-  exactly one** and the report to name the object you injected. That is sound whether the clean
-  board has zero instances or sixteen, and it turns `FIRED` into `orphan-island 0 -> 1`, which
-  is a claim with content. General shape: **a calibration must be a measurement of the
-  injection's effect, not of the board's state. Any calibration whose assertion could pass on
-  the un-injected board is decorative.**
-- **A calibration is code, and it breaks in ways that look like it working.** Five distinct
-  failures in one guard suite, each reporting something that read as success. *The harness
-  expected the wrong exception contract* — it caught only `AssertionError` while the ledger
-  functions deliberately raise `ValueError`, so calibrations reported "did not fire" for guards
-  that had reached their intended refusal. *The injection did not create the fault* — "delete a
-  wire and watch a pin dangle" popped the **last** `SEGS` entry, a `PWR_FLAG` stub whose removal
-  dangles nothing, so the calibration passed a guard that had evaluated a healthy design. *The
-  injection site was exempt* — "carry a host net onto the isolated side" injected on the
-  isolator, which the isolation guard skips by design as a declared barrier crosser; any
-  ordinary part fired immediately. *The injection tripped a different check first* — moving a
-  merged land's split lines also changed the land's union, so the union check fired and the
-  containment check was never exercised. *The input sat in the guard's blind region* — the rail
-  chosen to test "glyph drawn over its own wire" had a **horizontal** wire, and that arm only
-  has a direction to compare for vertical ones. So: **a calibration counts only when the
-  injection actually created the intended fault, the input lies in the guard's active region,
-  the site is not on its exemption list, and the guard raises the expected type AND a message
-  fragment identifying the intended arm.** Check each claim explicitly — a silent return, an
-  unexpected exception, and the right type with the wrong message are three different
-  calibration failures — restore every injected mutation in `finally` so a failed calibration
-  cannot poison the ones after it, and where no valid input exists say so rather than skipping:
-
-  ```python
-  kept = [g for g in SEGS if pp not in ((g[0], g[1]), (g[2], g[3]))]
-  if len(kept) == len(SEGS):
-      raise AssertionError("UNVERIFIED: nothing touches that pin, cannot calibrate")
-  ```
 - **A guard is only as strong as its weakest link to a real object.** When the empty-interval
   bullet under *Close every external interface* moved a bound from the resistors onto the gate
   clamps, the guard's arithmetic was fine and completely hollow: it computed
@@ -1303,9 +1255,6 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   a datasheet maximum — power, voltage, current, temperature — ask what fraction of it you are
   actually willing to ship, and put *that* number in the comparison. Then re-run the
   known-bad calibration, because a threshold this loose passes the calibration inputs too.
-- **Calibration must cover the case that matters, not the case you already fixed.** A cap guard
-  tested `NaN` and `0.01` — both outside its acceptance band — and never tested a *plausible*
-  bad measurement inside it, which is the one that raised the cap to full scale.
 - **A retraction that lands only in the document is HALF a retraction — grep the runtime output
   too.** An independent review showed that a claimed *"bottom-leg match resolved to 0.027 mΩ at
   50 A"* was code granularity, not accuracy: the ADC's ±1 µA input leakage into the divider's
@@ -1323,6 +1272,64 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Protection on a precision node has a cost.** A TVS sized for an 85 V input leaks µA near
   breakdown — comparable to the entire load on a node built for 134 µVpp. Clamp at the victim
   end, disconnect with a relay, or document the residual risk; don't reflexively fit the part.
+
+### Calibrations
+
+- **Calibrate against a known-bad input.** Copy the board, inject the exact fault the guard
+  exists to catch (e.g. widen the EP land back to the unsafe stock size), and watch it exit
+  non-zero. A guard never seen to fire is not a guard.
+- **Calibrate a branch BEFORE you fix the defect that has been exercising it.** A check with
+  two branches had a calibration for one of them. The other — orphaned pour islands — had none,
+  and nobody noticed, because the real board *had* orphans and the branch fired on every run.
+  That is genuine evidence, and it **expires the moment you fix the board**: remove the islands
+  and the branch goes silent, untested, still reporting PASS — and the loss is invisible
+  precisely because the output improved. When you are about to remove the condition that has
+  been exercising a guard, writing that guard's calibration is part of the fix, not follow-up
+  work. Write it first, watch it fire while the defect is still there, then fix the defect.
+- **On a board that ALREADY exhibits the fault, a calibration must be DIFFERENTIAL.** Having
+  written that missing calibration, the obvious form is: inject the fault, assert the check
+  raises, assert the message matches. On a board carrying 16 orphaned islands already, **that
+  passes without testing the injection at all** — the check raises because of the 16, the
+  message matches because it always would, and the harness reports FIRED having proved nothing.
+  The naive form is wrong on exactly the boards where the guard matters most. Count the fault
+  instances *without* the injection, count them *with* it, and require the count to rise **by
+  exactly one** and the report to name the object you injected. That is sound whether the clean
+  board has zero instances or sixteen, and it turns `FIRED` into `orphan-island 0 -> 1`, which
+  is a claim with content. General shape: **a calibration must be a measurement of the
+  injection's effect, not of the board's state. Any calibration whose assertion could pass on
+  the un-injected board is decorative.**
+- **A calibration is code, and it breaks in ways that look like it working.** It counts only
+  when the injection **actually created** the intended fault, the input lies in the guard's
+  **active region**, the site is **not on its exemption list**, and the guard raises the
+  **expected type and a message fragment naming the intended arm**. A silent return, an
+  unexpected exception, and the right type with the wrong message are three different
+  calibration failures. Restore every injected mutation in `finally`, or a failed calibration
+  poisons the ones after it. Five real failures in one suite, each reporting success:
+  - *harness* — it caught only `AssertionError` while the ledger functions deliberately raise
+    `ValueError`, so guards that had reached their intended refusal reported "did not fire";
+  - *the input did not create the fault* — "delete a wire and watch a pin dangle" popped the
+    **last** `SEGS` entry, a `PWR_FLAG` stub whose removal dangles nothing, so the calibration
+    passed a guard that had evaluated a healthy design (the differential form above is the
+    general fix);
+  - *the site was exempt* — "carry a host net onto the isolated side" injected on the isolator,
+    which the isolation guard skips by design as a declared barrier crosser; any ordinary part
+    fired immediately;
+  - *another check fired first* — moving a merged land's split lines also changed the land's
+    union, so the union check fired and the containment check under test was never reached;
+  - *blind region* — the rail chosen to test "glyph drawn over its own wire" had a
+    **horizontal** wire, and that arm only has a direction to compare for vertical ones.
+
+  ```python
+  except ValueError as e:
+      if "wrong side" not in str(e):
+          raise AssertionError(f"guard fired for the wrong reason: {e}")
+  ```
+
+  Where no input in the guard's active region exists, raise `UNVERIFIED` — a calibration that
+  could not run is not a calibration that passed.
+- **Calibration must cover the case that matters, not the case you already fixed.** A cap guard
+  tested `NaN` and `0.01` — both outside its acceptance band — and never tested a *plausible*
+  bad measurement inside it, which is the one that raised the cap to full scale.
 
 
 ## Reviewing someone else's numbers
