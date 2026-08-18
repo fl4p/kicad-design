@@ -1500,6 +1500,69 @@ def _make_workspace(keep: str | None):
     return tempfile.TemporaryDirectory(prefix="kicad-route-candidate-")
 
 
+def _report_mode(args: argparse.Namespace) -> str:
+    if args.prepare_only:
+        return "prepare-only"
+    if args.exploratory:
+        return "exploratory-report"
+    return "route-and-report"
+
+
+def _finalize_report(
+    report: dict,
+    *,
+    findings: list[str],
+    promotion_blocks: list[str],
+    args: argparse.Namespace,
+    config: dict | None,
+    project_audits: dict,
+) -> int:
+    """Set the terminal report state without letting exploration carry approval data."""
+    if args.exploratory:
+        # Defense in depth: even if an earlier refactor accidentally constructs
+        # promotion evidence, an exploratory report cannot retain it.
+        report.pop("promotion", None)
+    report["findings"] = findings
+    if findings:
+        report["verdict"] = "REJECT"
+    elif args.exploratory:
+        report["verdict"] = "EXPLORATORY"
+    elif config is not None and not promotion_blocks:
+        report["verdict"] = "PROMOTABLE_CANDIDATE"
+    elif config is not None:
+        report["verdict"] = "REPORT_ONLY"
+    else:
+        report["verdict"] = (
+            "PROJECT_AUDITS_PASSED"
+            if project_audits["configured"]
+            else "GENERIC_CHECKS_ONLY"
+        )
+    report["verdict_reason"] = (
+        "; ".join(findings)
+        if findings
+        else (
+            "Exploratory report completed without a generic rejection condition. "
+            "Its geometry may inform placement and critical-route planning, but "
+            "cannot be promoted or copied as accepted routing."
+            if report["verdict"] == "EXPLORATORY"
+            else
+            "Every promotion gate passed; an explicit candidate/report digest approval is still required."
+            if report["verdict"] == "PROMOTABLE_CANDIDATE"
+            else "; ".join(promotion_blocks)
+            if report["verdict"] == "REPORT_ONLY"
+            else
+            "Generic checks and every configured project audit command passed. "
+            "The partial non-routing snapshot cannot prove complete invariant "
+            "preservation, so REVIEW is intentionally withheld."
+            if project_audits["configured"]
+            else "Generic checks found no rejection condition, but no project "
+                 "audit command was configured. Project guards and visual review "
+                 "remain mandatory; REVIEW is intentionally withheld."
+        )
+    )
+    return 3 if findings and args.fail_on_findings else 0
+
+
 def run_report(args: argparse.Namespace) -> tuple[dict, int]:
     board = Path(args.board).expanduser().resolve()
     report_path = Path(args.report).expanduser().resolve()
@@ -1535,7 +1598,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
     input_bundle_root = getattr(args, "_input_bundle_root", None)
     initial = {
         "schema": REPORT_SCHEMA,
-        "mode": "prepare-only" if args.prepare_only else "route-and-report",
+        "mode": _report_mode(args),
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source": {
             "board": str(board),
@@ -1555,6 +1618,11 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             "Freerouting 2.3.0 headless -inc was observed routing an ignored net class; post-import scope audit is load-bearing.",
         ],
     }
+    if args.exploratory:
+        initial["limitations"].append(
+            "EXPLORATORY ONLY: use this geometry to diagnose placement, congestion, "
+            "and possible corridors; it is never promotion evidence or accepted routing."
+        )
     if config is not None:
         initial["configuration"] = {
             "schema": config["schema"],
@@ -2267,7 +2335,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             initial["configuration"]["input_bundle_error"] = bundle_error
 
         promotion_blocks = []
-        if config is not None:
+        if config is not None and not args.exploratory:
             seed_audits = initial["seed"].get("project_audits") or {}
             if not seed_audits.get("configured") or not project_audits.get("configured"):
                 promotion_blocks.append("both seed and final project audits must be configured")
@@ -2349,38 +2417,14 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 "blocks": promotion_blocks,
             }
 
-        initial["findings"] = findings
-        if findings:
-            initial["verdict"] = "REJECT"
-        elif config is not None and not promotion_blocks:
-            initial["verdict"] = "PROMOTABLE_CANDIDATE"
-        elif config is not None:
-            initial["verdict"] = "REPORT_ONLY"
-        else:
-            initial["verdict"] = (
-                "PROJECT_AUDITS_PASSED"
-                if project_audits["configured"]
-                else "GENERIC_CHECKS_ONLY"
-            )
-        initial["verdict_reason"] = (
-            "; ".join(findings)
-            if findings
-            else (
-                "Every promotion gate passed; an explicit candidate/report digest approval is still required."
-                if initial["verdict"] == "PROMOTABLE_CANDIDATE"
-                else "; ".join(promotion_blocks)
-                if initial["verdict"] == "REPORT_ONLY"
-                else
-                "Generic checks and every configured project audit command passed. "
-                "The partial non-routing snapshot cannot prove complete invariant "
-                "preservation, so REVIEW is intentionally withheld."
-                if project_audits["configured"]
-                else "Generic checks found no rejection condition, but no project "
-                     "audit command was configured. Project guards and visual review "
-                     "remain mandatory; REVIEW is intentionally withheld."
-            )
+        exit_code = _finalize_report(
+            initial,
+            findings=findings,
+            promotion_blocks=promotion_blocks,
+            args=args,
+            config=config,
+            project_audits=project_audits,
         )
-        exit_code = 3 if findings and args.fail_on_findings else 0
         return initial, exit_code
 
 
@@ -2800,6 +2844,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="export DSN and run seed preflight without requiring or invoking Freerouting",
     )
+    parser.add_argument(
+        "--exploratory",
+        action="store_true",
+        help=(
+            "run a non-promotable routing scout for placement, congestion, and "
+            "corridor evidence; generated geometry is inspiration only"
+        ),
+    )
     parser.add_argument("--freerouting-jar")
     parser.add_argument("--router-sha256")
     parser.add_argument("--expected-router-version")
@@ -2898,6 +2950,8 @@ def _configure_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -
         "timeout_seconds": 600,
         "audit_timeout_seconds": 300,
     }
+    if args.exploratory and args.prepare_only:
+        parser.error("--exploratory cannot be combined with --prepare-only")
     if not args.config:
         if args.replace_seed_drc_baseline:
             parser.error("--replace-seed-drc-baseline requires a tracked --config")
@@ -2906,6 +2960,21 @@ def _configure_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -
         for name, default in legacy.items():
             if getattr(args, name) is None:
                 setattr(args, name, default)
+        if not args.prepare_only and not args.exploratory:
+            parser.error(
+                "unconfigured router runs require --exploratory; promotable runs "
+                "require a tracked --config"
+            )
+        if args.exploratory:
+            if not args.allow_all_net_classes and not args.allow_net_class:
+                parser.error(
+                    "exploratory runs require --allow-net-class or the explicit "
+                    "--allow-all-net-classes override"
+                )
+            if not args.allow_layer:
+                parser.error(
+                    "exploratory runs require at least one explicit --allow-layer"
+                )
         args._autoroute_config = None
         args._project_scope = None
         return
@@ -3043,7 +3112,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("report path collides with a source artifact: %s" % report_path)
     report = {
         "schema": REPORT_SCHEMA,
-        "mode": "prepare-only" if args.prepare_only else "route-and-report",
+        "mode": _report_mode(args),
         "verdict": "ERROR",
     }
     exit_code = 2

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tempfile
@@ -29,6 +30,90 @@ def segment(net="N", locked=False, start=(0, 0), end=(10, 0), width=200_000):
 
 
 class RouteCandidateTests(unittest.TestCase):
+    @staticmethod
+    def exploratory_args(board: Path, report: Path) -> list[str]:
+        return [
+            str(board),
+            "--report",
+            str(report),
+            "--exploratory",
+            "--allow-all-net-classes",
+            "--allow-layer",
+            "F.Cu",
+        ]
+
+    def test_unconfigured_router_run_requires_explicit_exploratory_scope(self):
+        parser = route._parser()
+        args = parser.parse_args(["x.kicad_pcb", "--report", "report.json"])
+        with self.assertRaises(SystemExit):
+            route._configure_args(args, parser)
+
+        args = parser.parse_args(
+            [
+                "x.kicad_pcb",
+                "--report",
+                "report.json",
+                "--exploratory",
+                "--allow-net-class",
+                "Routine",
+                "--allow-layer",
+                "F.Cu",
+            ]
+        )
+        route._configure_args(args, parser)
+        self.assertEqual(route._report_mode(args), "exploratory-report")
+        self.assertIsNone(args._autoroute_config)
+
+    def test_exploratory_requires_explicit_layer_and_rejects_prepare_only(self):
+        parser = route._parser()
+        missing_layer = parser.parse_args(
+            [
+                "x.kicad_pcb",
+                "--report",
+                "report.json",
+                "--exploratory",
+                "--allow-all-net-classes",
+            ]
+        )
+        with self.assertRaises(SystemExit):
+            route._configure_args(missing_layer, parser)
+
+        contradictory = parser.parse_args(
+            [
+                "x.kicad_pcb",
+                "--report",
+                "report.json",
+                "--prepare-only",
+                "--exploratory",
+            ]
+        )
+        with self.assertRaises(SystemExit):
+            route._configure_args(contradictory, parser)
+
+    def test_exploratory_finalization_strips_promotion_evidence(self):
+        args = argparse.Namespace(
+            prepare_only=False,
+            exploratory=True,
+            fail_on_findings=False,
+        )
+        report = {
+            "mode": route._report_mode(args),
+            "promotion": {"must_not_survive": True},
+        }
+        exit_code = route._finalize_report(
+            report,
+            findings=[],
+            promotion_blocks=[],
+            args=args,
+            config={"tracked": True},
+            project_audits={"configured": True},
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["mode"], "exploratory-report")
+        self.assertEqual(report["verdict"], "EXPLORATORY")
+        self.assertNotIn("promotion", report)
+        self.assertIn("cannot be promoted", report["verdict_reason"])
+
     def test_router_command_is_local_bounded_and_not_drc_only(self):
         command = route._router_command(
             Path("/java"),
@@ -287,7 +372,7 @@ class RouteCandidateTests(unittest.TestCase):
             original = b"(kicad_pcb source-must-survive)\n"
             board.write_bytes(original)
             with self.assertRaises(SystemExit):
-                route.main([str(board), "--report", str(board)])
+                route.main(self.exploratory_args(board, board))
             self.assertEqual(board.read_bytes(), original)
 
     def test_report_collision_cannot_overwrite_source_sidecar(self):
@@ -298,7 +383,7 @@ class RouteCandidateTests(unittest.TestCase):
             original = b'{"source":"must survive"}\n'
             project.write_bytes(original)
             with self.assertRaises(SystemExit):
-                route.main([str(board), "--report", str(project)])
+                route.main(self.exploratory_args(board, project))
             self.assertEqual(project.read_bytes(), original)
 
     def test_report_collision_cannot_overwrite_project_library_member(self):
@@ -317,7 +402,7 @@ class RouteCandidateTests(unittest.TestCase):
             original = b"(footprint A source-must-survive)\n"
             member.write_bytes(original)
             with self.assertRaises(SystemExit):
-                route.main([str(board), "--report", str(member)])
+                route.main(self.exploratory_args(board, member))
             self.assertEqual(member.read_bytes(), original)
 
     def test_nonrouting_points_absorb_only_nanometre_canonicalization(self):

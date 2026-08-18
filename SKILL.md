@@ -30,6 +30,11 @@ creepage, surface leakage and fab output live in [`PCB.md`](PCB.md)** — read t
 file as well when the task touches the board, and skip it entirely for
 schematic-only work.
 
+Before external autorouting, classify routing ownership. `PCB.md` defines the
+three modes: an **exploratory** Freerouting scout is inspiration only, **critical**
+geometry stays generator/manual-owned, and only the declared **routine** scope
+may cross the manifest-promotion boundary.
+
 **"Is this ready to fab / ready to order?" is a board question**: go straight to
 `PCB.md`'s last section, which separates *manufacturable* from *final* and gives
 the export-and-measure checklist. Answering it from DRC alone gets it wrong in

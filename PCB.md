@@ -59,6 +59,44 @@ $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x
 
 ## Scoped external autorouting: default only after the project opts in
 
+Choose routing ownership before choosing a backend:
+
+| Mode | Purpose | Authority |
+|---|---|---|
+| **Exploratory** | Probe placement, congestion, possible corridors, via pressure, and whether the current floor plan is plausibly routable | Disposable report only. Never promote it, and do not transplant its coordinates into generator source as if they were reviewed routes |
+| **Critical** | Implement geometry whose shape carries an electrical, thermal, safety, or fabrication requirement | Generator-owned on generated boards; manually authored only on explicitly hand-maintained boards. Route and audit it before making the promotable seed |
+| **Routine** | Complete explicitly allowlisted low-risk connectivity around the finished critical skeleton | Freerouting may propose it; only verified canonical manifest geometry becomes a generator input |
+
+An exploratory route may include critical nets only as a congestion probe. Use
+its existence, corridor choices, via hotspots, and failures to revise placement
+or plan the critical skeleton; discard the trace geometry itself. Then author
+critical routing, planes, keepouts, and their audits, then emit the deterministic
+seed for the promotable routine scope. The project seed audit must prove each
+declared critical route group is present with its required geometry. The wrapper
+then locks every existing route only in the scratch export board and proves that
+DSN represents it as fixed copper; scratch lock bits never enter the manifest or
+final board. This order gives critical structures first claim on space while
+still using the router as an early floor-planning instrument.
+
+Keep at least these structures critical:
+
+- low-inductance switching, gate-drive, and decoupling loops, including their
+  return paths and via count;
+- high-current or thermal paths where width is only one part of the structure:
+  neckdowns, parallel layers, pours, connector entries, and via arrays matter too;
+- creepage/isolation barriers, bounded crossings, slots, keepouts, and any copper
+  whose all-layer distance implements a safety requirement;
+- RF/HF, controlled-impedance, differential/skew, clock, and other
+  stackup/return-path-sensitive routes; and
+- Kelvin, sense, guard, star-point, plane-entry, and other topology-bearing nets.
+
+A uniform trace width and clearance can remain routine when those dimensions are
+the whole requirement and the exact class/style is checked after import. If the
+requirement is really current density, temperature rise, impedance, inductance,
+loop area, creepage, or return continuity, DRC-clean width/spacing is insufficient
+and the route is critical. For generated boards, “manual” means deliberately
+authoring the route in generator source—not editing the generated `.kicad_pcb`.
+
 For a generated board with mature placement and rules, use Freerouting as the
 default **candidate backend for the project's declared routine scope** when all
 of these tracked inputs exist:
@@ -80,6 +118,12 @@ a poor resistor/capacitor grid is a placement problem and must be fixed before
 routing.
 
 The production flow is a candidate-and-promotion pipeline:
+
+```text
+optional exploratory scout -> revise placement/corridors -> discard scout copper
+-> generator-owned critical skeleton -> deterministic seed with routine opens
+-> Freerouting routine candidate -> verification -> route manifest -> final generator
+```
 
 ```sh
 # From the kicad-design skill root. Status is read-only; install needs explicit

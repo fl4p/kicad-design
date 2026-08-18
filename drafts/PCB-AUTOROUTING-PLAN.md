@@ -16,10 +16,10 @@ The plan's candidate, promotion, and reproduction boundaries are operational:
 |---|---|
 | Tool acquisition | `kicad_autoroute_tools.py` installs a platform-pinned JAR/JRE only after explicit `install --yes`, with TLS verification, archive safety, checksums, tree digest, and atomic receipt |
 | Project contract | Strict `autoroute.json`, dedicated live KiCad class/style/layers, deterministic filled seed, exact DRC baseline, shell-free seed/final audits, and project-local applicator |
-| Candidate wrapper | Scratch-only DSN/SES, fixed-seed proof, raw-addition filtering, complete non-routing control projection, protected-route proof, structured DRC, input/source integrity, and exact compatibility cell |
+| Candidate wrapper | Explicit non-promotable exploratory mode plus scratch-only DSN/SES, fixed-seed proof, raw-addition filtering, complete non-routing control projection, protected-route proof, structured DRC, input/source integrity, and exact compatibility cell |
 | Promotion | Digest-explicit `PROMOTABLE_CANDIDATE` -> canonical route manifest; no raw board/SES promotion |
 | Reproduction | Normal project generator consumes only `routes.json`, verifies the exact seed and input bundle, applies canonical segments/vias, and proves exact final manifest geometry |
-| Tests | 43 focused skill tests plus two project applicator contract/tamper tests pass |
+| Tests | 46 focused skill tests plus two project applicator contract/tamper tests pass |
 | Skill wiring | `SKILL.md` routes board work to `PCB.md`; `PCB.md` carries the conditional-default policy and operating procedure; `scripts/README.md` is the command contract |
 
 The representative `shunt-reversal` run delegated exactly nine connections on five
@@ -64,7 +64,7 @@ installed tree; compatibility evidence is digest-bound and revalidated live;
 nested symlink inputs and configured SES reuse are rejected; and full
 reproducibility can no longer silently select a cheaper generator stage.
 
-Current limits are deliberate: only configured routine scopes, canonical
+Current limits are deliberate: exploratory geometry is report-only; only configured routine scopes, canonical
 segments and F.Cu-to-B.Cu through-vias, and promotion-enabled exact compatibility
 cells. Placement, critical/high-current routing, fanout, planes, zones, isolation,
 and stitching remain generator-owned. Learned routing/placement methods remain
@@ -104,7 +104,7 @@ Historical prototype findings:
   routing tasks while retaining their fixed copper and obstacle effect, or do
   not expose scoped Freerouting through the skill.
 
-Date: 2026-08-18.
+Date: 2026-08-19.
 
 Evidence base: `PCB-AUTOROUTING.md`. The operating contract and representative
 prototype are now validated and linked from `PCB.md`.
@@ -323,6 +323,26 @@ On a precision power-metering board, begin with ordinary GPIO and low-risk contr
 nets. Do not begin with shunt, Kelvin, ADC/reference, clock, isolation, guard, or
 current-carrying paths.
 
+### Three routing ownership modes
+
+- **Exploratory:** a disposable Freerouting scout used to expose placement,
+  congestion, corridor, layer, and via-pressure information. It may look at a
+  broad scope only when explicitly requested. Its report cannot be promoted and
+  its coordinates are not generator input.
+- **Critical:** generator/manual-owned topology whose geometry implements an
+  inductance, current/thermal, creepage, HF/impedance, return-path, Kelvin, guard,
+  star-point, or similar requirement. Route and independently audit it before
+  producing the promotable seed. The seed audit must prove each declared critical
+  group is present; the wrapper locks every existing route only in the scratch
+  export board and proves the DSN carries it as fixed copper.
+- **Routine:** the explicit low-risk allowlist left open in that seed. This is the
+  only scope eligible for Freerouting candidate promotion.
+
+The preferred sequence is scout, revise placement, discard scout copper, author
+the critical skeleton, and then autoroute the routine residue. A DRC-clean route
+does not move a net from critical to routine: DRC does not prove loop inductance,
+return continuity, impedance, current density, thermal performance, or topology.
+
 ### Initial backend
 
 Use a local Freerouting process through KiCad's production DSN/SES interchange path
@@ -383,6 +403,8 @@ routing objects rather than silently omitting them.
 
 ### 1. Establish routing intent
 
+- If placement quality or routability is uncertain, run an explicitly exploratory
+  scout first and use only its congestion/corridor evidence; discard its copper.
 - Complete mechanically constrained placement, stackup, plane strategy, keepouts,
   net classes, and rule priorities.
 - Route critical topology in the generator and mark it immutable for the experiment.
@@ -491,6 +513,7 @@ it must not decide electrical route scope.
 
 Candidate operations:
 
+- `explore`: run a structurally non-promotable scout for placement and congestion evidence;
 - `prepare`: qualify the seed, create scratch space, export DSN, and record provenance;
 - `route`: invoke a configured local router with bounded resources;
 - `inspect`: import or locate an imported scratch candidate and enforce invariants;

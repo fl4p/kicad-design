@@ -412,6 +412,10 @@ class AutorouteContractsTests(unittest.TestCase):
             "verdict": "PROMOTABLE_CANDIDATE", "verdict_reason": "all checks passed",
         }
         autoroute.validate_promotion_report(report)
+        report["mode"] = "exploratory-report"
+        with self.assertRaisesRegex(autoroute.AutorouteError, "not a promotable"):
+            autoroute.validate_promotion_report(report)
+        report["mode"] = "route-and-report"
         report["promotion"]["checks"] = {"made_up": True}
         with self.assertRaisesRegex(autoroute.AutorouteError, "exact required set"):
             autoroute.validate_promotion_report(report)

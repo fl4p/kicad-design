@@ -74,6 +74,44 @@ digest-explicit approval boundary. A project generator consumes the resulting
 canonical route manifest; Java, DSN, SES, and the raw imported board never become
 build dependencies or production artifacts.
 
+### Exploratory routing is structurally non-promotable
+
+Use `--exploratory` when Freerouting is a floor-planning probe rather than a
+source of accepted routing. An unconfigured router run now requires this flag,
+an explicit class or `--allow-all-net-classes`, and at least one explicit copper
+layer. Its report has `mode: exploratory-report`, verdict `EXPLORATORY` when the
+generic checks pass, and no promotion object. The promoter accepts only
+`mode: route-and-report` plus `PROMOTABLE_CANDIDATE`.
+
+Prefer a named scout class. Whole-board exploration is an explicit decision, not
+the default:
+
+```sh
+python3 scripts/kicad_route_candidate.py project/board.kicad_pcb \
+  --exploratory \
+  --allow-net-class ScoutRoutine \
+  --allow-layer F.Cu --allow-layer B.Cu \
+  --java VERIFIED_JAVA_PATH \
+  --freerouting-jar VERIFIED_JAR_PATH \
+  --router-sha256 VERIFIED_JAR_SHA256 \
+  --expected-router-version 2.3.0 \
+  --report work/scout-report.json \
+  --keep-workspace work/scout-workspace
+```
+
+Use the real generated board basename so its same-stem `.kicad_pro` and
+`.kicad_sch` remain available for project interpretation and parity. The wrapper
+already makes the writable scratch copy; do not manufacture a renamed board
+without copying and binding all of its same-stem sidecars.
+
+The scout board is useful for congestion, corridor, layer-pressure, and placement
+evidence. Do not promote it and do not copy its trace coordinates into the
+generator. After revising placement, author and audit the critical skeleton in
+the generator, then emit the deterministic seed whose remaining opens are the
+routine scope. A configured `--exploratory` run is also permitted for a
+non-promotable rehearsal of that tracked scope; it still emits no promotion
+evidence.
+
 Use tracked `autoroute.json` configuration for promotable work. It binds the
 backend, hermetic input list, exact KiCad net classes and styles, allowed layers,
 limits, position-sensitive seed DRC baseline, shell-free seed/final project
@@ -137,7 +175,7 @@ alone can still produce wrong-width segments. The wrapper also passes `-inc`
 as defense in depth, but live calibration proved ignored-class routing can still
 occur; post-import filtering is the authority.
 
-Verdicts are `PREPARED`, `PREPARED_WITH_FINDINGS`,
+Verdicts are `PREPARED`, `PREPARED_WITH_FINDINGS`, `EXPLORATORY`,
 `PROMOTABLE_CANDIDATE`, `REPORT_ONLY`, `REJECT`, or `ERROR`.
 `PROMOTABLE_CANDIDATE` requires every promotion check to be exactly true and
 no promotion blocks. Exit 0 means the report completed; use
@@ -191,7 +229,7 @@ digest, duplicates/overlaps, KiCad 10 through-via enums, exact DRC
 multiplicity/positions, hermetic/symlink handling, installer authorization and
 archive safety, tool pins, scope/style filters, route-lock normalization,
 protected-route preservation, DSN fixed copper, path collisions, shell-free
-audits, environment scrubbing, and atomic reports.
+audits, environment scrubbing, exploratory promotion stripping, and atomic reports.
 
 **`transform_pin` is NOT calibrated.** `calibration_plan()` *enumerates* the 12
 (angle, mirror) cells; nothing here compares any cell against KiCad ground
