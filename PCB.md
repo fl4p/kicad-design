@@ -675,6 +675,63 @@ that matters. Write the derivation down; the next reader will otherwise see only
 the wrong place.
 
 
+## A slow generator: profile by OUTCOME, and measure the repeat rate before you cache
+
+A board generator that takes tens of minutes stops being a tool you iterate with, and the fix is
+usually not the one the profile appears to name. Measured on a 4-layer, 169-connection board whose
+run went from a `--full` that never finished a second round in 44 minutes to 2 min 58 s, with a
+**byte-identical `.kicad_pcb` at every step**.
+
+**Slice the profile by outcome, not only by function.** A function-level sampler said the spatial
+index was half the run, which reads as "make the index faster" — and an index rewrite, benchmarked
+against 40 000 recorded real queries, returned identical results for **1.12x**. The useful cut was
+one `perf_counter` around the top-level routing call, bucketed by return value:
+
+```
+routed  n=138    4.9s   3.6%   mean=0.04s
+FAILED  n=411  128.3s  96.4%   mean=0.31s
+```
+
+**96.4 % of the time went to searches that fail**, because a success stops at the first candidate
+that clears and a failure exhausts the families. No function-total profile shows that, since both
+outcomes share the same stacks. Bucketing by return value costs one timer and reframes the work.
+
+**Count how often the code is asked the SAME question before writing a cache.** Reading the
+candidate-generation source suggested 20–35 % duplication; a counting set measured **85.9 %**
+(22 887 753 repeats of 26 638 958 segment tests). That gap is the difference between "probably not
+worth it" and "do this first" — one instrumented run buys it. Do the same for the failing side:
+411 failed calls contained 116 exact repeats.
+
+**Two traps that cost real time here:**
+
+* **A sound cache can be useless.** The first failure-cache design invalidated on every via, which
+  is correct — and measured **1142 invalidations against 14 hits, no speedup at all**. Cache
+  utility depends on *temporal locality relative to the invalidation boundary*, not on the total
+  count of duplicate questions, so counting duplicates globally overestimates cacheability.
+  Measure hits **surviving the proposed lifetime**, not global duplicate keys.
+* **Widening the key can beat widening the invalidation — but it is a trade-off, not a rule.**
+  Naming the one varying input in the key instead of clearing on it took the same cache from 14
+  hits to 116 and 1.53x. That wins when the dependency is low-cardinality, cheap to hash and
+  stable, and when retaining superseded generations is acceptable. Invert any of those and
+  clearing is better: key on a monotonically increasing revision and every old generation is
+  retained but unreachable, so memory grows per edit where a clear would have bounded it.
+
+**Verify with the artefact hash, and know what it does not prove.** A matching violation count is
+weak — two runs can fail differently and tie. Byte identity is far stronger and costs one command.
+It is **strong evidence that the artefact of the tested run is unchanged; not proof that the
+mechanism producing it is correct.** Demonstrated the hard way on this board: an A/B with a
+deliberately *unsound* cache key produced the identical file, because the unsound branch was never
+exercised in a verdict-changing way. Keep that distinct from hashing to prove *reproducibility*,
+which is a different claim.
+
+**Finally, a deliberate absence needs a sign on it.** Removing an invalidation because the
+dependency moved into the cache key leaves a site that looks exactly like a site where the
+invalidation was lost. On this board a second reader restored it — reinstating the version already
+measured as useless and silently costing the 1.53x. If an omission is load-bearing, say so *at the
+omission*, with the numbers; a note 500 lines away at the compensating code is not where the next
+reader will be standing.
+
+
 ## Is it ready to fab? — manufacturable and final are different questions
 
 A board can be DRC-clean, parity-clean and perfectly manufacturable and still be the **wrong

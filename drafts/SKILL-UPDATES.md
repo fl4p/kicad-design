@@ -1121,6 +1121,8 @@ Worth stating plainly because it is the reason to bother: the largest island was
 
 ## 36. When the clearance test is the profile, count how often it is asked the SAME question
 
+> **PROMOTED (speed-up content only), 2026-08-18** — folded into `PCB.md` → *A slow generator: profile by OUTCOME…*. The measurement method and the hit-rate discipline went across; the router-specific candidate-family analysis and the 12 % threshold did not, and the board this was measured on is moving to FreeRouting, so they are evidence rather than rules.
+
 **[SKILL.md Guards / PCB.md — router performance, continued from §31]**
 
 A candidate-polyline router spends its life in one function: is this segment clear of everything near it. On this board a stack sampler put `SpatialIndex.near` + `_cells` at **49.9 %** of the run and the geometry tests at another 10.6 % — so the obvious reading is "make the index faster". That reading is wrong, and it is wrong in a way worth recognising early: **half the time went into *finding* obstacles, which is a call-frequency symptom, not an index-quality one.** An index rewrite, benchmarked against 40 000 recorded real queries, returned identical results at **1.12 × overall**. It was correctly rejected — a structure whose failure mode is silently dropping an obstacle should not be touched for 12 %.
@@ -1138,6 +1140,8 @@ Two pieces of method, both of which did work here:
 * **md5 the artefact, not the violation count — but state precisely what the hash proves.** A matching unrouted count is weak evidence: two runs can fail differently and tie. Byte identity is a far stronger *regression* oracle — it covers every serialized field rather than a summary statistic — and it costs one command, so take it whenever deterministic output is an intended invariant. The formulation to write down: **strong evidence that the artefact of the tested run is unchanged; never proof that the mechanism producing it is correct, and never proof it generalises to another input.** Measured, not supposed: a later cache in the same router was A/B'd with a deliberately *unsound* key and produced the identical board (§43). Note the honest reason, because the first draft of this bullet guessed wrong — it was not that a wrong verdict left no trace in the output, it was that **the unsound branch was never exercised in a verdict-changing way at all**. Both are real ways a hash stays green over a broken mechanism, along with a wrong FAIL suppressing a candidate that was not needed, two paths converging on identical copper, and a defect that appears only on another board or another ordering. Independent codex review reached the same limit from the other side — *"the hash proves final-artifact identity for that run, not memo correctness"*. Keep this distinct from §31, which rejects hashing a deliberately *incomplete* artefact, and from `SKILL.md`'s use of md5 to prove *reproducibility*: three different claims that must not be collapsed.
 
 ## 37. Verify a cache on the HIT — and a calibration that does not fire has told you something, so say which thing
+
+> **NOT PROMOTED — still staged.** Only the speed-up material was folded in. This entry is guard/calibration epistemology, and codex's review of it recommends splitting it and merging the unfired-calibration half into the existing calibration checklist rather than adding it whole. Its factual corrections have been applied; the restructure has not.
 
 **[SKILL.md Guards — the guard-review checklist, items 1, 5 and 7]**
 
@@ -1316,6 +1320,8 @@ placement generator's own `sanity()` it returns the legal window — `[31.450, 3
 ---
 
 ## 43. Profile by OUTCOME, not only by function — and when a cache is unsound, put the dependency in the KEY rather than invalidating
+
+> **PARTLY PROMOTED, 2026-08-18** — the outcome-profiling, temporal-locality and key-vs-invalidation trade-off went into `PCB.md`, along with the deliberate-absence lesson. The monotonicity proof and its preconditions did not: they are specific to a router being retired.
 
 **[SKILL.md Guards / PCB.md — router performance, continued from §31 and §36]**
 
