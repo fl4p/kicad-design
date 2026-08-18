@@ -1,8 +1,8 @@
 # PCB layout and footprints (KiCad)
 
 Companion to `SKILL.md`. **Read this file when the task involves the board** —
-`.kicad_pcb`, `.kicad_mod`, `pcbnew` scripting, DRC, zones, footprints, land
-patterns, stackup, creepage, surface leakage, or **fab output and release**
+`.kicad_pcb`, `.kicad_mod`, routing/autorouting, `pcbnew` scripting, DRC, zones,
+footprints, land patterns, stackup, creepage, surface leakage, or **fab output and release**
 ("is this ready to order?"). Schematic-only work does not need it.
 
 Everything in `SKILL.md` still applies here: generate rather than hand-place,
@@ -56,6 +56,112 @@ $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x
   without reading its restriction flags: a via inside a keepout that explicitly
   permits vias is not a violation. Triage third-party findings before promoting
   any of them to a blocker, and say in the review which ones you dismissed and why.
+
+## Scoped external autorouting: default only after the project opts in
+
+For a generated board with mature placement and rules, use Freerouting as the
+default **candidate backend for the project's declared routine scope** when all
+of these tracked inputs exist:
+
+- `autoroute.json` with an exact backend, net-class allowlist, layer allowlist,
+  styles, limits, seed baseline, audits, and manifest path;
+- a dedicated KiCad net class whose live `.kicad_pro` assignments and dimensions
+  match that configuration exactly;
+- a generator stage that emits a deterministic, filled seed with only the named
+  routing tasks open; and
+- a project-local, Freerouting-independent manifest applicator.
+
+If any item is absent, keep the existing native/manual routing path. This is not
+permission for silent whole-board autorouting. Placement, fanout, high-current
+copper, critical nets, differential/skew constraints, isolation, planes, zones,
+and post-route stitching stay generator-owned unless the project explicitly
+defines and audits a different boundary. Freerouting does not place footprints;
+a poor resistor/capacitor grid is a placement problem and must be fixed before
+routing.
+
+The production flow is a candidate-and-promotion pipeline:
+
+```sh
+# From the kicad-design skill root. Status is read-only; install needs explicit
+# user authorization and an explicit --yes.
+python3 scripts/kicad_autoroute_tools.py status
+python3 scripts/kicad_autoroute_tools.py install --yes
+
+# Set this to the Python interpreter shipped with the installed KiCad build.
+# The candidate wrapper can discover it, but seed generation and promotion use
+# pcbnew directly and therefore require an explicit executable.
+KICAD_PYTHON=/path/to/kicad-bundled-python3
+
+# Project-specific command: emit a deterministic seed, not a final board.
+"$KICAD_PYTHON" project/gen_pcb.py --autoroute-seed --output work/seed.kicad_pcb
+
+python3 scripts/kicad_route_candidate.py work/seed.kicad_pcb \
+  --config project/autoroute.json \
+  --report work/route-report.json \
+  --keep-workspace work/router-workspace \
+  --fail-on-findings
+
+# After visual review, copy candidate.board_path and the exact candidate/report
+# digests from the report. Promotion refuses changed inputs, a substitute board,
+# or a non-promotable verdict.
+"$KICAD_PYTHON" scripts/kicad_route_manifest.py promote \
+  --seed work/seed.kicad_pcb \
+  --candidate-board CANDIDATE_BOARD_PATH \
+  --config project/autoroute.json \
+  --report work/route-report.json \
+  --project-root project \
+  --approve-candidate-sha256 CANDIDATE_SHA256 \
+  --approve-report-sha256 REPORT_SHA256 \
+  --output-manifest project/routes.json
+
+# The normal generator consumes only the reviewed manifest, not Java/DSN/SES.
+"$KICAD_PYTHON" project/gen_pcb.py --full
+
+# Prefer one project-owned final wrapper that regenerates reproducibly and emits
+# a canonical report covering DRC, parity, calibrated audits, and exact routes.
+"$KICAD_PYTHON" project/verify_final_pcb.py
+```
+
+Treat DSN, SES, Freerouting's completion count, and the raw imported board as
+untrusted evidence. KiCad's SES importer replaces routing rather than providing
+a trustworthy edit script. The wrapper therefore locks and proves the seed,
+extracts the raw addition delta, discards excluded-net/layer additions, applies
+only canonical segments and F.Cu-to-B.Cu through-vias to a fresh seed, and then
+proves that every protected seed primitive remains. Never promote the raw SES
+board.
+
+Freerouting 2.3.0 requires both `--router.automatic_neckdown=false` and
+`--router.fanout.enabled=false` for exact-width manifests. Its fanout fallback can
+emit micro-neckdown segments even when automatic neckdown is disabled. Its `-inc`
+ignored-class option is advisory only; the post-import filter and manifest scope
+are authoritative.
+
+A green DRC is necessary but not sufficient. Promotion also requires the exact
+position-sensitive seed DRC multiset, zero final unconnected items, schematic
+parity, complete non-routing projection equality, protected-route equality,
+final project audits that emit their required known-bad calibration marker,
+unchanged source/input bundles, exact
+toolchain receipts, and a promotion-enabled compatibility cell. A new KiCad,
+`pcbnew`, OS, architecture, Java, or Freerouting version starts staged/report-only
+until that exact cell is qualified.
+
+The manifest is the only generated source input: canonical segments and through
+vias, exact nanometre geometry and style, the reviewed seed digest, project input
+bundle, project applicator hash, toolchain receipt, and candidate/report digests.
+The normal generator must re-create the seed digest before applying it and must
+re-extract the final routes to prove exact equality. Re-running Freerouting is not
+part of board reproduction.
+
+Make the final verification result a canonical, tracked machine-readable report,
+not a set of unrelated terminal transcripts. It must bind the final board digest
+and promoted route digest and include a full two-run reproduction result, JSON DRC
+with schematic parity, the calibrated project-audit result, and exact manifest
+re-extraction. A failure in any member makes the report fail; a DRC-only report is
+not release evidence.
+
+See [`scripts/README.md`](scripts/README.md) for the command contract and
+[`drafts/PCB-AUTOROUTING.md`](drafts/PCB-AUTOROUTING.md) for the research evidence
+and limitations behind this policy.
 
 ## Decoupling is a current loop, not a placement radius
 

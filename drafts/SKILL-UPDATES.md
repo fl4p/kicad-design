@@ -22,11 +22,19 @@ them a guard, and between them most of this file. §§36–37 and §43 have a fo
 a second codex review then attacked the fix rather than the design; two of its findings were
 real defects, one of them in the guard I had just written to protect the change.
 
+§§44–52 have a fifth source — **closing the board's last 9 unrouted connections** (2026-08-18)
+— and they are the only entries here written while replacing an algorithm rather than fixing a
+defect. Two of them (§47, §51) exist because a confident diagnosis of mine was measured and turned
+out to be wrong, and one (§49) because the obvious form of a calibration I had just written for
+§48 would have passed without testing anything.
+
 **Before folding in, merge these clusters** — they are the same lesson found from different
 directions, and folding them separately would bloat the skill: §33 + §34 + §38 (*a real number
 attached to the wrong cause / population*), §29 + §35 (*a copper test must consider every
 layer's fill*), §13 + §42 (*a table or range typed apart from its subject goes stale, including
-across files*), §11 + §40 (*encode the premise as executable code, then interrogate it*).
+across files*), §11 + §40 (*encode the premise as executable code, then interrogate it*),
+§25 + §48 + §49 (*a calibration that fires for the wrong reason, has expired, or was never
+differential*), §9 + §52 (*silk tests, and which object each one is actually about*).
 
 Verified against the current skill text before writing: none of the greps for
 `package page`, `assets.infineon`, `ground_pin_not_ground`, `centroid`, `pad centroid`,
@@ -387,6 +395,8 @@ trade-off in the design document rather than claiming nothing is lost.
 
 ## 10. A calibration needs its own guard: it must fire for the RIGHT reason, and its injection site must not be exempt
 
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Guards* as *a calibration is code, and it breaks in ways that look like it working*, compressed to one bullet naming all five failures.
+
 → **`SKILL.md`**, *Guards* — this is the single largest addition proposed here, because five
 calibration failures in one session exposed five different ways the harness or injection can
 be wrong, and every one of them *looked* like it was working.
@@ -602,13 +612,16 @@ and the second is a finding worth as much as a spec.
   also earned its keep immediately: the footprint is `Lug_M4_Ring`, I wrote `M4_RingLug`, and
   because `FootprintLoad` returning `None` raises rather than defaulting, the error named the
   library and the generator it came from instead of producing a board with a wrong obstacle.
-- **`kicad-cli ... --exit-code-violations | tail` always exits 0** — the pipe makes `$?`
+- **PROMOTED 2026-08-18 (this bullet only, into `SKILL.md` -> *The verification ladder*):**
+  **`kicad-cli ... --exit-code-violations | tail` always exits 0** — the pipe makes `$?`
   belong to `tail`. Capture the status before piping, and judge DRC by the report contents
   regardless. Measured: exit 0 with 42 violations present.
 
 ---
 
 ## 16. A datasheet table's unit column is shared down the rows — take the unit from YOUR row
+
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Never quote a spec from memory*, as the first bullet of that list.
 
 → **`SKILL.md`**, *Never quote a spec from memory*. Added after the entries above, but it is
 the highest-value item in this file: it is the one that changed a circuit.
@@ -684,6 +697,8 @@ What generalises:
 
 ## 18. When two requirements squeeze a value from both sides, assert the FEASIBLE INTERVAL, not the chosen value
 
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Close every external interface*, as the closing bullet.
+
 → **`SKILL.md`**, *Close every external interface* / component-sizing rules. This is the
 structural lesson behind §16, and it is more general than the unit error that exposed it.
 
@@ -720,6 +735,8 @@ What generalises:
 ---
 
 ## 19. When a bound comes from a PART rather than from a formula, the guard must check the part is fitted — and calibrate one injection per MECHANISM
+
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Guards*, cross-referencing the promoted SS18 bullet.
 
 → **`SKILL.md`**, extending §10 (*a calibration needs its own guard*) and §11 (*encode the
 quantitative premise as a guard*).
@@ -1261,6 +1278,8 @@ obviously generous, and at 100 °C it is not.
 
 ## 41. A retraction that lands only in the document is HALF a retraction — grep the runtime output too
 
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Guards*, near the end of the list.
+
 → **`SKILL.md`**, near the provenance rules; pairs with the guard checklist's *"provenance must
 not claim more than was actually done"*.
 
@@ -1405,3 +1424,221 @@ advice lives and not only where the finding was made: **byte-identical output di
 unsound cache key.** A verification tool that has been seen to miss the class of defect you are
 using it against has to be labelled with that miss, or the next reader will spend it as proof.
 
+
+---
+
+## 44. A pattern router's ceiling is its FREE-COORDINATE COUNT — when the residue is structural, change the algorithm, do not enlarge the table
+
+**[PCB.md]**
+
+A hand-written router usually starts as a family of candidate polylines: L-shapes, Z-shapes with
+an offset, staircases. Each family has some number of *free coordinates* — the offset, the jog
+position — and that number is the hard limit on how many walls of parts it can thread through
+slots it chooses. Two free coordinates cross two walls. A dense control section is four to six
+walls deep, and the connections that survive every family are exactly the ones that have to cross
+all of them: on this board, the driver outputs going from y 20 to the gate rows at y 56..73 past
+the interlock rows, the diagnostic rows and two ICs.
+
+The tell that you are at the ceiling rather than at a tuning problem: **the residue stops
+shrinking and stops changing shape.** Enlarging the family is quartic in the wrong place — the
+effort-3 two-jog staircase here already spends `13 x 13 x 5 = 845` candidates to buy *one* more
+free coordinate, and a fourth would be `~11 000`. Measured on this board: pattern families alone
+left 9 unrouted across two rip-up rounds, stable across runs.
+
+The fix is a different algorithm, not a bigger table — a bounded A\* over a uniform grid, which
+has as many free coordinates as it has cells. **Run it only on what the pattern families have
+already refused**, and the cost stops mattering: 12 connections at 0.6–9.7 s each is affordable
+where the same search on all 133 would not be. The board went from 9 unrouted to **0**, DRC from
+7 violations + 9 unconnected to 1 + 0.
+
+Keep the pattern families. They are cheap, they run on everything, and they produce geometry a
+human recognises; a board routed by grid search everywhere is a board whose geometry nobody chose.
+The grid is the last resort, and saying so in the code is what stops a later edit from promoting
+it.
+
+## 45. A grid used as a search structure must be a SOUND proxy for the continuous test — and the exact test stays the authority
+
+**[PCB.md]** — the companion to §44, and the part that decides whether the search is trustworthy.
+
+Two rules, and each one was load-bearing.
+
+**The grid never decides.** Every polyline the search produces goes back through the *same* exact
+clearance test every other path on the board passes. A grid that is subtly too permissive then
+costs a refusal, not a bad board — the failure mode is bounded on the safe side by construction.
+This is worth the double work: rasterised occupancy and closed-form segment geometry disagree at
+the margins, and you do not want to find out which was right from a fab.
+
+**And the grid must still be sound, or the exact test rejects paths the search already committed
+to.** A cell is tested as a *point* carrying the track's half-width plus its clearance — and plus
+**half a grid pitch**. That last term is the whole argument: moves are axis-aligned and exactly
+one cell long, so every point of the segment joining two free cell centres lies within `G/2` of
+one of them. Drop it and the grid is a *sampling* of the segment rather than a proxy for it, with
+exactly the same defect as a clearance test that walks a segment every 0.1 mm and cannot see a
+violation between two samples.
+
+Note the asymmetry: the inflation makes the grid slightly *conservative*, which costs a little
+reach in tight slots and buys the guarantee. At `G = 0.10` mm the inflation is 0.05 mm and a
+1.075 mm pad-to-pad slot still admits a 0.25 mm track with clearance, so it cost nothing
+measurable here.
+
+## 46. A router's "routed" is its own RETURN VALUE — check that the copper it emitted actually joins the two points
+
+**[PCB.md]**, and it generalises past routers to anything that reports its own success.
+
+Nothing between a greedy router and DRC asks whether a connection's copper is connected. The
+router returns `True`, the caller records the connection as routed, the unrouted list is empty,
+and the generator reports a finished board. DRC will find it — but DRC is the last rung, and on a
+25-minute pipeline that is a slow way to learn it.
+
+The concrete defect: emitting a multi-layer path as per-layer runs plus vias between them, the
+first version replaced the first cell's coordinate with the exact endpoint. When a path changes
+layer on its *first* cell that run is one cell long, collapses to a single point, gets dropped as
+degenerate — and leaves the via with **no copper joining it to the pad**. Reproduced exactly:
+
+```
+polys = [(B.Cu, [(1.0,1.0),(1.25,1.0)])]   vias = [(1.0,1.0)]
+```
+
+a barrel on the bottom layer, nothing on the top, and a cheerful `True`.
+
+Two fixes and only the second is general. *Prepend* the endpoint instead of overwriting it — that
+repairs the case I had thought of. Then **walk the chain**: run 0 starts at `a`, run *n* ends at
+`b`, consecutive runs meet at the via between them, and no "via" joins two runs on the same layer.
+That one does not depend on my having enumerated the causes, and it is the one to write.
+
+## 47. A search's refusal must say WHICH refusal — "no path" and "path rejected" point in opposite directions
+
+**[SKILL.md Guards]**
+
+A bounded search has at least three distinct ways to fail and they demand opposite responses:
+
+* **the open list emptied** — the goal is genuinely unreachable in this obstacle set. Change the
+  board: rip up a neighbour, move a part, re-order;
+* **the budget was exhausted** — the search gave up. Raise the budget, improve the heuristic, or
+  accept it; the board may be fine;
+* **a path was found and the exact test rejected it** — the *grid* is wrong, not the board. This
+  one points at your own code and is the one a single boolean hides completely.
+
+Collapsing these into `False` costs real diagnosis time. Recording them cost four lines and
+immediately overturned a wrong conclusion of mine: several connections were refusing in 0.1 s, and
+I had diagnosed pad escape — the search starting at a pad centre without the escape logic the
+pattern router has for stepping out of a package. I measured it: all four neighbouring cells were
+free, identical to a known-good control. **The hypothesis was dead and the instrumentation gave
+the real answer** — `open list emptied after 432 pops`, a sealed pocket of ~4 mm² in a narrow
+strip. Same symptom, different cause, opposite fix.
+
+Note also what the measurement itself got wrong, because it is the more transferable lesson: I
+measured the four immediate neighbours and the nearest free cell. Both were fine. The quantity
+that mattered was **the size of the reachable region**, which I had not thought to measure. When a
+probe comes back clean, ask whether it measured the quantity the hypothesis was actually about.
+
+## 48. A guard branch exercised only by a REAL defect has an expiry date — calibrate it BEFORE you fix the defect
+
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Guards*, immediately after *calibrate against a known-bad input*.
+
+**[SKILL.md Guards]** — this is §"a calibration can stop exercising its branch when the BOARD
+changes" with the timing made explicit, and it is the version that would have caught it.
+
+A check with two branches had a calibration for one of them. The other — orphaned pour islands —
+had none, and nobody noticed, because the real board had orphans and the branch fired on every
+run. That is genuine evidence. It is also evidence that **expires the moment you fix the board**:
+remove the islands and the branch goes silent, untested, still reporting PASS, and the loss is
+invisible precisely because the output improved.
+
+The rule: when you are about to remove the condition that has been exercising a guard, the
+calibration for that guard is part of the fix, not follow-up work. Write it first, watch it fire
+while the defect is still there, then fix the defect.
+
+## 49. On a board that ALREADY exhibits the fault, a calibration must be DIFFERENTIAL
+
+> **PROMOTED, 2026-08-18** — folded into `SKILL.md` -> *Guards*, paired with SS48.
+
+**[SKILL.md Guards]**, and it is the trap directly under §48.
+
+Having written the missing calibration, the obvious form is: inject the fault, assert the check
+raises, assert the message matches. On a board with 16 orphaned islands already, **that passes
+without testing the injection at all** — the check raises because of the 16, the message matches
+because it always would, and the calibration reports FIRED having proved nothing. The naive form
+is exactly wrong on precisely the boards where the guard matters most.
+
+Make it differential instead: count the fault instances *without* the injection, count them
+*with* it, and require the count to rise **by exactly one** and the report to name the object you
+injected. That is sound whether the clean board has zero instances or sixteen, and it is what
+turned "FIRED" into `orphan-island 0 -> 1`, which is a claim with content.
+
+The general shape: **a calibration must be a measurement of the injection's effect, not of the
+board's state.** Any calibration whose assertion could pass on the un-injected board is decorative.
+
+## 50. Scope a global policy to the objects whose requirement motivated it — the measurement that set it may be narrower than the setting
+
+**[PCB.md]**
+
+Zone island removal was `NEVER` board-wide, and it had been *measured*: a compromise setting took
+two inner fills from congruent-to-0.0 µm² to 189.7 µm² against a 50 µm² limit. Good decision, real
+number, correctly documented — and applied to every pour on the board.
+
+But re-read what the number is about. It is about the pours whose **shape is a requirement**: two
+mirrored power pours whose congruence *is* the board's thermal symmetry, where removal destroys
+copper asymmetrically. The control- and host-section ground pours have no mirror partner and are
+not in the congruence check at all. For them an island is not a shape question — it is a floating
+plate under eight high-impedance ADC inputs, i.e. a coupling path *between* them, which is a harm
+the codebase's own stitching routine already names in its docstring. Those pours should remove
+theirs; the power pours should not.
+
+Result: 6 islands / 7.99 mm² → **0**, congruence unchanged at 6.5 µm². The fix was not a better
+threshold — it was noticing that a well-measured decision had been generalised past the objects
+its measurement covered. When you inherit a setting with a number attached, check *which objects
+the number was measured on* before assuming it applies to all of them.
+
+## 51. A plausible mechanism can be exactly BACKWARDS — measure it, and record the number that killed it
+
+**[PCB.md]**, and the entry exists because the argument still sounds right.
+
+Bottom-layer copper here carries the reference pours under the control and host sections, so a
+track routed there does not merely occupy space — it *cuts a plane*, and a cut plane is what turns
+into the orphaned islands something else then has to chase. The first grid-search pass, costing
+both layers equally, had taken the island count from 6 to 9 with **every new one a bottom-layer
+ground island**. Charging bottom-layer travel 3× is the obvious targeted fix: short hops stay
+cheap, long runs down the plane get expensive.
+
+It made it worse. Islands went **9 → 17 before stitching, 16 after**, and the stitcher's success
+collapsed from 5 anchored to 1. Pushing the search onto the top layer displaces *other*
+connections onto the bottom layer in worse places — a second-order effect the argument never
+considered and had no way to.
+
+Reverted, with the constant left at parity and the killing number written **beside it in the
+code**, not only in a commit message:
+
+```python
+# Travelling on B.Cu was charged 3x here, and it was MEASURED and REVERTED.
+# ... the board disagreed: at 3x the count went to SEVENTEEN before stitching
+# and sixteen after, and the stitcher went from anchoring 5 to anchoring 1.
+MAZE_LAYER_COST = {pcbnew.F_Cu: 1.0, pcbnew.B_Cu: 1.0}
+```
+
+A reverted experiment that leaves no trace gets re-run. The comment is the artefact, and it has to
+live where the next person will be tempted to change the constant.
+
+## 52. Reference designators need their own over-PAD check — courtyards are the wrong test and so are tracks
+
+**[PCB.md]**
+
+`silk_over_copper` on a reference field is the one silk violation the usual guards miss, and each
+of the three obvious tests is wrong in a different way:
+
+* KiCad's own `silk_overlap` compares silk against silk;
+* a hand-written note check typically compares board **notes** against **courtyards** — it does
+  not look at reference fields at all;
+* and testing references against *courtyards* fails every densely packed passive row for a
+  non-problem, while testing them against *tracks* fails for something the solder mask covers.
+
+The right object is the **mask opening**: silk is clipped where it crosses an exposed pad, so the
+test is visible silk reference bbox vs. every *other* footprint's pads on the mask layer. That is
+a dozen lines and it closed the last DRC violation on this board — one introduced when a
+diagnostic block was re-packed and two passives moved under an IC's reference field, which had sat
+in empty space until then.
+
+Two details worth copying. Key the fix as an **offset from the footprint origin**, never a
+board-absolute position, or it silently stops tracking the part the next time placement moves.
+And exempt a part's own pads — a reference over its own body is normal and flagging it makes the
+check unusable.

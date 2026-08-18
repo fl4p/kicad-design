@@ -1,10 +1,10 @@
-# `kicad-design/scripts` — proposed
+# `kicad-design/scripts` — reusable verification and routing helpers
 
-**Status: proposal, not yet referenced from `SKILL.md`.** Extracted 2026-08-11
-from the `pwr-metering/hw/shunt-adc` generators after that project hit several
-of the failures `SKILL.md` describes in prose.
+**Status: live and referenced from `SKILL.md` / `PCB.md`.** The first helpers
+were extracted 2026-08-11 from `pwr-metering/hw/shunt-adc`; the qualified
+autorouting boundary was added and forward-tested 2026-08-18.
 
-## Why these four and not others
+## Why these helpers and not others
 
 `SKILL.md` already *documents* every trap below. What it cannot do in prose is
 stop the next project from re-implementing the workaround and getting it wrong
@@ -17,6 +17,10 @@ whose failure mode is a **silent false PASS**:
 | `kicad_symlib.py` | `extends` (53.8 % of the stock library), unit-0 pins, rotate-then-mirror pin transforms |
 | `kicad_verify.py` | `--exit-code-violations`; the sparse/absent `rule_severities` map read as "nothing ignored" |
 | `kicad_repro.py` | "reproducible" claimed by a generator that never ran; **and** a concurrent writer replacing the artifact you verified |
+| `kicad_autoroute.py` | strict shared config, route, manifest, DRC-baseline, and non-routing-projection contracts |
+| `kicad_autoroute_tools.py` | unapproved downloads, ambient Java/JAR drift, unsafe archives, or a cache receipt that does not bind installed contents |
+| `kicad_route_candidate.py` | an external router or diagnostic writing the generated board; an unpinned router, lost DSN constraints, or out-of-scope copper reading as an acceptable route |
+| `kicad_route_manifest.py` | a reviewed candidate being promoted without exact seed/input/applicator/toolchain and route-digest equality |
 
 Each raises rather than returning an empty container **on the paths listed
 above**, and every error message says *which* condition failed — because "the
@@ -61,6 +65,133 @@ DRC rc=0  {'drc violations': 0, 'unconnected pads': 0, 'footprint errors': 0}
 The renamed-net, pin-less-symbol, extends-cycle, digest-drift, empty-outputs
 and `min_components<1` guards were each fired on a known-bad input before being
 accepted.
+
+## Qualified Freerouting candidate and manifest workflow
+
+`kicad_route_candidate.py` is a scratch-only, fail-closed wrapper for the
+pinned Freerouting toolchain. `kicad_route_manifest.py promote` is the separate,
+digest-explicit approval boundary. A project generator consumes the resulting
+canonical route manifest; Java, DSN, SES, and the raw imported board never become
+build dependencies or production artifacts.
+
+Use tracked `autoroute.json` configuration for promotable work. It binds the
+backend, hermetic input list, exact KiCad net classes and styles, allowed layers,
+limits, position-sensitive seed DRC baseline, shell-free seed/final project
+audits, project-local applicator, and manifest output.
+
+Check or install the locked toolchain:
+
+```sh
+python3 scripts/kicad_autoroute_tools.py status
+# Network/cache mutation requires user authorization and the explicit flag:
+python3 scripts/kicad_autoroute_tools.py install --yes
+```
+
+The lock pins Freerouting 2.3.0 and a Java 25 Temurin JRE by URL, size, and
+SHA-256 for each staged platform. Install uses verified TLS, traversal-safe
+archive extraction, and an atomic receipt. A promotion-enabled cell additionally
+pins and rechecks the installed Java executable and complete installed-tree
+digests, so the receipt cannot authorize locally replaced runtime contents. It
+never falls back to an ambient JAR/JRE for configured promotion.
+
+Prepare or route a project-owned seed:
+
+```sh
+python3 scripts/kicad_route_candidate.py project/seed.kicad_pcb \
+  --config project/autoroute.json \
+  --prepare-only \
+  --report work/prepare-report.json
+
+python3 scripts/kicad_route_candidate.py project/seed.kicad_pcb \
+  --config project/autoroute.json \
+  --report work/route-report.json \
+  --keep-workspace work/router-workspace \
+  --fail-on-findings
+```
+
+Full runs must retain a workspace. The source board and every declared input are
+hashed before and after; only scratch paths are passed to KiCad's
+`ExportSpecctraDSN`/`ImportSpecctraSES`, Freerouting, saves, DRC, and audits.
+The input bundle rejects symlinks and includes same-stem sidecars, declared
+inputs, top-level project Python, and project-local library resources.
+
+KiCad 10's SES importer replaces board routing. Raw SES “removals” are therefore
+not accepted as edit authority. The wrapper:
+
+1. refills and qualifies a fresh seed against the exact structured-DRC baseline
+   and seed project audits;
+2. exports DSN after proving every seed route appears as fixed copper;
+3. runs the bounded pinned router with ambient Java/Freerouting options scrubbed;
+4. retains the raw import but computes only its additions relative to the seed;
+5. discards excluded-net/layer additions and rejects wrong styles or unsupported
+   primitives;
+6. applies the canonical allowlisted additions to another fresh seed;
+7. compares that board against an empty-apply control using a complete
+   S-expression non-routing projection;
+8. proves every protected seed route remains, then reruns structured DRC,
+   connectivity, parity, input/source integrity, and configured project audits.
+
+Freerouting 2.3.0 must run with automatic neckdown and fanout disabled. Fanout
+has an independent micro-neckdown fallback, so disabling automatic neckdown
+alone can still produce wrong-width segments. The wrapper also passes `-inc`
+as defense in depth, but live calibration proved ignored-class routing can still
+occur; post-import filtering is the authority.
+
+Verdicts are `PREPARED`, `PREPARED_WITH_FINDINGS`,
+`PROMOTABLE_CANDIDATE`, `REPORT_ONLY`, `REJECT`, or `ERROR`.
+`PROMOTABLE_CANDIDATE` requires every promotion check to be exactly true and
+no promotion blocks. Exit 0 means the report completed; use
+`--fail-on-findings` when rejection must be a failing process status.
+
+After visual review, promote exact digests:
+
+```sh
+"$KICAD_PYTHON" scripts/kicad_route_manifest.py promote \
+  --seed project/seed.kicad_pcb \
+  --candidate-board CANDIDATE_BOARD_PATH_FROM_REPORT \
+  --config project/autoroute.json \
+  --report work/route-report.json \
+  --project-root project \
+  --approve-candidate-sha256 CANDIDATE_SHA256 \
+  --approve-report-sha256 REPORT_SHA256 \
+  --output-manifest project/routes.json
+```
+
+Promotion opens the actual candidate board and re-verifies its digest and exact
+scoped route delta in addition to the report verdict, every check, report/seed
+digest, configuration, reconstructed full live input bundle, project applicator
+source, route digest, current compatibility cell/tool receipt, and configured
+output path. The strict manifest contains only canonical
+segments and F.Cu-to-B.Cu through-vias with integer-nanometre geometry, exact
+style/scope, the reviewed seed digest, input/toolchain/applicator provenance,
+and review digests. The project-local applicator must compare the generated seed
+to `seed_sha256` before applying anything and re-extract exact routes after the
+final save.
+
+`--candidate-board` must be the exact `candidate.board_path` recorded by the
+report (normally the fresh-seed, filtered candidate), not a guessed workspace
+path and not the raw SES import. The promoter opens that board, verifies its
+digest, and independently extracts its scoped delta against the seed.
+
+After promotion, use a project-owned final verification wrapper where available.
+It should run the normal full generator in genuine two-run reproduction mode and
+write one canonical report binding the final board digest, JSON DRC and schematic
+parity counts, calibrated project-audit result, and exact manifest route digest.
+This wrapper is the release-evidence boundary; separate successful commands must
+not be assembled into an implicit PASS.
+
+Promotion is enabled only for an exact qualified
+`(OS, architecture, kicad-cli, pcbnew)` cell in
+`kicad-autoroute-compatibility.json`. Other cells remain report-only until
+forward-qualified. The demonstrated cell is KiCad/pcbnew 10.0.5 on Darwin
+arm64 with Freerouting 2.3.0 and the pinned Java 25 runtime.
+
+Focused tests cover strict config/manifest schemas, canonical route order and
+digest, duplicates/overlaps, KiCad 10 through-via enums, exact DRC
+multiplicity/positions, hermetic/symlink handling, installer authorization and
+archive safety, tool pins, scope/style filters, route-lock normalization,
+protected-route preservation, DSN fixed copper, path collisions, shell-free
+audits, environment scrubbing, and atomic reports.
 
 **`transform_pin` is NOT calibrated.** `calibration_plan()` *enumerates* the 12
 (angle, mirror) cells; nothing here compares any cell against KiCad ground

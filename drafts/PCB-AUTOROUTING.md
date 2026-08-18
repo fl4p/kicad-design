@@ -1,5 +1,12 @@
 # PCB trace autorouting in ECAD
 
+Implementation status (2026-08-18): the associated plan has been implemented
+for a qualified KiCad 10.0.5 / Darwin arm64 cell. Freerouting is used as an
+untrusted, scoped candidate generator; reviewed canonical routes are promoted to
+a project manifest and reproduced without Freerouting. See
+[`PCB-AUTOROUTING-PLAN.md`](PCB-AUTOROUTING-PLAN.md) for the operating contract,
+representative result, and current limits.
+
 Research snapshot: 2026-08-18.
 
 This document covers two independent routing axes. **Automation scope** ranges from

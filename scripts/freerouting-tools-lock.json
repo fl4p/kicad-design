@@ -1,0 +1,48 @@
+{
+  "schema": "kicad-autoroute-tools-lock-v1",
+  "backend": "freerouting-2.3.0-temurin-25.0.4+7",
+  "freerouting": {
+    "version": "2.3.0",
+    "url": "https://github.com/freerouting/freerouting/releases/download/v2.3.0/freerouting-2.3.0.jar",
+    "size": 62995156,
+    "sha256": "3cf18d608437740bc497db6b8ef5888e2e60a08de0def20691d1bad0c0e0ee24"
+  },
+  "jre": {
+    "version": "25.0.4+7",
+    "platforms": {
+      "darwin-arm64": {
+        "archive": "tar.gz",
+        "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jre_aarch64_mac_hotspot_25.0.4_7.tar.gz",
+        "size": 56207717,
+        "sha256": "bc5c721d4475b328e50cc0fbbe3319773db374716836e7caa8fb4398c1f90eba",
+        "java_path": "jre/jdk-25.0.4+7-jre/Contents/Home/bin/java",
+        "java_sha256": "2187a28d325113dd5a4af73cb35a3e4049876d474d601b5b1d60c5474cf2d28e",
+        "tree_sha256": "375fd00bd1284440978911c46c80da96fe432c5892a86badc35fa60b01316e6b"
+      },
+      "darwin-x64": {
+        "archive": "tar.gz",
+        "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jre_x64_mac_hotspot_25.0.4_7.tar.gz",
+        "size": 42133365,
+        "sha256": "1603a51392d6e4aa66dea50f60cc725d40ed77c05bf7557096e5003807236296"
+      },
+      "linux-arm64": {
+        "archive": "tar.gz",
+        "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jre_aarch64_linux_hotspot_25.0.4_7.tar.gz",
+        "size": 60478596,
+        "sha256": "1f2644427000316bc431df3389504551ed7464fe8486bf6b4f1130af9ffc8f55"
+      },
+      "linux-x64": {
+        "archive": "tar.gz",
+        "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jre_x64_linux_hotspot_25.0.4_7.tar.gz",
+        "size": 61714730,
+        "sha256": "aed3915f8facc0c80733ab2448bb0df4b494a36a2c5759e9a6e1eb979720f2b3"
+      },
+      "windows-x64": {
+        "archive": "zip",
+        "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jre_x64_windows_hotspot_25.0.4_7.zip",
+        "size": 58474646,
+        "sha256": "5b0d58f043f762fa3ee6cc12b6774b59b245cafdcb357e45ce61f822aa9a56cb"
+      }
+    }
+  }
+}
