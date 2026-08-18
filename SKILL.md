@@ -271,6 +271,25 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   depending on series, and at a 110 V fault the part's **working-voltage** rating binds
   independently of power. A protection resistor chosen at the nominal fault and the nameplate
   rating is sized twice over at the wrong number.
+- **When two requirements squeeze a value from both sides, assert the FEASIBLE INTERVAL, not
+  the chosen value.** Two node-definition resistors had to hold reverse `V_GS` under a 20 V
+  absolute maximum (`R ≤ 5.75 kΩ`) and leakage injection under the allocated 0.1 ppm
+  (`R ≥ 25 kΩ`). **The interval is empty; no value of `R` exists.** The guard did not say so,
+  because it was written the way component-sizing guards usually are — take the fitted value,
+  compute both consequences, check each against its limit. Fed the right leakage number it
+  would have failed with *"R is too large"*, which is **the wrong diagnosis**: it sends the
+  next person to try a smaller resistor, which fails the other requirement. Neither message
+  says "you cannot get there from here". Compute `lo = f(constraint_a)`, `hi = g(constraint_b)`
+  and `if lo > hi: raise "no value satisfies both"` **before** ever looking at what is fitted.
+  An empty feasible set is a different fault from a badly chosen value and needs a different
+  message, because the fix is a topology change rather than a BOM change — and it usually means
+  **a component is missing from the story, not that a number is wrong**. Here it meant the gate
+  clamps, carried as belt-and-braces, were in fact the primary protection and always had been:
+  the circuit was right and the rationale was wrong, which is the more dangerous state, because
+  the next person to simplify it deletes the part doing the work. State which corner each bound
+  comes from, too — those two are evaluated at different junction temperatures, and a guard
+  that collapses them onto one operating point cannot express "cold corner held by the
+  resistor, hot corner held by the clamp".
 
 
 ## The verification ladder
@@ -309,6 +328,11 @@ bare and `5` with the flag. So a CI step, a `set -e` script, or an agent that "a
 exit status is 0" passes a board it never checked — the anti-monotone false PASS this whole
 document is about, sitting in its own ladder. Either pass the flag, or parse the report and
 assert the violation count; never take `$?` alone as the verdict.
+
+**And the flag is defeated by a pipe.** `$K pcb drc --exit-code-violations … | tail` exits **0**
+whatever the board does, because `$?` then belongs to `tail` — measured: exit 0 with 42
+violations present. Capture the status before piping (or set `pipefail`), and judge the run by
+the report contents regardless.
 
 **`--severity-all` is not optional for ERC either, and "ERC = 0" is a statement about the
 severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities`,
@@ -811,6 +835,21 @@ figure, and say explicitly which one the calibration removes.
 **Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
 table. Every one of these was a real error caught by doing so:
 
+- **A table's UNIT column is shared down the rows — take the unit from YOUR row.** Under
+  `pdftotext -layout` a multi-row parameter block puts the unit on the *parameter's* row, and
+  that row can sit above, below or between the value lines it governs. Infineon's `IDSS` and
+  `IGSS` rows both render as `- 10 100`; the `µA` belongs to `IDSS` one line up, the `nA` to
+  `IGSS`. Reading `100 nA` for a **100 µA** leakage — wrong by 1000× — sized two resistors to
+  bound an all-off `V_GS` to **400 V instead of 0.4 V**, i.e. to bound nothing, and the design
+  note explaining that they made a gate clamp unnecessary was exactly backwards. It survived a
+  full guard suite, because every guard consumed the same constant: **a guard fed a constant
+  cannot check the constant.** Adjacent parameters with similar names and identical digits —
+  `IDSS`/`IGSS`, `ICBO`/`ICEO`, `IIL`/`IIH` — are the trap, since the unit is the only thing
+  separating them and it is the column the eye skips. Extract **value, unit and test condition
+  as one tuple** and put all three beside the constant: `IDSS_MAX = 100e-9` says nothing,
+  `# 100 uA at VDS=80V, VGS=0V, Tj=125C` makes the mismatch visible on the next read. Caught
+  only by an independent reader with the datasheet, which is the defence available when every
+  guard sits downstream of the error.
 - **Noise gain ≠ signal gain.** An op-amp's input-referred noise is multiplied by
   `1 + Rf/Rin`, not by the inverting gain `Rf/Rin`. Using 10 instead of 11 made a whole noise
   budget 10 % optimistic.
@@ -1122,6 +1161,68 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Calibrate against a known-bad input.** Copy the board, inject the exact fault the guard
   exists to catch (e.g. widen the EP land back to the unsafe stock size), and watch it exit
   non-zero. A guard never seen to fire is not a guard.
+- **Calibrate a branch BEFORE you fix the defect that has been exercising it.** A check with
+  two branches had a calibration for one of them. The other — orphaned pour islands — had none,
+  and nobody noticed, because the real board *had* orphans and the branch fired on every run.
+  That is genuine evidence, and it **expires the moment you fix the board**: remove the islands
+  and the branch goes silent, untested, still reporting PASS — and the loss is invisible
+  precisely because the output improved. When you are about to remove the condition that has
+  been exercising a guard, writing that guard's calibration is part of the fix, not follow-up
+  work. Write it first, watch it fire while the defect is still there, then fix the defect.
+- **On a board that ALREADY exhibits the fault, a calibration must be DIFFERENTIAL.** Having
+  written that missing calibration, the obvious form is: inject the fault, assert the check
+  raises, assert the message matches. On a board carrying 16 orphaned islands already, **that
+  passes without testing the injection at all** — the check raises because of the 16, the
+  message matches because it always would, and the harness reports FIRED having proved nothing.
+  The naive form is wrong on exactly the boards where the guard matters most. Count the fault
+  instances *without* the injection, count them *with* it, and require the count to rise **by
+  exactly one** and the report to name the object you injected. That is sound whether the clean
+  board has zero instances or sixteen, and it turns `FIRED` into `orphan-island 0 -> 1`, which
+  is a claim with content. General shape: **a calibration must be a measurement of the
+  injection's effect, not of the board's state. Any calibration whose assertion could pass on
+  the un-injected board is decorative.**
+- **A calibration is code, and it breaks in ways that look like it working.** Five distinct
+  failures in one guard suite, each reporting something that read as success. *The harness
+  expected the wrong exception contract* — it caught only `AssertionError` while the ledger
+  functions deliberately raise `ValueError`, so calibrations reported "did not fire" for guards
+  that had reached their intended refusal. *The injection did not create the fault* — "delete a
+  wire and watch a pin dangle" popped the **last** `SEGS` entry, a `PWR_FLAG` stub whose removal
+  dangles nothing, so the calibration passed a guard that had evaluated a healthy design. *The
+  injection site was exempt* — "carry a host net onto the isolated side" injected on the
+  isolator, which the isolation guard skips by design as a declared barrier crosser; any
+  ordinary part fired immediately. *The injection tripped a different check first* — moving a
+  merged land's split lines also changed the land's union, so the union check fired and the
+  containment check was never exercised. *The input sat in the guard's blind region* — the rail
+  chosen to test "glyph drawn over its own wire" had a **horizontal** wire, and that arm only
+  has a direction to compare for vertical ones. So: **a calibration counts only when the
+  injection actually created the intended fault, the input lies in the guard's active region,
+  the site is not on its exemption list, and the guard raises the expected type AND a message
+  fragment identifying the intended arm.** Check each claim explicitly — a silent return, an
+  unexpected exception, and the right type with the wrong message are three different
+  calibration failures — restore every injected mutation in `finally` so a failed calibration
+  cannot poison the ones after it, and where no valid input exists say so rather than skipping:
+
+  ```python
+  kept = [g for g in SEGS if pp not in ((g[0], g[1]), (g[2], g[3]))]
+  if len(kept) == len(SEGS):
+      raise AssertionError("UNVERIFIED: nothing touches that pin, cannot calibrate")
+  ```
+- **A guard is only as strong as its weakest link to a real object.** When the empty-interval
+  bullet under *Close every external interface* moved a bound from the resistors onto the gate
+  clamps, the guard's arithmetic was fine and completely hollow: it computed
+  `CLAMP_VBR_MAX + CLAMP_VF` and asserted the result was inside the absolute maximum, and both
+  are module constants — so **a board with no clamps on it at all passes that check**, because
+  nothing in it reaches for a component. Arithmetic over constants proves the design *intent*,
+  never the design. If a safety bound is provided by a part, assert the part exists, is on the
+  right net, and is the right MPN. **And calibrate one known-bad input per MECHANISM, not per
+  variable:** the pre-existing calibration perturbed the resistor, the only variable the guard
+  read, while both real failure modes — a substituted higher-breakdown clamp, and no clamp
+  fitted — change no resistor, so a passing suite proved nothing about either. Enumerate the
+  things that *produce* the bound and inject into each; here that turned one calibration into
+  three. Corollary for reviews: when a review moves a bound from one mechanism to another, the
+  guard **and** its calibrations both have to move. Fixing only the number leaves a guard
+  watching the wrong thing, which is worse than the original error because it now looks
+  deliberate.
 - **A guard is blind to whatever its data model omits, and that blindness is silent.** A
   text-overlap check iterated the generator's list of *text* objects and passed a caption
   printed straight through a power symbol's net name — because a net name is a symbol
@@ -1205,6 +1306,20 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
 - **Calibration must cover the case that matters, not the case you already fixed.** A cap guard
   tested `NaN` and `0.01` — both outside its acceptance band — and never tested a *plausible*
   bad measurement inside it, which is the one that raised the cap to full scale.
+- **A retraction that lands only in the document is HALF a retraction — grep the runtime output
+  too.** An independent review showed that a claimed *"bottom-leg match resolved to 0.027 mΩ at
+  50 A"* was code granularity, not accuracy: the ADC's ±1 µA input leakage into the divider's
+  90.9 kΩ is ±2 mΩ-equivalent and swamps it. The claim was withdrawn from the design document,
+  the section rewritten, an open item added — and the generator carried on printing
+  `bottom-leg match resolved to 0.027 mOhm at 50 A` to the console on every run. **The operator
+  reads the console, not §8**, and a number surviving in runtime output is still in circulation
+  no matter what the document now says; worse, it arrives with more authority, because it looks
+  like a measurement the tool just made. When you retract a claim, **grep the whole repo for the
+  NUMBER**, not the sentence — `0.027` was the only reliable handle, the surrounding prose
+  differed everywhere. And fix it by **re-labelling, not deleting**: the figure is still the true
+  LSB size and worth printing, so it now reads `bottom-leg LSB 0.027 mOhm (granularity, NOT
+  accuracy -- ADC leakage is +/-2 mOhm here)`. Deleting it would have lost a real number;
+  leaving it bare asserted something false.
 - **Protection on a precision node has a cost.** A TVS sized for an 85 V input leaks µA near
   breakdown — comparable to the entire load on a node built for 134 µVpp. Clamp at the victim
   end, disconnect with a relay, or document the residual risk; don't reflexively fit the part.
