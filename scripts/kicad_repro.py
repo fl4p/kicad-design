@@ -12,7 +12,7 @@ IS UNCHANGED, NEVER PROOF THAT THE MECHANISM PRODUCING IT IS CORRECT.
 Measured, not supposed: a router cache A/B'd with a deliberately UNSOUND key
 produced a byte-identical board, because the unsound branch was never
 exercised in a verdict-changing way on that input. A wrong verdict on a
-candidate that is never selected leaves no trace in the output. See PCB.md,
+candidate that is never selected leaves no trace in the output. See PCBNEW.md,
 "A slow generator", for the full statement.
 
 Project-agnostic. Nothing here knows about any particular board.
