@@ -5,9 +5,9 @@ Companion to `SKILL.md`. **Read this file when the task involves the board** —
 footprints, land patterns, stackup, creepage, surface leakage, or **fab output and release**
 ("is this ready to order?"). Schematic-only work does not need it.
 
-Everything in `SKILL.md` still applies here: generate rather than hand-place,
-climb the whole verification ladder, and write guards that fail when they cannot
-evaluate their input.
+Everything in `SKILL.md` still applies here: preserve the project's declared
+source authority, climb the whole verification ladder, and write guards that
+fail when they cannot evaluate their input.
 
 **This file is the board-layout core.** Four companions carry the rest, so a task pays
 only for what it needs:
@@ -83,20 +83,91 @@ default **candidate backend for the project's declared routine scope** when all
 of these tracked inputs exist:
 
 - `autoroute.json` with an exact backend, net-class allowlist, layer allowlist,
-  styles, limits, seed baseline, audits, and manifest path;
+  styles, limits, seed baseline, reviewed selected-scope/audit policy, and
+  manifest path;
 - a dedicated KiCad net class whose live `.kicad_pro` assignments and dimensions
   match that configuration exactly;
 - a generator stage that emits a deterministic, filled seed with only the named
   routing tasks open; and
 - a project-local, Freerouting-independent manifest applicator.
 
-If any item is absent, keep the existing native/manual routing path. This is not
+If any item is absent, do not start a promotable run; onboard it with the
+scaffold below or keep the existing native/manual routing path. This is not
 permission for silent whole-board autorouting. Placement, fanout, high-current
 copper, critical nets, differential/skew constraints, isolation, planes, zones,
 and post-route stitching stay generator-owned unless the project explicitly
 defines and audits a different boundary. Freerouting does not place footprints;
 a poor resistor/capacitor grid is a placement problem and must be fixed before
 routing.
+
+For a project that does not yet have `autoroute.json`, use the v2 scaffold. It
+supports generated projects through a small language-neutral adapter, existing
+hand-maintained KiCad projects through an immutable board snapshot, and a
+standalone `.kicad_pcb` through explicit board-only authority. The last mode
+creates a minimal `.kicad_pro`; it never invents a schematic, and every report
+retains the permanent parity/ERC waiver.
+
+```sh
+# First write a read-only, reviewable plan. The selected-scope declaration is
+# mandatory: use --project-audited when geometry-dependent checks are needed.
+python3 scripts/kicad_autoroute_scaffold.py plan project/board.kicad_pcb \
+  --mode board-snapshot \
+  --use-net-class AutorouteRoutine \
+  --layer F.Cu --layer B.Cu \
+  --reset-all-selected-routing \
+  --selected-scope-routine \
+  --output work/autoroute-scaffold-plan.json
+
+python3 scripts/kicad_autoroute_scaffold.py apply \
+  --plan work/autoroute-scaffold-plan.json \
+  --approve-plan-sha256 PLAN_SHA256
+
+python3 scripts/kicad_autoroute_scaffold.py check project/board.kicad_pcb \
+  --report work/autoroute-scaffold-check.json
+```
+
+`check` is fail-closed and reports a phase, not a vague boolean: project
+context, configuration, primitives, adapter, audit, toolchain, migration,
+stale-source, report-only platform, baseline-ready, or candidate-ready. It
+re-expands recursive source declarations, runs the adapter on temporary output,
+checks every protected seed route, and refuses KiCad format/default-stackup
+migration. The source board remains editable and authoritative; generated seed
+and final boards live below `build/autoroute/` and are not edit targets.
+
+Use `--create-net-class` only with an explicit reviewed net allowlist and exact
+style dimensions. It rejects an existing class name and conflicting effective
+assignments. `--use-net-class` freezes KiCad's effective board resolution,
+including pattern results, as a finite `net_to_class` inventory. A reset is an
+exact UUID/geometry/locked-state multiset, never “delete whatever happens to be
+in this class now.” Initial snapshot support is deliberately limited to track
+segments and F.Cu-to-B.Cu through-vias; arcs, blind/buried vias, and microvias
+remaining anywhere in the protected seed block promotion.
+
+The generated `autoroute_adapter.py` is complete in snapshot mode. In generator
+mode it is intentionally a `BLOCKED_ADAPTER` template: implement `describe`,
+`seed`, and `final` for the project's generator without AST rewriting. Its
+`final` operation invokes the promotion-pinned applicator, which reruns the
+adapter's `seed`, verifies the reviewed semantic/context attestation, and then
+applies canonical route records. The generated `autoroute_apply.py` is
+generator-neutral and owns source/reset/manifest validation plus canonical
+segment/via application. For
+`--project-audited`, replace the fail-closed audit stub with project physics
+checks and a known-bad calibration; `--selected-scope-routine` waives only
+geometry-dependent checks on the selected nets, never generic integrity checks
+or critical copper elsewhere.
+
+Editing either blocked template invalidates its configured digest. Repin those
+tools through a new digest-approved plan, never by silently editing
+`autoroute.json`:
+
+```sh
+python3 scripts/kicad_autoroute_scaffold.py repin-plan \
+  --config project/autoroute.json \
+  --output work/autoroute-repin-plan.json
+python3 scripts/kicad_autoroute_scaffold.py apply \
+  --plan work/autoroute-repin-plan.json \
+  --approve-plan-sha256 PLAN_SHA256
+```
 
 The production flow is a candidate-and-promotion pipeline:
 
@@ -117,10 +188,12 @@ python3 scripts/kicad_autoroute_tools.py install --yes
 # pcbnew directly and therefore require an explicit executable.
 KICAD_PYTHON=/path/to/kicad-bundled-python3
 
-# Project-specific command: emit a deterministic seed, not a final board.
-"$KICAD_PYTHON" project/gen_pcb.py --autoroute-seed --output work/seed.kicad_pcb
+# Adapter command: emit the project-owned seed bundle with same-stem context.
+"$KICAD_PYTHON" project/autoroute_adapter.py seed \
+  --output-dir project/build/autoroute/seed \
+  --report project/build/autoroute/seed/adapter-report.json
 
-python3 scripts/kicad_route_candidate.py work/seed.kicad_pcb \
+python3 scripts/kicad_route_candidate.py project/build/autoroute/seed/board.kicad_pcb \
   --config project/autoroute.json \
   --report work/route-report.json \
   --keep-workspace work/router-workspace \
@@ -139,8 +212,11 @@ python3 scripts/kicad_route_candidate.py work/seed.kicad_pcb \
   --approve-report-sha256 REPORT_SHA256 \
   --output-manifest project/routes.json
 
-# The normal generator consumes only the reviewed manifest, not Java/DSN/SES.
-"$KICAD_PYTHON" project/gen_pcb.py --full
+# The adapter/applicator consumes only the reviewed manifest, not Java/DSN/SES.
+"$KICAD_PYTHON" project/autoroute_adapter.py final \
+  --manifest project/routes.json \
+  --output-dir project/build/autoroute/final \
+  --report project/build/autoroute/final/adapter-report.json
 
 # Prefer one project-owned final wrapper that regenerates reproducibly and emits
 # a canonical report covering DRC, parity, calibrated audits, and exact routes.
@@ -164,18 +240,21 @@ are authoritative.
 A green DRC is necessary but not sufficient. Promotion also requires the exact
 position-sensitive seed DRC multiset, zero final unconnected items, schematic
 parity, complete non-routing projection equality, protected-route equality,
-final project audits that emit their required known-bad calibration marker,
+calibrated final project audits for project-audited scope (or the explicit
+reviewed routine-scope declaration),
 unchanged source/input bundles, exact
 toolchain receipts, and a promotion-enabled compatibility cell. A new KiCad,
 `pcbnew`, OS, architecture, Java, or Freerouting version starts staged/report-only
 until that exact cell is qualified.
 
-The manifest is the only generated source input: canonical segments and through
-vias, exact nanometre geometry and style, the reviewed seed digest, project input
-bundle, project applicator hash, toolchain receipt, and candidate/report digests.
-The normal generator must re-create the seed digest before applying it and must
-re-extract the final routes to prove exact equality. Re-running Freerouting is not
-part of board reproduction.
+The v2 manifest is the only generated source input: canonical segments and
+through vias, exact nanometre geometry and style, the reviewed semantic/context
+seed attestation, project input bundle, project applicator hash, toolchain
+receipt, and candidate/report digests. The final adapter must re-create that
+attestation before applying it and re-extract the final routes to prove exact
+equality. `seed_sha256` remains byte evidence, not v2 authority; the legacy v1
+contract still requires exact seed bytes. Re-running Freerouting is not part of
+board reproduction.
 
 Make the final verification result a canonical, tracked machine-readable report,
 not a set of unrelated terminal transcripts. It must bind the final board digest

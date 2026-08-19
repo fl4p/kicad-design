@@ -34,18 +34,21 @@ from pathlib import Path
 try:
     from kicad_autoroute import (
         AutorouteError,
+        CONFIG_SCHEMA_V2,
         REPORT_SCHEMA,
         build_input_bundle,
+        build_v2_input_bundle,
         canonical_json_sha256,
         compare_drc,
         config_path,
         filter_candidate_routes,
         load_config,
+        make_seed_attestation,
         make_drc_baseline,
         nonrouting_projection_sha256,
         normalize_drc_report,
         resolve_project_netclasses,
-        sha256_path,
+        seed_context_bundle,
         verify_input_bundle,
         verify_project_styles,
     )
@@ -60,18 +63,21 @@ try:
 except ImportError:  # imported as scripts.kicad_route_candidate
     from .kicad_autoroute import (
         AutorouteError,
+        CONFIG_SCHEMA_V2,
         REPORT_SCHEMA,
         build_input_bundle,
+        build_v2_input_bundle,
         canonical_json_sha256,
         compare_drc,
         config_path,
         filter_candidate_routes,
         load_config,
+        make_seed_attestation,
         make_drc_baseline,
         nonrouting_projection_sha256,
         normalize_drc_report,
         resolve_project_netclasses,
-        sha256_path,
+        seed_context_bundle,
         verify_input_bundle,
         verify_project_styles,
     )
@@ -409,6 +415,8 @@ def _related_sources(board: Path, no_parity: bool) -> dict[str, Path]:
         ("schematic", ".kicad_sch"),
         ("rules", ".kicad_dru"),
     ):
+        if no_parity and label == "schematic":
+            continue
         path = board.with_suffix(suffix)
         if path.is_file():
             related[label] = path
@@ -438,6 +446,20 @@ def _related_sources(board: Path, no_parity: bool) -> dict[str, Path]:
             continue
         related["project-table:" + table_name] = table
         table_text = _read_utf8(table)
+        all_uris = re.findall(r'\(uri\s+"([^"\r\n]+)"\)', table_text)
+        if table_text.count("(uri") != len(all_uris):
+            raise RouteReportError(
+                "%s contains an unparseable/non-quoted library URI" % table
+            )
+        unsupported_uris = [
+            uri for uri in all_uris if not uri.startswith("${KIPRJMOD}/")
+        ]
+        if unsupported_uris:
+            raise RouteReportError(
+                "%s contains non-hermetic library URI(s): %s; vendor them below "
+                "${KIPRJMOD} before a promotable run"
+                % (table, ", ".join(sorted(unsupported_uris)))
+            )
         for raw_relative in re.findall(
             r'\(uri\s+"\$\{KIPRJMOD\}/([^"\r\n]+)"\)', table_text
         ):
@@ -459,6 +481,16 @@ def _related_sources(board: Path, no_parity: bool) -> dict[str, Path]:
                     "%s references missing project library %s" % (table, source)
                 )
             related["project-resource:" + relative.as_posix()] = source
+    # Same-stem discovery alone is insufficient for hierarchical schematics
+    # and vendored project libraries.  Preserve every KiCad context file that
+    # participates in the seed attestation at its project-relative path.
+    known = {path.resolve() for path in related.values()}
+    for entry in seed_context_bundle(board):
+        source = (project_dir / entry["path"]).resolve()
+        if source in known:
+            continue
+        related["project-resource:" + entry["path"]] = source
+        known.add(source)
     return related
 
 
@@ -913,6 +945,107 @@ def _worker_call(
         ) from exc
     result["worker_log"] = _log_record(run)
     return result
+
+
+def _attest_v2_adapter_seed(
+    *,
+    config: dict,
+    input_bundle: list[dict],
+    supplied_seed: Path,
+    supplied_snapshot: dict,
+    kicad_python: Path,
+    workspace: Path,
+) -> dict:
+    """Re-run the pinned adapter and prove the reviewed seed is its output."""
+    root = Path(config["project_root"])
+    adapter = root / config["tools"]["adapter"]["path"]
+    # Compute this before creating adapter scratch below the candidate
+    # workspace; context enumeration must describe only the supplied bundle.
+    supplied = make_seed_attestation(
+        supplied_snapshot, supplied_seed, config, input_bundle
+    )
+    describe_path = workspace / "adapter-attestation-describe.json"
+    described = _run(
+        [str(kicad_python), str(adapter), "describe", "--report", str(describe_path)],
+        cwd=root,
+        timeout=config["limits"]["audit_timeout_seconds"],
+    )
+    if described["returncode"] != 0 or not describe_path.is_file():
+        raise RouteReportError(
+            "configured adapter describe failed during seed attestation: "
+            + (described["stderr"].strip() or "no report")
+        )
+    try:
+        description = json.loads(_read_utf8(describe_path))
+    except json.JSONDecodeError as exc:
+        raise RouteReportError("configured adapter emitted invalid describe JSON") from exc
+    if (
+        description.get("protocol") != config["tools"]["adapter"]["protocol"]
+        or description.get("mode") != config["project"]["mode"]
+        or description.get("ready") is not True
+        or set(description.get("operations") or []) != {"seed", "final"}
+    ):
+        raise RouteReportError(
+            "configured adapter does not attest the required protocol/mode/operations"
+        )
+
+    generated_dir = workspace / "adapter-attested-seed"
+    report_path = generated_dir / "adapter-seed-report.json"
+    generated = _run(
+        [
+            str(kicad_python), str(adapter), "seed",
+            "--output-dir", str(generated_dir), "--report", str(report_path),
+        ],
+        cwd=root,
+        timeout=config["limits"]["timeout_seconds"],
+    )
+    if generated["returncode"] != 0 or not report_path.is_file():
+        raise RouteReportError(
+            "configured adapter seed failed during attestation: "
+            + (generated["stderr"].strip() or "no report")
+        )
+    try:
+        adapter_report = json.loads(_read_utf8(report_path))
+    except json.JSONDecodeError as exc:
+        raise RouteReportError("configured adapter emitted invalid seed report JSON") from exc
+    if adapter_report.get("status") != "PASS":
+        raise RouteReportError("configured adapter seed report did not pass")
+    generated_board = generated_dir / config["project"]["board_basename"]
+    required = [generated_board, generated_board.with_suffix(".kicad_pro")]
+    if config["project"]["schematic_authority"] == "parity":
+        required.append(generated_board.with_suffix(".kicad_sch"))
+    elif generated_board.with_suffix(".kicad_sch").exists():
+        raise RouteReportError(
+            "board-only adapter seed unexpectedly contains a same-stem schematic"
+        )
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise RouteReportError(
+            "configured adapter seed omitted same-stem project context: "
+            + ", ".join(missing)
+        )
+    generated_snapshot = _worker_call(
+        kicad_python,
+        "snapshot",
+        [generated_board],
+        workspace / "adapter-attested-seed-semantic.json",
+        workspace,
+    )["snapshot"]
+    regenerated = make_seed_attestation(
+        generated_snapshot, generated_board, config, input_bundle
+    )
+    if supplied != regenerated:
+        raise RouteReportError(
+            "supplied seed is not semantically identical to the configured adapter output: "
+            f"supplied {supplied['sha256']}, adapter {regenerated['sha256']}"
+        )
+    return {
+        "description": description,
+        "seed_report": adapter_report,
+        "attestation": supplied,
+        "regenerated_seed_sha256": digest(generated_board),
+        "byte_seed_match": digest(supplied_seed) == digest(generated_board),
+    }
 
 
 def _drc_snapshot(board: Path, report: Path, parity: bool, cli: str) -> dict:
@@ -1632,6 +1765,15 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             "input_bundle": input_bundle,
             "input_bundle_sha256": canonical_json_sha256(input_bundle),
         }
+        if config.get("schema") == CONFIG_SCHEMA_V2:
+            initial["configuration"]["schematic_authority"] = config["project"][
+                "schematic_authority"
+            ]
+            if config["project"]["schematic_authority"] == "board-only":
+                initial["limitations"].append(
+                    "PERMANENT WAIVER: schematic parity and ERC are unavailable; "
+                    "the PCB is the declared authority."
+                )
     # Keep a live reference on the parsed arguments so main() can still emit
     # all completed evidence if a later tool probe or router stage fails.
     # Without this, the most useful failure (for example a Java/JAR mismatch)
@@ -1674,6 +1816,24 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
         export_snapshot_path = workspace / "seed-semantic.json"
         import_snapshot_path = workspace / "candidate-semantic.json"
 
+        adapter_seed_evidence = None
+        if config is not None and config.get("schema") == CONFIG_SCHEMA_V2:
+            supplied_snapshot = _worker_call(
+                kicad_python,
+                "snapshot",
+                [seed],
+                workspace / "supplied-seed-attestation-semantic.json",
+                workspace,
+            )["snapshot"]
+            adapter_seed_evidence = _attest_v2_adapter_seed(
+                config=config,
+                input_bundle=input_bundle,
+                supplied_seed=seed,
+                supplied_snapshot=supplied_snapshot,
+                kicad_python=kicad_python,
+                workspace=workspace,
+            )
+
         export_result = _worker_call(
             kicad_python,
             "export",
@@ -1691,6 +1851,18 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             args.allow_net_class,
             args.allow_all_net_classes,
         )
+        if config is not None and config.get("schema") == CONFIG_SCHEMA_V2:
+            live_mapping = {
+                net: class_name
+                for net, class_name in seed_snapshot["netclasses"]["net_to_class"].items()
+                if class_name in config["scope"]["net_classes"]
+            }
+            expected_mapping = config["scope"]["net_to_class"]
+            if live_mapping != expected_mapping:
+                raise RouteReportError(
+                    "live KiCad net-class resolution differs from frozen v2 net_to_class: "
+                    f"expected {expected_mapping}, live {live_mapping}"
+                )
         requested_layers = list(dict.fromkeys(args.allow_layer))
         available_layers = set(seed_snapshot["board"]["copper_layers"])
         unknown_layers = sorted(set(requested_layers) - available_layers)
@@ -1728,6 +1900,8 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             },
             "export_worker": export_result["worker_log"],
         }
+        if adapter_seed_evidence is not None:
+            initial["seed"]["adapter_attestation"] = adapter_seed_evidence
         if not dsn_fixed_routes["passed"]:
             raise RouteReportError(
                 "DSN export did not preserve every locked route as fixed copper: %s"
@@ -2327,6 +2501,12 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
         if config is not None:
             try:
                 verify_input_bundle(input_bundle_root, input_bundle)
+                if config.get("schema") == CONFIG_SCHEMA_V2:
+                    live_bundle = build_v2_input_bundle(config)
+                    if live_bundle != input_bundle:
+                        raise AutorouteError(
+                            "v2 input bundle membership changed during the run"
+                        )
             except AutorouteError as exc:
                 bundle_unchanged = False
                 bundle_error = str(exc)
@@ -2337,25 +2517,39 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
         promotion_blocks = []
         if config is not None and not args.exploratory:
             seed_audits = initial["seed"].get("project_audits") or {}
-            if not seed_audits.get("configured") or not project_audits.get("configured"):
-                promotion_blocks.append("both seed and final project audits must be configured")
-            if not project_audits.get("calibration_passed"):
-                promotion_blocks.append(
-                    "final project audits must execute their tracked known-bad calibration"
-                )
+            routine_scope = (
+                config.get("schema") == CONFIG_SCHEMA_V2
+                and config["scope"].get("selected_scope_policy") == "routine"
+            )
+            if not routine_scope:
+                if not seed_audits.get("configured") or not project_audits.get("configured"):
+                    promotion_blocks.append("both seed and final project audits must be configured")
+                if not project_audits.get("calibration_passed"):
+                    promotion_blocks.append(
+                        "final project audits must execute their tracked known-bad calibration"
+                    )
             if not initial["tools"].get("promotion_toolchain_eligible"):
                 promotion_blocks.append(
                     "installed tool receipt and an enabled exact compatibility cell are required"
                 )
-            applicators = [
-                item
-                for item in input_bundle
-                if item["role"] == "project-code:autoroute_apply.py"
-                and item["path"].endswith("autoroute_apply.py")
-            ]
+            if config.get("schema") == CONFIG_SCHEMA_V2:
+                configured_applicator = config["tools"]["applicator"]
+                applicators = [
+                    item
+                    for item in input_bundle
+                    if item["path"] == configured_applicator["path"]
+                    and item["sha256"] == configured_applicator["sha256"]
+                ]
+            else:
+                applicators = [
+                    item
+                    for item in input_bundle
+                    if item["role"] == "project-code:autoroute_apply.py"
+                    and item["path"].endswith("autoroute_apply.py")
+                ]
             if len(applicators) != 1:
                 promotion_blocks.append(
-                    "the hermetic bundle must contain exactly one project autoroute_apply.py"
+                    "the hermetic bundle must contain exactly one configured manifest applicator"
                 )
                 applicator = None
             else:
@@ -2364,6 +2558,30 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                     "bundle_path": applicators[0]["path"],
                     "source_sha256": applicators[0]["sha256"],
                 }
+            promotion_checks = {
+                "source_unchanged": unchanged,
+                "input_bundle_unchanged": bundle_unchanged,
+                "nonrouting_unchanged": nonrouting_unchanged,
+                "locked_routes_unchanged": not (
+                    locked["missing_count"] or locked["new_count"]
+                ),
+                "structured_drc_baseline_passed": not final_drc_problems,
+            }
+            if routine_scope:
+                promotion_checks["selected_scope_routine_declared"] = (
+                    config["scope"]["selected_scope_policy"] == "routine"
+                )
+            else:
+                promotion_checks.update({
+                    "seed_project_audits_passed": (
+                        seed_audits.get("failed") == 0
+                        and seed_audits.get("board_unchanged") is True
+                    ),
+                    "final_project_audits_passed": (
+                        project_audits.get("failed") == 0
+                        and project_audits.get("board_unchanged") is True
+                    ),
+                })
             initial["promotion"] = {
                 "seed_sha256": initial["seed"]["board_sha256"],
                 "config_sha256": config["config_sha256"],
@@ -2397,25 +2615,14 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 "review_candidate_sha256": digest(candidate_board),
                 "routes": filtered_result["routes"],
                 "routes_sha256": canonical_json_sha256(filtered_result["routes"]),
-                "checks": {
-                    "source_unchanged": unchanged,
-                    "input_bundle_unchanged": bundle_unchanged,
-                    "nonrouting_unchanged": nonrouting_unchanged,
-                    "locked_routes_unchanged": not (
-                        locked["missing_count"] or locked["new_count"]
-                    ),
-                    "structured_drc_baseline_passed": not final_drc_problems,
-                    "seed_project_audits_passed": (
-                        seed_audits.get("failed") == 0
-                        and seed_audits.get("board_unchanged") is True
-                    ),
-                    "final_project_audits_passed": (
-                        project_audits.get("failed") == 0
-                        and project_audits.get("board_unchanged") is True
-                    ),
-                },
+                "checks": promotion_checks,
                 "blocks": promotion_blocks,
             }
+            if config.get("schema") == CONFIG_SCHEMA_V2:
+                initial["promotion"].update({
+                    "selected_scope_policy": config["scope"]["selected_scope_policy"],
+                    "seed_attestation": initial["seed"]["adapter_attestation"]["attestation"],
+                })
 
         exit_code = _finalize_report(
             initial,
@@ -2679,19 +2886,16 @@ def _semantic_snapshot(board, pcbnew) -> dict:
 
 
 def _init_pcbnew():
-    # pcbnew's Specctra functions touch wx standard paths.  Without a wxApp,
-    # KiCad 10.0.5 emits a C++ assertion even when export succeeds.
     try:
         import wx
-
         wx.Log.SetLogLevel(wx.LOG_Error)
-        app = wx.App(False)
-    except Exception as exc:
-        raise RouteReportError("cannot initialize KiCad's wx application: %s" % exc) from exc
-    try:
+        app = wx.AppConsole()
         import pcbnew
-    except ImportError as exc:
-        raise RouteReportError("worker interpreter cannot import pcbnew") from exc
+    except Exception as exc:
+        raise RouteReportError("cannot initialize KiCad console runtime: %s" % exc) from exc
+    # wx.App(False) is a GUI app and hangs or degrades GetSettingsManager() to
+    # a raw SwigPyObject in headless KiCad 10.0.5/Darwin.  AppConsole provides
+    # wx standard paths while preserving the typed SETTINGS_MANAGER API.
     return app, pcbnew
 
 
@@ -2837,7 +3041,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--report", required=True, help="JSON report path")
     parser.add_argument(
         "--config",
-        help="tracked kicad-autoroute-config-v1; supplies immutable scope and safety policy",
+        help="tracked kicad-autoroute-config-v1/v2; supplies immutable scope and safety policy",
     )
     parser.add_argument(
         "--prepare-only",
@@ -3000,9 +3204,27 @@ def _configure_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     project = board.with_suffix(".kicad_pro")
     if not project.is_file():
         parser.error("configured autorouting requires a same-stem .kicad_pro")
+    if config.get("schema") == CONFIG_SCHEMA_V2:
+        expected_project_name = Path(config["project"]["project_file"]).name
+        if project.name != expected_project_name:
+            parser.error(
+                "v2 seed project sidecar basename differs from project.project_file"
+            )
+        if config["project"]["schematic_authority"] == "board-only":
+            if board.with_suffix(".kicad_sch").exists():
+                parser.error(
+                    "board-only seed unexpectedly contains a same-stem schematic"
+                )
+            args.no_schematic_parity = True
     try:
         project_scope = resolve_project_netclasses(
-            project, config["scope"]["net_classes"]
+            project,
+            config["scope"]["net_classes"],
+            expected_mapping=(
+                config["scope"]["net_to_class"]
+                if config.get("schema") == CONFIG_SCHEMA_V2
+                else None
+            ),
         )
         verify_project_styles(config, project_scope)
     except AutorouteError as exc:
@@ -3028,6 +3250,11 @@ def _configured_input_bundle(
     config = getattr(args, "_autoroute_config", None)
     if config is None:
         return None, None
+    if config.get("schema") == CONFIG_SCHEMA_V2:
+        try:
+            return Path(config["project_root"]).resolve(), build_v2_input_bundle(config)
+        except AutorouteError as exc:
+            raise RouteReportError(str(exc)) from exc
     root = Path(config["config_dir"]).resolve()
     entries: dict[str, Path] = {
         "autoroute-config": Path(config["config_path"]),
@@ -3097,10 +3324,12 @@ def main(argv: list[str] | None = None) -> int:
     args._input_bundle_root = bundle_root
     args._input_bundle = input_bundle
     colliding_sources = set()
+    protected_source_dirs = set()
     for source in prewrite_sources.values():
         if source.is_file():
             colliding_sources.add(source.resolve())
         elif source.is_dir():
+            protected_source_dirs.add(source.resolve())
             colliding_sources.update(
                 child.resolve() for child in source.rglob("*") if child.is_file()
             )
@@ -3108,8 +3337,24 @@ def main(argv: list[str] | None = None) -> int:
         colliding_sources.update(
             (bundle_root / item["path"]).resolve() for item in input_bundle
         )
-    if report_path in colliding_sources:
-        parser.error("report path collides with a source artifact: %s" % report_path)
+    config = getattr(args, "_autoroute_config", None)
+    if config is not None and config.get("schema") == CONFIG_SCHEMA_V2:
+        root = Path(config["project_root"])
+        for declaration in config["sources"]:
+            if declaration["kind"] == "directory-recursive":
+                protected_source_dirs.add((root / declaration["path"]).resolve())
+
+    targets = [("report", report_path)]
+    if args.keep_workspace:
+        targets.append(("workspace", Path(args.keep_workspace).expanduser().resolve()))
+    for label, target in targets:
+        if target in colliding_sources or any(
+            target == directory
+            or target.is_relative_to(directory)
+            or (label == "workspace" and directory.is_relative_to(target))
+            for directory in protected_source_dirs
+        ):
+            parser.error(f"{label} path overlaps an immutable source: {target}")
     report = {
         "schema": REPORT_SCHEMA,
         "mode": _report_mode(args),

@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion files PCB.md (layout, zones, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility) and RELEASE.md (DRC severity map, fab readiness), read on demand so schematic-only work does not pay for them; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion files PCB.md (layout, zones, DRC, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility) and RELEASE.md (fab readiness), read on demand so schematic-only work does not pay for them; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
 ---
 
 # KiCad schematic and PCB design
@@ -46,17 +46,30 @@ three modes: an **exploratory** Freerouting scout is inspiration only, **critica
 geometry stays generator/manual-owned, and only the declared **routine** scope
 may cross the manifest-promotion boundary.
 
+For a project without a tracked autoroute contract, use
+`scripts/kicad_autoroute_scaffold.py plan` → digest-approved `apply` → `check`;
+do not invent `autoroute.json` or patch a generator by pattern matching. A v2
+candidate is promotable only after the pinned adapter independently regenerates
+the supplied seed and matches its route/non-routing/context attestation. After
+implementing a blocked generator or audit template, update its pin through
+`repin-plan` plus digest-approved `apply`.
+
 **"Is this ready to fab / ready to order?" is a board question**: go straight to
 [`RELEASE.md`](RELEASE.md), which separates *manufacturable* from *final* and gives
 the export-and-measure checklist. Answering it from DRC alone gets it wrong in
 both directions.
 
-## Core principle: generate, never hand-place
+## Core principle: preserve the declared source authority
 
-Write a Python **generator** that emits the `.kicad_sch` (and a `pcbnew` script for the
-`.kicad_pcb`). Then the design is diffable, reviewable, reproducible, and a fix applies
-everywhere at once. Hand-editing a generated file is a bug waiting to happen — put a note in
-the docs saying the artefact is generated and the generator is the source of truth.
+Prefer a generator for new designs: emit the `.kicad_sch` and use a `pcbnew` script for the
+`.kicad_pcb` so the design is diffable, reviewable, and reproducible. Once a project declares
+its authority, preserve it. Regenerate generator-owned boards; keep an explicitly
+hand-maintained `.kicad_pcb` board-owned; never retrofit or infer a generator merely to enable
+autorouting. For hand-maintained boards, transformations such as autorouting produce derived,
+non-editable build boards and never replace the editable source board.
+
+Hand-editing a generated file is still a bug waiting to happen — put a note in the docs saying
+the artefact is generated and the generator is the source of truth.
 
 **Verify reproducibility**: `md5` the output, re-run the generator, `md5` again. Equal or the
 generator has hidden state — **but only if the generator actually ran**. Assert its exit

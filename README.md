@@ -22,9 +22,8 @@ guard detail it does not need:
 
 Topics covered:
 
-- **Generate, never hand-place** — the schematic and board as generator output, and the
-  hygiene rules that keep it honest (byte-reproducibility, stable-identity UUIDs, netlist
-  export after structural edits, never writing a file another generator owns).
+- **Preserve source authority** — generated designs remain generator-owned and explicitly
+  hand-maintained boards remain board-owned, with hygiene for reproducibility and shared files.
 - **Verification ladder** — what ERC catches, what DRC catches, and the large class of
   defects that neither does.
 - **File-format gotchas** for `.kicad_sch` / `.kicad_pcb` / `.kicad_sym` / `.kicad_mod`.

@@ -21,6 +21,7 @@ whose failure mode is a **silent false PASS**:
 | `kicad_autoroute_tools.py` | unapproved downloads, ambient Java/JAR drift, unsafe archives, or a cache receipt that does not bind installed contents |
 | `kicad_route_candidate.py` | an external router or diagnostic writing the generated board; an unpinned router, lost DSN constraints, or out-of-scope copper reading as an acceptable route |
 | `kicad_route_manifest.py` | a reviewed candidate being promoted without exact seed/input/applicator/toolchain and route-digest equality |
+| `kicad_autoroute_scaffold.py` | project/generator assumptions being guessed, an existing source board being overwritten, or a fresh project receiving a false-ready adapter/audit |
 
 Each raises rather than returning an empty container **on the paths listed
 above**, and every error message says *which* condition failed — because "the
@@ -201,10 +202,15 @@ digest, configuration, reconstructed full live input bundle, project applicator
 source, route digest, current compatibility cell/tool receipt, and configured
 output path. The strict manifest contains only canonical
 segments and F.Cu-to-B.Cu through-vias with integer-nanometre geometry, exact
-style/scope, the reviewed seed digest, input/toolchain/applicator provenance,
-and review digests. The project-local applicator must compare the generated seed
-to `seed_sha256` before applying anything and re-extract exact routes after the
-final save.
+style/scope, input/toolchain/applicator provenance, and review digests. Legacy
+v1 manifests bind the exact `seed_sha256`. A v2 manifest additionally carries
+`kicad-autoroute-seed-attestation-v1`: the candidate first regenerates the seed
+through the pinned adapter and binds canonical route/lock state, net classes,
+enabled layers, complete non-routing projection, and exact KiCad context-file
+hashes. Final application regenerates through the adapter and must reproduce
+that attestation before applying anything; a byte-different but semantically
+identical KiCad serialization may therefore pass v2. Both versions re-extract
+exact routes after the final save.
 
 `--candidate-board` must be the exact `candidate.board_path` recorded by the
 report (normally the fresh-seed, filtered candidate), not a guessed workspace
@@ -230,6 +236,61 @@ multiplicity/positions, hermetic/symlink handling, installer authorization and
 archive safety, tool pins, scope/style filters, route-lock normalization,
 protected-route preservation, DSN fixed copper, path collisions, shell-free
 audits, environment scrubbing, exploratory promotion stripping, and atomic reports.
+
+### General v2 onboarding scaffold
+
+`kicad_autoroute_scaffold.py` adds a strict v2 discriminated union while v1
+loading and promotion remain compatible. It onboards a hand-maintained KiCad
+project, a standalone PCB with an explicit permanent schematic-parity/ERC
+waiver, or any generated project through the `describe`/`seed`/`final` adapter
+protocol.
+
+The two-step `plan`/digest-approved `apply` flow copies versioned adapter,
+applicator, and audit assets create-only. A planned net-class creation is the
+only allowed existing-file edit: it records exact before/after project digests,
+adds only the reviewed class/assignments, and is idempotent. `check` reruns all
+source declarations, the scratch migration probe, adapter seed generation,
+primitive eligibility, audit readiness, pinned tool status, and the exact
+promotion compatibility cell before returning `READY_FOR_BASELINE` or
+`READY_FOR_CANDIDATE`.
+
+Generator and project-audit templates intentionally begin blocked. After
+implementing either tool, update its pinned hash only through another reviewed
+plan:
+
+```sh
+python3 scripts/kicad_autoroute_scaffold.py repin-plan \
+  --config project/autoroute.json \
+  --output work/autoroute-repin-plan.json
+python3 scripts/kicad_autoroute_scaffold.py apply \
+  --plan work/autoroute-repin-plan.json \
+  --approve-plan-sha256 PLAN_SHA256
+```
+
+The v2 adapter protocol and configuration currently require `project.root` to
+be `.` and the board/project/schematic authority files to be top-level,
+same-stem files. Additional hierarchical sheets and `${KIPRJMOD}` libraries
+are explicit typed sources and are copied and attested with the seed. Local
+library tables containing ambient absolute or environment-variable URIs block
+promotion until those resources are vendored below `${KIPRJMOD}`.
+
+Generate the seed explicitly after a ready check:
+
+```sh
+KICAD_PYTHON=/path/to/kicad-bundled-python3
+mkdir -p project/build/autoroute/seed
+"$KICAD_PYTHON" project/autoroute_adapter.py seed \
+  --output-dir project/build/autoroute/seed \
+  --report project/build/autoroute/seed/adapter-report.json
+```
+
+Then pass that same-basename seed to `kicad_route_candidate.py --config
+project/autoroute.json`. Snapshot `final` always rederives from the exact source
+plus reset multiset, applies the reviewed manifest, proves the complete route
+multiset and non-routing projection against an empty-apply control, and emits a
+derived board rather than modifying the source. It records semantic
+reproducibility universally; byte identity is never claimed by the generic
+snapshot adapter.
 
 **`transform_pin` is NOT calibrated.** `calibration_plan()` *enumerates* the 12
 (angle, mirror) cells; nothing here compares any cell against KiCad ground

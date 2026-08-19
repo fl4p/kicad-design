@@ -12,16 +12,16 @@ import argparse
 import collections
 import json
 from pathlib import Path
-import shutil
 import sys
-import tempfile
 
 from kicad_autoroute import (
     AutorouteError,
+    CONFIG_SCHEMA_V2,
     MANIFEST_SCHEMA,
-    ROUTE_APPLICATOR_VERSION,
+    MANIFEST_SCHEMA_V2,
     canonical_json_sha256,
     canonical_routes,
+    config_path,
     load_config,
     sha256_path,
     validate_promotion_report,
@@ -291,8 +291,9 @@ def _promote(args) -> int:
     if config["config_sha256"] != promotion.get("config_sha256"):
         raise AutorouteError("promotion config differs from the reviewed config")
     root = Path(args.project_root).resolve()
-    if root != Path(config["config_dir"]).resolve():
-        raise AutorouteError("promotion project root must be the tracked config directory")
+    expected_config_root = Path(config.get("project_root", config["config_dir"])).resolve()
+    if root != expected_config_root:
+        raise AutorouteError("promotion project root must match the configured project root")
     bundle = promotion.get("input_bundle")
     verify_input_bundle(root, bundle)
     # Reconstruct the complete live bundle instead of trusting the report to
@@ -301,7 +302,13 @@ def _promote(args) -> int:
 
     expected_root, expected_bundle = _configured_input_bundle(
         argparse.Namespace(_autoroute_config=config),
-        _related_sources(seed, no_parity=False),
+        _related_sources(
+            seed,
+            no_parity=(
+                config.get("schema") == "kicad-autoroute-config-v2"
+                and config["project"]["schematic_authority"] == "board-only"
+            ),
+        ),
     )
     if expected_root != root or expected_bundle != bundle:
         raise AutorouteError("candidate report input bundle is incomplete or stale")
@@ -357,8 +364,9 @@ def _promote(args) -> int:
         raise AutorouteError("installed JRE is not bound to tracked integrity pins")
     if installed.get("receipt_sha256") != promotion["toolchain"]["install_receipt_sha256"]:
         raise AutorouteError("live tool installation receipt differs from the reviewed run")
+    is_v2 = config.get("schema") == CONFIG_SCHEMA_V2
     manifest = {
-        "schema": MANIFEST_SCHEMA,
+        "schema": MANIFEST_SCHEMA_V2 if is_v2 else MANIFEST_SCHEMA,
         "seed_sha256": promotion["seed_sha256"],
         "applicator": applicator,
         "input_bundle": bundle,
@@ -372,9 +380,11 @@ def _promote(args) -> int:
         "routes": routes,
         "routes_sha256": canonical_json_sha256(routes),
     }
+    if is_v2:
+        manifest["seed_attestation"] = promotion["seed_attestation"]
     validate_manifest(manifest)
     output = Path(args.output_manifest).resolve()
-    expected_output = (Path(config["config_dir"]) / config["promotion"]["manifest"]).resolve()
+    expected_output = config_path(config, config["promotion"]["manifest"])
     if output != expected_output:
         raise AutorouteError(
             f"output manifest must match config promotion.manifest: {expected_output}"

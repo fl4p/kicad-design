@@ -141,6 +141,9 @@ class AutorouteContractsTests(unittest.TestCase):
         self.assertEqual(routes[0]["net"], "A")
         self.assertEqual(routes[1]["start_nm"], [0, 0])
         self.assertEqual(len(autoroute.canonical_json_sha256(routes)), 64)
+        custom_inner = segment()
+        custom_inner["layer"] = "PWR"
+        self.assertEqual(autoroute.canonical_route(custom_inner)["layer"], "PWR")
 
     def test_routes_reject_duplicate_zero_and_overlap(self):
         with self.assertRaisesRegex(autoroute.AutorouteError, "duplicate"):
@@ -168,6 +171,71 @@ class AutorouteContractsTests(unittest.TestCase):
         raw["width_nm"] = 150_000
         with self.assertRaisesRegex(autoroute.AutorouteError, "expected 250000"):
             autoroute.filter_candidate_routes([raw], config, scope)
+
+    def test_candidate_filter_unions_redundant_collinear_router_copper(self):
+        config = config_dict()
+        scope = {"net_to_class": {"N": "AutorouteRoutine"}}
+        short = {
+            **segment(start=(0, 0), end=(500_000, 0)),
+            "locked": False, "length_nm": 500_000,
+        }
+        long = {
+            **segment(start=(0, 0), end=(1_000_000, 0)),
+            "locked": False, "length_nm": 1_000_000,
+        }
+        result = autoroute.filter_candidate_routes([short, long], config, scope)
+        self.assertEqual(result["routes"], [segment()])
+
+    def test_v2_seed_attestation_binds_routes_nonrouting_and_context(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            board = root / "x.kicad_pcb"
+            board.write_text(
+                '(kicad_pcb (version 20260206) (generator pcbnew) '
+                '(general (thickness 1.6)) '
+                '(segment (start 0 0) (end 1 0) (width 0.25) (layer "F.Cu") (net 1)))\n',
+                encoding="utf-8",
+            )
+            (root / "x.kicad_pro").write_text('{"unicode":"µ"}\n', encoding="utf-8")
+            snapshot = {
+                "board": {
+                    "copper_layer_count": 2,
+                    "copper_layers": ["F.Cu", "B.Cu"],
+                    "enabled_layers": [0, 31],
+                },
+                "netclasses": {"net_to_class": {"Nµ": "Routine"}},
+                "routing": {"items": [{
+                    "kind": "segment", "net": "Nµ", "locked": True,
+                    "width_nm": 250_000, "layer": "F.Cu",
+                    "start_nm": [0, 0], "end_nm": [1_000_000, 0],
+                    "length_nm": 1_000_000,
+                }]},
+            }
+            config = {
+                "schema": autoroute.CONFIG_SCHEMA_V2,
+                "config_sha256": "1" * 64,
+                "tools": {"adapter": {
+                    "path": "autoroute_adapter.py",
+                    "protocol": "kicad-autoroute-adapter-v1",
+                    "sha256": "2" * 64,
+                }},
+                "project": {"mode": "board-snapshot"},
+                "reset": {"policy": "none", "manifest": None, "manifest_sha256": None},
+            }
+            bundle = [{
+                "role": "autoroute-config", "path": "autoroute.json",
+                "sha256": "1" * 64,
+            }]
+            attestation = autoroute.make_seed_attestation(snapshot, board, config, bundle)
+            autoroute.validate_seed_attestation(attestation)
+            self.assertEqual(
+                attestation["semantic"]["context_bundle"][0]["path"],
+                "x.kicad_pro",
+            )
+            tampered = json.loads(json.dumps(attestation))
+            tampered["semantic"]["route_state_count"] = 2
+            with self.assertRaisesRegex(autoroute.AutorouteError, "inconsistent"):
+                autoroute.validate_seed_attestation(tampered)
 
     def test_kicad_10_through_via_enum_is_promotable(self):
         config = config_dict()
@@ -417,6 +485,86 @@ class AutorouteContractsTests(unittest.TestCase):
             autoroute.validate_promotion_report(report)
         report["mode"] = "route-and-report"
         report["promotion"]["checks"] = {"made_up": True}
+        with self.assertRaisesRegex(autoroute.AutorouteError, "exact required set"):
+            autoroute.validate_promotion_report(report)
+
+    def test_v2_routine_promotion_cannot_fabricate_project_audit_passes(self):
+        routes = autoroute.canonical_routes([segment(net="N")])
+        bundle = [
+            {"role": "tool:adapter", "path": "autoroute_adapter.py", "sha256": "a" * 64},
+            {"role": "tool:applicator", "path": "autoroute_apply.py", "sha256": "0" * 64},
+        ]
+        evidence = {
+            "config_sha256": "8" * 64,
+            "input_bundle_sha256": autoroute.canonical_json_sha256(bundle),
+            "adapter": {
+                "path": "autoroute_adapter.py",
+                "protocol": "kicad-autoroute-adapter-v1",
+                "sha256": "a" * 64,
+            },
+            "project_mode": "board-snapshot",
+            "reset": {"policy": "none", "manifest": None, "manifest_sha256": None},
+        }
+        semantic = {
+            "board": {}, "net_to_class": {"N": "AutorouteRoutine"},
+            "route_state_count": 0,
+            "route_states_sha256": autoroute.canonical_json_sha256([]),
+            "nonrouting_projection_sha256": "b" * 64,
+            "context_bundle": [],
+            "context_bundle_sha256": autoroute.canonical_json_sha256([]),
+        }
+        attestation = {
+            "schema": autoroute.SEED_ATTESTATION_SCHEMA,
+            "semantic": semantic, "evidence": evidence,
+        }
+        attestation["sha256"] = autoroute.canonical_json_sha256(attestation)
+        scope = {
+            "net_classes": ["AutorouteRoutine"], "resolved_nets": ["N"],
+            "net_to_class": {"N": "AutorouteRoutine"},
+            "layers": ["F.Cu", "B.Cu"],
+            "styles": config_dict()["scope"]["styles"],
+        }
+        promotion = {
+            "seed_sha256": "7" * 64, "config_sha256": "8" * 64,
+            "input_bundle": bundle,
+            "input_bundle_sha256": autoroute.canonical_json_sha256(bundle),
+            "applicator": {
+                "schema_version": "1", "bundle_path": "autoroute_apply.py",
+                "source_sha256": "0" * 64,
+            },
+            "toolchain": {
+                "backend": autoroute.BACKEND_ID,
+                "freerouting_version": "2.3.0", "freerouting_sha256": "1" * 64,
+                "java_version": "25.0.4+7", "install_receipt_sha256": "2" * 64,
+                "compatibility_matrix_sha256": "3" * 64,
+                "compatibility_cell": {
+                    "os": "darwin", "arch": "arm64",
+                    "kicad_cli": "10.0.5", "pcbnew": "10.0.5",
+                },
+            },
+            "scope": scope, "raw_candidate_sha256": "4" * 64,
+            "review_candidate_sha256": "5" * 64, "routes": routes,
+            "routes_sha256": autoroute.canonical_json_sha256(routes),
+            "checks": {key: True for key in autoroute.PROMOTION_CHECKS_V2_ROUTINE},
+            "blocks": [], "seed_attestation": attestation,
+            "selected_scope_policy": "routine",
+        }
+        report = {
+            "schema": autoroute.REPORT_SCHEMA, "mode": "route-and-report",
+            "created_utc": "2026-08-18T00:00:00Z", "source": {}, "tools": {},
+            "limitations": [],
+            "configuration": {"schema": autoroute.CONFIG_SCHEMA_V2, "sha256": "8" * 64},
+            "workspace": "/tmp/work", "scratch_copies": {}, "seed": {},
+            "router_settings": {}, "router_run": {},
+            "candidate": {
+                "board_sha256": "5" * 64,
+                "filtered": {"routes": routes, "routes_sha256": autoroute.canonical_json_sha256(routes)},
+            },
+            "scope": {}, "findings": [], "promotion": promotion,
+            "verdict": "PROMOTABLE_CANDIDATE", "verdict_reason": "all checks passed",
+        }
+        autoroute.validate_promotion_report(report)
+        report["promotion"]["checks"] = {key: True for key in autoroute.PROMOTION_CHECKS}
         with self.assertRaisesRegex(autoroute.AutorouteError, "exact required set"):
             autoroute.validate_promotion_report(report)
 

@@ -40,7 +40,7 @@ $K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x
   stays green. Any relaxation needs an independent geometric audit that measures
   real clearance (binary-search `SHAPE::Collide`) rather than asking the rules.
 - **Re-run the layout script after *any* schematic change**, not just after
-  connectivity changes — see the parity note below.
+  connectivity changes — see the parity note in [`PCBNEW.md`](PCBNEW.md).
 - **Only KiCad's own connectivity is authoritative.** Third-party analyzers
   rebuild nets with their own union-find over pads, tracks, vias and fills, and
   on a 2-layer board they routinely report "GND plane split, 2 islands, signals
@@ -120,4 +120,5 @@ While there, flag components whose Value is still a placeholder — a library na
 Export, then record the board md5 alongside the gerbers, and commit both. Otherwise there is no
 way to prove later which copper is in the boards on the bench — and a board file that has been
 opened and re-saved in the GUI since the export will not match, for reasons that are pure
-reordering (see *`LoadBoard` → `Save` does not round-trip*) and therefore invisible in a diff.
+reordering (see *`LoadBoard` → `Save` does not round-trip* in [`PCBNEW.md`](PCBNEW.md)) and
+therefore invisible in a diff.

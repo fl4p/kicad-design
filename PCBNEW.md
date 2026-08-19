@@ -43,7 +43,7 @@ bump — they are simply the next six that cost a round trip each:
 | `via.GetWidth()` | wx assert on stderr: *"PCB_VIA::GetWidth called without a layer argument"* | `via.GetWidth(via.TopLayer())` — a via's width is now per-layer |
 | `board.GetDesignSettings().GetDefault()` | `AttributeError` | read the netclass off an item, or the `.kicad_pro` JSON |
 | `pcbnew.VIATYPE_BLIND_BURIED` | `AttributeError` — the name is not what the C++ enum suggests | enumerate `[n for n in dir(pcbnew) if n.startswith("VIATYPE_")]` and map values yourself |
-| `cc.GetNetItems(code, pcbnew.PCB_PAD_T)` | `TypeError … argument 3 of type 'std::vector< KICAD_T >'` | avoid; use `kicad-cli pcb drc`'s unconnected pairs, per the note above |
+| `cc.GetNetItems(code, pcbnew.PCB_PAD_T)` | `TypeError … argument 3 of type 'std::vector< KICAD_T >'` | avoid; use `kicad-cli pcb drc`'s unconnected pairs, per the DRC note in [`RELEASE.md`](RELEASE.md) |
 
 **Exporting footprints out of a board into a `.pretty`** is the workflow those first three block,
 and it is worth having: it vendors a library that resolves only through some machine's global
@@ -137,7 +137,7 @@ on 10.0.5, it is false on every board tried, by two separate mechanisms:
 
   **Loading someone's 9.x board through the bundled Python and saving it fabricates a stackup
   they never specified** — which is exactly what "The stackup is part of the design, not a fab
-  preference" above says must never be left to a default. Opening a board you do not own is a
+  preference" ([`PCB.md`](PCB.md)) says must never be left to a default. Opening a board you do not own is a
   *write*, and a lossy one.
 
 What survives is the guard, not the claim: **assert the round-trip on the specific file before

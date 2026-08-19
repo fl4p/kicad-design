@@ -39,8 +39,9 @@ import shutil
 import subprocess
 import tempfile
 import sys
-import pathlib
 from pathlib import Path
+
+from _util import read_utf8 as _read_utf8
 
 __all__ = [
     "VerifyError",
@@ -54,28 +55,6 @@ __all__ = [
 
 class VerifyError(AssertionError):
     """A rung of the ladder could not be run, or its result cannot be trusted."""
-
-
-def _read_utf8(path, err_cls):
-    """Read a KiCad text file as UTF-8, STRICTLY.
-
-    KiCad writes UTF-8 on every platform. `Path.read_text()` without an
-    encoding uses `locale.getpreferredencoding()`, which on a typical Windows
-    host is cp1252 -- so `10 uF +-10%` written as UTF-8 comes back as mojibake
-    ("10 AuF A+-10%"), and `errors="replace"` guarantees that happens SILENTLY.
-    A guard comparing such a value then mismatches for a reason nothing
-    reports. Decode strictly and raise: undecodable input is unreadable input,
-    not input that happens to contain replacement characters.
-    """
-    try:
-        return pathlib.Path(path).read_text(encoding="utf-8")
-    except UnicodeDecodeError as e:
-        raise err_cls(
-            "%s is not valid UTF-8 at byte %d (%s). KiCad writes UTF-8; a file "
-            "that does not decode is unreadable, not partially readable."
-            % (path, e.start, e.reason))
-    except OSError as e:
-        raise err_cls("cannot read %s: %s" % (path, e))
 
 
 #: Rules observed at ``ignore`` in KiCad's own built-in defaults. Provenance:

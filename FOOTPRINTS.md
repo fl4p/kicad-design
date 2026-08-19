@@ -126,7 +126,8 @@ have kept finding the next one at random.
 Enumerate instead. Grid the region and reject a candidate that collides with **any** of:
 
 1. every footprint courtyard (`GetCourtyard(F_CrtYd).BBox()` — and assert it is non-degenerate,
-   per *An empty geometry result reads exactly like a clean one* above);
+   per *An empty geometry result reads exactly like a clean one*, in
+   [`PCBNEW.md`](PCBNEW.md));
 2. **every existing `F.Silkscreen` item's bounding box** — see below;
 3. any lane a generator reserves for text it has not placed yet, such as a connector's
    per-pin label column at `pad_x − offset`;
