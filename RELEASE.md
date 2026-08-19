@@ -4,6 +4,10 @@ The board-side rungs of the verification ladder, and the separate question of wh
 board that is *manufacturable* is the one you actually want built. Read the ladder before
 believing a green DRC; read the release half before ordering.
 
+Release checks do not establish temperature or heat-flow performance. When those are project
+requirements, apply [`THERMALS.md`](THERMALS.md) and bind its calculation/model/measurement
+evidence to the released artifact.
+
 ## Board-specific rungs of the verification ladder
 
 DRC green means "no rule was broken", not "the design is right". In particular:

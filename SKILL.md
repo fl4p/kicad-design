@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion files PCB.md (layout, zones, DRC, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility) and RELEASE.md (fab readiness), read on demand so schematic-only work does not pay for them; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material is split across on-demand companions—PCB.md (layout, zones, DRC, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility), RELEASE.md (fab readiness), GUARDS.md (audits), and THERMALS.md (heat and temperature); SETUP.md is the preflight for datasheet access—distributor API keys, vendor WAFs, PDF validation.
 ---
 
 # KiCad schematic and PCB design
@@ -24,9 +24,8 @@ engineering.
 
 ## Working on the board? Read the board companions
 
-This file covers what is shared plus schematic capture. **Board-side material lives
-in four companions** — read the ones the task touches, and none of them for
-schematic-only work:
+This file covers what is shared plus schematic capture. **Specialized material lives
+in on-demand companions** — read only the ones the task touches:
 
 | file | read it when |
 |---|---|
@@ -34,12 +33,19 @@ schematic-only work:
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a part's package |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or making a slow generator fast |
 | [`RELEASE.md`](RELEASE.md) | verifying a board, the DRC severity map, or "is this ready to fab?" |
+| [`GUARDS.md`](GUARDS.md) | writing or reviewing checks, validators, audits or calibration harnesses |
+| [`THERMALS.md`](THERMALS.md) | heat, temperature, dissipation, gradients, thermal pads/vias or thermal validation |
 
-`PCB.md` is the one to start from; it indexes the other three.
+`PCB.md` is the board-layout core and routes to the concern-specific companions.
 
 When writing or reviewing generator checks, validators, audits or calibration harnesses, read
 [`GUARDS.md`](GUARDS.md). It defines the ledger/model/artifact tiers, subject-specific
 bidirectional calibration, zone-fill semantic finalization and matched-copper guard contract.
+
+Read [`THERMALS.md`](THERMALS.md) only when heat or temperature is a design variable:
+dissipation, junction/case limits, current-density rise, exposed pads or thermal vias,
+heat-spreading copper, gradients, temperature-dependent accuracy, enclosure ambient, or
+transient thermal response. Ordinary low-power placement and routing do not need it.
 
 Before external autorouting, classify routing ownership. `PCB.md` defines the
 three modes: an **exploratory** Freerouting scout is inspiration only, **critical**
@@ -271,10 +277,10 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   point; clamp at the victim, disconnect the fault path, or document the residual risk rather
   than fitting protection reflexively.
 - **Size protection at the maximum credible fault, not the normal signal maximum.** Include
-  supply tolerance and transients, component tolerance, working-voltage limits, continuous and
-  pulse power, ambient-temperature derating, and the protection part's failure mode. A nominal
-  package rating with only a few percent of room is not design margin. If prose calls the fault
-  110 V while the arithmetic uses 100 V, the protection check has failed even if ERC and DRC pass.
+  supply tolerance and transients, component tolerance, working-voltage limits and the
+  protection part's failure mode. Use [`THERMALS.md`](THERMALS.md) for continuous/pulse power,
+  ambient and junction corners, and package derating. If prose calls the fault 110 V while the
+  arithmetic uses 100 V, the protection check has failed even if ERC and DRC pass.
 - **Do not join two possible power sources directly.** State which connector powers which rail,
   or add ORing, current limiting or isolation that makes either connection order safe.
 - **A series limiter belongs at the connector, and the pull-up on the exposed side of it.**
@@ -289,22 +295,13 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   last, beside the connector, with the clamp.
   The pull-up then has to move to the exposed side, and this is the part that is easy to get
   backwards. Leave it at the connector and it forms a divider with the limiter, so a valid
-  `V_OL` caps the limiter at a few kΩ — and the bounding fault of 110 V across 3 kΩ is 37 mA
-  and **4.0 W**, a fusible rather than a resistor. Moving the pull-up upstream removes the
-  divider entirely and lets the limiter be large enough (47 kΩ → 2.34 mA, **0.257 W**) that
-  nothing in the path becomes a fuse. Size the pull-up against the receiver's **worst-case**
+  `V_OL` caps the limiter at a few kΩ. Moving the pull-up upstream removes the divider and lets
+  the limiter be large enough to bound fault current. Size the pull-up against the receiver's **worst-case**
   input leakage, not its typical: 100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is
   what bounds how large the pair can get. Record which side each part is on and why, or the
   next tidy-up moves the pull-up back.
-  Two traps in those numbers, both of which this entry fell into before being corrected.
-  **Bound the fault at the rail, not at the maximum output** — the first version sized it at
-  100 V because that was the output swing, while the supply is 110 V, which is the same defect
-  the *maximum credible fault* bullet above describes. And 110²/47 kΩ = **0.257 W is 103 % of
-  a 0.25 W 1206** — over its nameplate before any derating at all — so the part goes to a 2010.
-  Quote the series and rating the percentage is against: 1206 thick-film runs 0.125–0.5 W
-  depending on series, and at a 110 V fault the part's **working-voltage** rating binds
-  independently of power. A protection resistor chosen at the nominal fault and the nameplate
-  rating is sized twice over at the wrong number.
+  Bound the limiter at the fault rail rather than the maximum signal, check working voltage
+  independently, and complete its package/pulse/temperature sizing in [`THERMALS.md`](THERMALS.md).
 - **When two requirements squeeze a value from both sides, assert the FEASIBLE INTERVAL, not
   the chosen value.** Two node-definition resistors had to hold reverse `V_GS` under a 20 V
   absolute maximum (`R ≤ 5.75 kΩ`) and leakage injection under the allocated 0.1 ppm
@@ -321,9 +318,8 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   clamps, carried as belt-and-braces, were in fact the primary protection and always had been:
   the circuit was right and the rationale was wrong, which is the more dangerous state, because
   the next person to simplify it deletes the part doing the work. State which corner each bound
-  comes from, too — those two are evaluated at different junction temperatures, and a guard
-  that collapses them onto one operating point cannot express "cold corner held by the
-  resistor, hot corner held by the clamp".
+  comes from, too. If temperature changes which mechanism holds a bound, enumerate the hot and
+  cold cases separately as described in [`THERMALS.md`](THERMALS.md).
 
 
 ## The verification ladder
@@ -555,7 +551,7 @@ when they are no longer current.
 | **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
 | **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
 | **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
-| **Multi-pad nets in footprints** | An exposed pad and its thermal vias often share one pad number — take the **union** of every pad carrying that number, not the first and not the largest. On an EP-plus-thermal-vias footprint the vias sit inside the land, so largest and union agree (verified: `SOIC-8-1EP_…_ThermalVias`, 10 pads numbered `9`, both give 2.95 × 4.90 mm). On a **notched split land** they do not — vendors merge same-net pins into one land and mark the split with a notch, which is modelled as two *equal* overlapping pads, so "largest" is a coin flip returning about half the real land. Union is identical in the common case and correct in the rare one. See *Vendors merge same-net lands* below. |
+| **Multi-pad nets in footprints** | Take the **union** of every pad carrying one pad number, not the first and not the largest. On a **notched split land**, vendors merge same-net pins into one land and mark the split with a notch modelled as two *equal* overlapping pads, so "largest" is a coin flip returning about half the real land. Union is identical in the common case and correct in the rare one. See *Vendors merge same-net lands* below; exposed-pad/via construction is in [`THERMALS.md`](THERMALS.md). |
 | **`lib_symbols` entry names** | Must be the full `lib_id` (`"Device:R"`), not the bare name you grabbed out of the source library (`"R"`). KiCad never says *symbol not found*: the same one-line mismatch either **segfaults `kicad-cli` (exit 139, no output file)** or writes a netlist with **zero components and exit 0**, depending on unrelated details of the same file. Both reproduced on 9.0.4 from one string. Rename on the way in, and assert the netlist's component count. |
 | **`PWR_FLAG`** | Needed once per net whose only source is a passive connector pin, else `power_pin_not_driven`. Put them in an isolated block — branching off a live stub collides with neighbouring pins. |
 
@@ -871,26 +867,14 @@ exist; it is `OPA455IDDA`) reaches a purchase order.
 
 Build a **corner ledger** for every quantity that establishes bias, gain, safety margin or
 component stress. Combine supply tolerance, passive tolerance, device min/max specifications,
-and temperature or ageing terms where material; then prove every result stays inside the
+and ageing terms where material; then prove every result stays inside the
 datasheet's characterized operating range. Typical-value arithmetic is useful for nominal
 performance, never for demonstrating compliance. In particular, do not infer that a pin named
 `SENSE`, `REF` or `FB` is high impedance — use its specified current when calculating copper
 drop, bias current and drift.
 
-**A DC error that calibration removes still has a temperature coefficient, and that part
-survives.** It is tempting to wave away an IR drop on a board whose reference instrument reads
-the true output at every sweep point — the static term genuinely does vanish. Its *tempco* does
-not: copper is **+3930 ppm/K**, so 259 µV of *uncancelled* drop in a reference return was
-1.0 µV/K at the buffer and, through the ×10 output stage behind it, **10.2 µV/K** at the 100 V
-output — ±51 µV over a ±5 K room swing. Carry the drop through the gain before applying the
-tempco: the coefficient acts where the error is, the budget lives at the output, and collapsing
-those two into one multiplication (as an earlier version of this paragraph did, quoting a
-single leg's 182 µV against the output's 10.2 µV/K) under-reports drift by whatever gain sits
-downstream. Two further traps compound here. First, a thermal term is
-sub-0.1 Hz, so it falls outside a 0.1–10 Hz noise budget and gets dismissed as "not in band"
-rather than bounded. Second, the copper is usually widened or re-routed for a reason nobody
-records, and the next person narrows it back. Compute the tempco, write it next to the static
-figure, and say explicitly which one the calibration removes.
+When temperature affects dissipation, stress, leakage, drift, matching or calibration residual,
+extend the ledger with [`THERMALS.md`](THERMALS.md)'s hot/cold, gradient and transient cases.
 
 **Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
 table. Every one of these was a real error caught by doing so:
@@ -945,12 +929,9 @@ table. Every one of these was a real error caught by doing so:
 - **Recommended operating ≠ absolute maximum.** And an absolute maximum is not a design target.
 - **The datasheet outranks the vendor's own SPICE model.** Trust order: datasheet *table* >
   datasheet *chart* > vendor `.lib`. A model is a *derivative* of the datasheet, usually
-  auto-fitted, so it cannot hold more information — only lose or distort it, and the
-  temperature block (`TRS1`/`TRS2`, `EG`, `XTI`) is the least validated part. One Schottky's
-  vendor model matched its own datasheet at 25 °C but gave 0.863 V against a 0.66 V typ at
-  125 °C / 15 A — 200 mV in the wrong direction, and worse at higher current. It contradicted
-  the datasheet it shipped with. Validate any model at the operating point **and** at
-  temperature before relying on it; if it disagrees, fit from the datasheet.
+  auto-fitted, so it cannot hold more information — only lose or distort it. Validate a model
+  against the table/chart at every load-bearing operating point; temperature-model validation
+  and a measured failure case are in [`THERMALS.md`](THERMALS.md).
 - **Stock KiCad footprints are not safety-checked.** A stock exposed-pad footprint left
   0.200 mm between a −15 V pad and a +110 V pin. Always measure pad-to-pad clearance for HV
   parts; TI land drawings often carry a note explicitly permitting a narrower pad for creepage.

@@ -9,8 +9,8 @@ Everything in `SKILL.md` still applies here: preserve the project's declared
 source authority, climb the whole verification ladder, and write guards that
 fail when they cannot evaluate their input.
 
-**This file is the board-layout core.** Four companions carry the rest, so a task pays
-only for what it needs:
+**This file is the board-layout core.** Concern-specific companions carry the rest, so a task
+pays only for what it needs:
 
 | file | read it when |
 |---|---|
@@ -18,6 +18,7 @@ only for what it needs:
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a package |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or a slow generator |
 | [`RELEASE.md`](RELEASE.md) | verifying a board, or answering "is this ready to fab?" |
+| [`THERMALS.md`](THERMALS.md) | dissipation, heat paths, thermal pads/vias, gradients, or temperature validation |
 
 ## Scoped external autorouting: default only after the project opts in
 
@@ -44,8 +45,9 @@ Keep at least these structures critical:
 
 - low-inductance switching, gate-drive, and decoupling loops, including their
   return paths and via count;
-- high-current or thermal paths where width is only one part of the structure:
-  neckdowns, parallel layers, pours, connector entries, and via arrays matter too;
+- high-current paths where width is only one part of the electrical structure: neckdowns,
+  parallel layers, pours, connector entries and via arrays matter too; when temperature rise or
+  heat spreading is load-bearing, also apply [`THERMALS.md`](THERMALS.md);
 - creepage/isolation barriers, bounded crossings, slots, keepouts, and any copper
   whose all-layer distance implements a safety requirement;
 - RF/HF, controlled-impedance, differential/skew, clock, and other
@@ -56,8 +58,9 @@ A uniform trace width and clearance can remain routine when those dimensions are
 the whole requirement and the exact class/style is checked after import. If the
 requirement is really current density, temperature rise, impedance, inductance,
 loop area, creepage, or return continuity, DRC-clean width/spacing is insufficient
-and the route is critical. For generated boards, “manual” means deliberately
-authoring the route in generator source—not editing the generated `.kicad_pcb`.
+and the route is critical. For thermal cases, apply [`THERMALS.md`](THERMALS.md).
+For generated boards, “manual” means deliberately authoring the route in generator
+source—not editing the generated `.kicad_pcb`.
 
 **Which backend, and it is a size question before it is anything else.** An owned
 pattern router — enumerate candidate polylines per connection, take the first that
@@ -305,10 +308,10 @@ the round-trip.
 ## Symmetry and matching are invisible to DRC
 
 A board can be DRC-clean, parity-clean and **completely asymmetric**. Nothing in KiCad checks
-that a differential pair is matched, that two halves of a current path mirror, or that a
-matched-resistor pair sits symmetrically in a thermal gradient. If the design's accuracy rests
-on any of that, it rests on a guard you write, and the design docs must say *that* guard — not
-DRC — is what enforces it, or the next tidy-up deletes it as redundant.
+that a differential pair is matched or that two halves of a current path mirror. If the
+design's accuracy rests on symmetry, it rests on a guard you write, and the design docs must
+say *that* guard — not DRC — is what enforces it, or the next tidy-up deletes it as redundant.
+For matched placement under thermal gradients, read [`THERMALS.md`](THERMALS.md).
 
 Four traps, all met on one precision current-sense board:
 
@@ -324,20 +327,11 @@ Four traps, all met on one precision current-sense board:
   108.0 and 131.0, i.e. exactly symmetric about the board centre at 119.5. An origin-based
   check reports a false asymmetry. Worse, the *same* proxy error had already reached a design
   review, which derived "the symmetry axis is x ≈ 121" from those origins and concluded the
-  wrong one of two matched resistor networks was the thermally exposed one. Compare pad sets.
+  wrong one of two matched resistor networks occupied the critical side. Compare pad sets.
 
-- **Audit the zone FILL, not the zone outline.** The outline is intent; the fill is what ships,
-  and it is shaped by pads, tracks, clearances and the board edge. On that board the two
-  current pours had outlines that differed only cosmetically while their *fills* differed by
-  3.4 mm².
-
-- **Compare fills semantically, never by vertex equality or area alone.** KiCad segments arcs
-  into chords, and two mirror-image arcs get their chords in different places even when the
-  shapes are equivalent. Conversely, equal areas can hide a neck or a severed region. For a
-  load-bearing matched pour, use [`GUARDS.md`](GUARDS.md)'s two independent gates: an
-  artifact-derived masked shape residual with bounded masks and topology validation, plus an
-  unmasked raw-quantity limit derived from the physical error or thermal budget. Measure the
-  legal fill noise before setting either geometric tolerance.
+Matched current pours need the filled-geometry, topology and raw-quantity contract in
+[`GUARDS.md`](GUARDS.md), not outline or area comparison alone. Apply
+[`THERMALS.md`](THERMALS.md) additionally only when temperature or heat spreading is load-bearing.
 
 **Symmetry is not the whole objective — check the loop area too.** A mirror-symmetric
 differential pair can still be a large pickup loop, and the audit that proves the symmetry
@@ -352,13 +346,6 @@ ever tell you it is too big. Two corollaries: the fan-out from the source's pad 
 the dominant remaining term, so converge it steeply rather than at a tidy 45°; and running the
 pair down the gap between two pours *guards* it, provided each conductor is flanked by the
 pour nearest its own potential rather than the other one's.
-
-Asymmetries hide in places a placement check never looks. On that board the last one left,
-after every coordinate matched, was **pad 1 of a 4-terminal shunt being `rect` while pad 4 was
-`circle`** — same size, same drill, the ordinary pin-1 marker. It was 1.65 mm² of extra copper
-on one terminal and it carved a correspondingly larger void out of the opposing current plane.
-Before changing it, check the part still has a pin-1 marker somewhere else (silkscreen), and
-make the script *refuse* if it does not — symmetry is not worth losing orientation over.
 
 Finally: a symmetry audit is exactly the kind of guard that must fail closed. An unreadable
 outline, an object class the parser never visited, or a pair that could not be compared has to

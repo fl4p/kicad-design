@@ -19,6 +19,7 @@ guard detail it does not need:
 | `PCBNEW.md` | scripting `pcbnew`, reproducibility or generator performance |
 | `FOOTPRINTS.md` | selecting, generating or modifying footprints and land patterns |
 | `RELEASE.md` | DRC severity, fab output or release readiness |
+| `THERMALS.md` | dissipation, junction/ambient limits, heat paths, gradients, thermal pads/vias or validation |
 
 Topics covered:
 
@@ -33,6 +34,7 @@ Topics covered:
 - **Datasheet discipline** — read the land-pattern page, don't recall it.
 - **Guards** — explicit ledger/model/artifact tiers, subject-specific bad and legal
   calibrations, semantic zone-fill finalization and matched-copper checks.
+- **Thermals** — opt-in heat, temperature, power-stress and thermally load-bearing copper workflow.
 - **Reviewing someone else's numbers.**
 
 ## Install

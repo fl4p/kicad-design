@@ -224,16 +224,12 @@ Two consequences worth carrying:
 - **Put zone settings in the audit, not just zone geometry.** Fill settings, pad connection
   mode and island removal are all load-bearing and all revert invisibly — a `.kicad_pro`
   rewrite, a GUI round-trip, or a zone copied from elsewhere.
-- **Turning island removal off trades the copper for `isolated_copper` violations** (12 of
-  them here). That is the right trade on a plane whose job is thermal — an electrically
-  orphaned island still conducts heat, and deleting 31 mm² from one side only is exactly the
-  gradient the symmetry rule exists to prevent. Resolve it with **mirrored stitching vias**,
-  never by lowering the rule's severity.
 
-- **A thermal pad wants solid copper, not thermal relief.** Zones default to
-  `ZONE_CONNECTION_THERMAL`; spokes on an exposed-pad land starve exactly the
-  connection the island exists to make. DRC's `starved_thermal` check catches it
-  (`zone min spoke count 2; actual 1`) — set `ZONE_CONNECTION_FULL` on that zone.
+For planes that spread heat, exposed-pad connection mode, island retention and mirrored
+stitching are thermal design choices rather than generic `pcbnew` mechanics. Apply
+[`THERMALS.md`](THERMALS.md) before setting them or waiving `isolated_copper`/
+`starved_thermal` findings.
+
 - **A track endpoint sitting on top of a zone is not connected to it** if they
   are on different layers. It needs a via. DRC reports this as `track_dangling`
   plus an unconnected item; both point at the same missing via.

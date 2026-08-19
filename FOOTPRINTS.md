@@ -2,7 +2,8 @@
 
 Editing a footprint, choosing a land pattern, and changing a part's package. The three
 layers of a pad are independent and DRC checks almost none of this. Layout judgement is
-in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md).
+in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
+[`THERMALS.md`](THERMALS.md) for exposed heat-transfer lands, thermal vias and their fab process.
 
 ## No vias in pads — and DRC will not tell you
 
@@ -84,9 +85,9 @@ for layer, name in ((pcbnew.F_Cu,"copper"), (pcbnew.F_Mask,"mask"), (pcbnew.F_Pa
     ...  # min/max extents per layer, then the gap to the nearest foreign-net land
 ```
 
-Also: **never print paste over an open via barrel** — solder wicks down it. If thermal vias
-sit inside the pad's mask opening, either shape the apertures to miss them, or specify
-plugged/filled vias (IPC-4761) in the fab notes.
+When vias intentionally share an exposed land for heat transfer, use the paste, barrel and fab
+construction rules in [`THERMALS.md`](THERMALS.md); an ordinary same-net via in a pad remains a
+manufacturing defect under the net-blind check above.
 
 ## Substituting a larger package: make the change, don't reason about it
 

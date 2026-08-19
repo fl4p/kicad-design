@@ -153,7 +153,8 @@ give it an independent bound or report rather than inferring it from a stable di
 ## Matched copper needs shape and quantity gates
 
 Use this pattern only when mirrored or matched filled copper carries an electrical or thermal
-requirement. DRC and placement symmetry do not establish it.
+requirement. DRC and placement symmetry do not establish it. For heat-spreading copper, derive
+the physical budget and validation cases with [`THERMALS.md`](THERMALS.md).
 
 **Gate A — artifact-derived residual shape.** Validate the expected feature inventory and topology
 before masking anything. Derive the allowed-asymmetry mask from actual placed pads, tracks, vias
@@ -165,15 +166,23 @@ behavior that must remain quiet.
 
 **Gate B — unmasked raw quantity.** Keep the individual raw totals and their difference independent
 of Gate A; never apply the allowed-asymmetry mask to this gate. Total area is a scalar proxy, not
-the physical property itself, so derive its limit from an allowed temperature, resistance, error
-or other physical budget with sensitivity to where copper is removed. Report each side as well as
-the delta so common-mode movement stays visible.
+the physical property itself, so derive its limit from an allowed resistance, error or other
+physical budget with sensitivity to where copper is removed. Thermal limits belong to
+[`THERMALS.md`](THERMALS.md). Report each side as well as the delta so common-mode movement stays
+visible.
 
 Shape and area cover different failure classes: equal areas can hide a neck or severed region,
-while a masked shape residual can hide gross copper loss inside the allowed region. Land Gate A
-before loosening an existing area gate. Until Gate B has a derived limit, retain the existing
-fail-closed limit or require an explicit recorded waiver; do not silently tune a threshold to the
-current board.
+while a masked shape residual can hide gross copper loss inside the allowed region.
+
+Audit pad shape and orientation evidence, not coordinates alone. On one 4-terminal shunt, a
+rectangular pin-1 pad opposite a circular pad of the same size and drill added 1.65 mm² of copper
+to one terminal and changed the opposing filled region. Before normalizing such pads, prove that
+silkscreen or another reparsed artifact still marks pin 1; refuse the change if orientation would
+become ambiguous.
+
+Land Gate A before loosening an existing area gate. Until Gate B has a derived limit, retain the
+existing fail-closed limit or require an explicit recorded waiver; do not silently tune a
+threshold to the current board.
 
 ## Reporting and review hygiene
 
