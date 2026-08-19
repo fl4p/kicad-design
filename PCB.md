@@ -97,6 +97,25 @@ loop area, creepage, or return continuity, DRC-clean width/spacing is insufficie
 and the route is critical. For generated boards, “manual” means deliberately
 authoring the route in generator source—not editing the generated `.kicad_pcb`.
 
+**Which backend, and it is a size question before it is anything else.** An owned
+pattern router — enumerate candidate polylines per connection, take the first that
+clears — stays the right tool for a *small* board: it is inspectable, its failures
+name a connection you can reason about, and every constraint lives in your own
+generator where a region policy or a barrier rule is a function you can read. It
+does not scale, and the reason is structural rather than a tuning problem: on a
+169-connection board **96 % of its runtime went into calls that FAIL**, because a
+candidate enumeration that succeeds stops at the first clear path while one that
+fails must exhaust every family. Congestion turns successes into failures, so cost
+climbs precisely where the board gets hard.
+
+So: **pattern router for small boards; Freerouting for complex ones, and as initial
+guidance on any board.** The second half of that is the part worth keeping — an
+external router's first pass is useful as *evidence about the placement* even when
+none of its geometry is promoted. Where it struggles, the floor plan is telling you
+something the connection list alone does not, and that reading costs nothing and
+commits nothing. Promotion is a separate decision, governed by the scope and
+manifest machinery below.
+
 For a generated board with mature placement and rules, use Freerouting as the
 default **candidate backend for the project's declared routine scope** when all
 of these tracked inputs exist:
