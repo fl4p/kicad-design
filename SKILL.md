@@ -469,6 +469,22 @@ class of error the rule exists to fix. KiCad's PDF export draws glyphs as vector
 `pdftotext` measures the substitute, not the strokes. (The discrepancy is confirmed; that
 explanation of it is not.) Line pitch is unaffected — 1.610 either way.
 
+**Net labels are not text objects, and they rotate.** A text-overlap guard that iterates the
+generator's *text* list never compares them — the same blindness as the property case under
+*Guards*, one object class further out. They also need their own box, because KiCad justifies
+a label **left at 0°/90° and right at 180°/270°**, and draws 90° and 270° with the *same*
+glyph rotation: the advance therefore runs **+x, up, −x, down** for 0/90/180/270, and the
+glyph body of a rotated label sits on the **−x** side of its anchor, not centred on it.
+
+Then fix the drafting, not just the guard: **one node, one label.** Stubbing each pin of a
+series pair and labelling both with the same net name — instead of wiring the two pins
+together — puts two copies of that name on the gap between them, pointing at each other. On
+`hw/shunt-reversal` that gap was 11.43 mm and each `ADC_CH0` ran ≈8.4 mm at 1.27 mm, so the
+pair drew one unreadable blot while ERC, the netlist and every other guard stayed clean; it
+survived on **seven** divider mid-nodes until someone looked at the plot. Wire the pins into
+one node and label the wire between them once — that also drops the label count, so the
+collision is removed rather than relocated.
+
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
 Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
 clearance — are in [`PCB.md`](PCB.md).
@@ -1188,7 +1204,9 @@ Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instance
   you write a guard, enumerate what the design contains and ask which of those object
   classes your loop actually visits — properties, symbol graphics, zone fills and
   drawing-sheet items are the usual omissions. Calibrating with a fault built from the
-  class you already iterate will never reveal this.
+  class you already iterate will never reveal this. It then recurred on the same board one
+  class further out — **net labels** are not text objects either — so add the missing class
+  *and* re-read the enumeration; see *Net labels are not text objects, and they rotate*.
 - **A perfect score on your own design may have tested nothing.** The `pn()` transform above
   was validated at **164/164 pins** on a real board and was still wrong for a third of its
   input space: that board contained no mirrored symbols, so four of the twelve rotation ×
