@@ -1,6 +1,6 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion file PCB.md, read on demand so schematic-only work does not pay for it; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
+description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material (pcbnew, DRC, footprints, stackup, creepage, surface leakage, fab output and release readiness) is in the companion files PCB.md (layout, zones, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility) and RELEASE.md (DRC severity map, fab readiness), read on demand so schematic-only work does not pay for them; SETUP.md is the preflight for datasheet access — distributor API keys, vendor WAFs, PDF validation.
 ---
 
 # KiCad schematic and PCB design
@@ -22,13 +22,20 @@ Do it at the start, not when you hit a wall. An agent that discovers mid-task it
 cannot read a datasheet tends to substitute a part and explain the substitution as
 engineering.
 
-## Working on the board? Read `PCB.md`
+## Working on the board? Read the board companions
 
-This file covers what is shared plus schematic capture. **PCB layout, footprints,
-land patterns, routing and autorouting, `pcbnew` scripting, zones, DRC, stackup,
-creepage, surface leakage and fab output live in [`PCB.md`](PCB.md)** — read that
-file as well when the task touches the board, and skip it entirely for
-schematic-only work.
+This file covers what is shared plus schematic capture. **Board-side material lives
+in four companions** — read the ones the task touches, and none of them for
+schematic-only work:
+
+| file | read it when |
+|---|---|
+| [`PCB.md`](PCB.md) | any board task: layout judgement, zones, stackup, creepage, surface leakage, autorouting |
+| [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a part's package |
+| [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or making a slow generator fast |
+| [`RELEASE.md`](RELEASE.md) | verifying a board, the DRC severity map, or "is this ready to fab?" |
+
+`PCB.md` is the one to start from; it indexes the other three.
 
 Before external autorouting, classify routing ownership. `PCB.md` defines the
 three modes: an **exploratory** Freerouting scout is inspiration only, **critical**
@@ -36,7 +43,7 @@ geometry stays generator/manual-owned, and only the declared **routine** scope
 may cross the manifest-promotion boundary.
 
 **"Is this ready to fab / ready to order?" is a board question**: go straight to
-`PCB.md`'s last section, which separates *manufacturable* from *final* and gives
+[`RELEASE.md`](RELEASE.md), which separates *manufacturable* from *final* and gives
 the export-and-measure checklist. Answering it from DRC alone gets it wrong in
 both directions.
 
@@ -91,7 +98,7 @@ Generator hygiene, each learned the hard way:
   designator / net name / coordinates instead. On the board side this **cannot** be done
   through the API: `pcbnew` gives every item it creates a random UUID and exposes `m_Uuid`
   **read-only** (there is no `SetUuid`), so it takes a post-save rewrite of the `.kicad_pcb`.
-  [`PCB.md`](PCB.md) covers that and the second, less obvious cause of a wobbling md5.
+  [`PCBNEW.md`](PCBNEW.md) covers that and the second, less obvious cause of a wobbling md5.
 - **Verify the generator actually ran before believing a reproducibility check.** (Stated in
   *Core principle* above because an agent that skims the principle box implements the broken
   version.) Cost: a confident "reproducibility verified" on a board whose generator had not
@@ -174,9 +181,9 @@ one message, before any placement:
   write down must carry `standard + revision + table + column + voltage band +
   the voltage actually used`, or it is not checkable and will be misapplied at a
   different voltage. Note the current revision is **IPC-2221C** (Dec 2023); the
-  figures quoted here and in `PCB.md` are the B-era ones and have **not** been
+  figures quoted here and in `FOOTPRINTS.md` are the B-era ones and have **not** been
   re-verified against C's Table 6-1 — read it before leaning on a marginal number,
-  and see `PCB.md` for which column (A5–A7 assembly vs B1–B4 bare-board) applies.
+  and see `FOOTPRINTS.md` for which column (A5–A7 assembly vs B1–B4 bare-board) applies.
 - **Connector types and pinout** — usually fixed by what plugs into it.
 
 **If the user forbids questions** ("don't ask me anything", or an autonomous run), you still
@@ -242,6 +249,10 @@ a divider, and a `5V` pin is unsafe until its input/output direction is unambigu
   include the sink in the maximum-fault stress ledger. Only a fault explicitly excluded from
   that envelope may be documented as unsupported; documentation is not a substitute for an
   in-scope protection path.
+- **Protection on a precision node has a cost.** A high-voltage TVS can leak on the same scale
+  as the entire signal budget near breakdown. Bound leakage and capacitance at the operating
+  point; clamp at the victim, disconnect the fault path, or document the residual risk rather
+  than fitting protection reflexively.
 - **Size protection at the maximum credible fault, not the normal signal maximum.** Include
   supply tolerance and transients, component tolerance, working-voltage limits, continuous and
   pulse power, ambient-temperature derating, and the protection part's failure mode. A nominal
@@ -342,7 +353,7 @@ the report contents regardless.
 
 **`--severity-all` is not optional for ERC either, and "ERC = 0" is a statement about the
 severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities`,
-plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC map that `PCB.md` treats as
+plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC map that `RELEASE.md` treats as
 a first-class guard precondition. (This used to say "43 rules on KiCad 9.0.4". Do not quote a
 count: the map is **sparse** — KiCad writes only entries it has reason to write, so the number
 is a property of that file's edit history, not of KiCad. Measured across four real projects on
@@ -367,7 +378,7 @@ Absence of the map encodes absence of the problem: the same anti-monotone shape 
 exists to prevent, sitting inside the remedy for it. **A missing or empty `rule_severities` is
 `unverified`, not clean.** Resolve the enumeration against KiCad's built-in default map and
 report the effective severity of every rule, or say the severity map could not be established
-and refuse to call the ERC green. (`PCB.md`'s DRC half is not exposed to this: the same board
+and refuse to call the ERC green. (`RELEASE.md`'s DRC half is not exposed to this: the same board
 had 62 entries in `board.design_settings.rule_severities` — but that is luck, not structure,
 so give the DRC side the same tri-state.)
 
@@ -497,7 +508,7 @@ collision is removed rather than relocated.
 
 Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
 Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
-clearance — are in [`PCB.md`](PCB.md).
+clearance — are in [`RELEASE.md`](RELEASE.md).
 
 Treat verification summaries as cached output. Regenerate ERC, DRC, parity and audit reports
 before release, then derive or check the documented counts against those files. A design note
