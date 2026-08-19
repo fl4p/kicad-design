@@ -462,6 +462,16 @@ heading running 1.4× wider than budgeted. Use ~0.95 × size per character for a
 capitals in it, and remember that a block of *n* lines occupies `1.61 × size × (n − 1)` plus
 one line of height.
 
+**A guard that *rejects* overlaps needs the p90, not the typical — 1.15, not 0.95.** Those
+are two different jobs done with one number. Placing text, you want the honest average and a
+box that does not invent collisions. *Checking* text, a narrow box does not report a near
+miss; it passes a real overstrike whose leading glyph starts inside the strip the model
+dropped. Measured on `hw/shunt-reversal`: the plotted ink of `NW` runs 2.54 mm from its
+anchor at size 1.27, i.e. **1.0 × size per character**, already past a 0.95 box. Widening a
+guard costs far less than it looks — that sheet reports zero collisions at 0.95, 1.0 and 1.15
+alike, so the conservative constant bought coverage for free. Set it from the p90 and let a
+real false positive, if one ever appears, be the thing that argues it down.
+
 **Measure with KiCad, not with `pdftotext -bbox`.** The earlier lowercase figure here was
 0.67, taken from a `pdftotext` pass over an exported sheet — about 20 % low, which is the same
 class of error the rule exists to fix. KiCad's PDF export draws glyphs as vector strokes and
