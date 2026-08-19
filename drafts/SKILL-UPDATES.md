@@ -556,7 +556,7 @@ not:
 Also: read each footprint's **real courtyard** off the loaded board rather than keeping a
 table of sizes. Call `fp.BuildCourtyardCaches()` before `fp.GetCourtyard(...).BBox()` when
 working with a freshly built or loaded footprint, and assert that the resulting box is
-non-degenerate. `PCB.md` already warns about degenerate courtyard results; this addition
+non-degenerate. `PCBNEW.md` already warns about degenerate courtyard results; this addition
 should extend it with the cache-building mechanic. A footprint change then reflows the row
 instead of silently overlapping.
 
@@ -1117,7 +1117,7 @@ Two corollaries:
 
 ## 35. An island-anchoring pass must test the position against EVERY layer's fill, not against its own island
 
-**[PCB.md — "A zone SETTING can destroy copper asymmetrically"]**, the constructive half of §10 and §17.
+**[PCBNEW.md — "A zone SETTING can destroy copper asymmetrically"]**, the constructive half of §10 and §17.
 
 `PCB.md` says to turn island removal off and resolve `isolated_copper` with mirrored stitching vias. §17 added that a uniform denser grid manufactures more pinched islands than it cures. The pass that actually works is neither: **fill, find the orphans, and anchor each one individually** — because an island is a property of the fill, and the fill does not exist until the filler has run.
 
@@ -1138,7 +1138,7 @@ Worth stating plainly because it is the reason to bother: the largest island was
 
 ## 36. When the clearance test is the profile, count how often it is asked the SAME question
 
-> **PROMOTED (speed-up content only), 2026-08-18** — folded into `PCB.md` → *A slow generator: profile by OUTCOME…*. The measurement method and the hit-rate discipline went across; the router-specific candidate-family analysis and the 12 % threshold did not, and the board this was measured on is moving to FreeRouting, so they are evidence rather than rules.
+> **PROMOTED (speed-up content only), 2026-08-18** — folded into `PCBNEW.md` → *A slow generator: profile by OUTCOME…*. The measurement method and the hit-rate discipline went across; the router-specific candidate-family analysis and the 12 % threshold did not, they are evidence rather than rules. (An earlier note here said the router was being retired, so the material was only historical. That was wrong: the pattern router is KEPT for small boards, with FreeRouting for complex ones and as initial guidance, so the candidate-family analysis still describes live code.)
 
 **[SKILL.md Guards / PCB.md — router performance, continued from §31]**
 
@@ -1350,7 +1350,7 @@ placement generator's own `sanity()` it returns the legal window — `[31.450, 3
 
 ## 43. Profile by OUTCOME, not only by function — and when a cache is unsound, put the dependency in the KEY rather than invalidating
 
-> **PARTLY PROMOTED, 2026-08-18** — the outcome-profiling, temporal-locality and key-vs-invalidation trade-off went into `PCB.md`, along with the deliberate-absence lesson. The monotonicity proof and its preconditions did not: they are specific to a router being retired.
+> **PARTLY PROMOTED, 2026-08-18** — the outcome-profiling, temporal-locality and key-vs-invalidation trade-off went into `PCBNEW.md`, along with the deliberate-absence lesson. The monotonicity proof and its preconditions did not — not because that router is going away (it is not; it is kept for small boards), but because they are specific to one router's candidate enumeration rather than general practice.
 
 **[SKILL.md Guards / PCB.md — router performance, continued from §31 and §36]**
 
