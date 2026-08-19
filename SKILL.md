@@ -37,6 +37,10 @@ schematic-only work:
 
 `PCB.md` is the one to start from; it indexes the other three.
 
+When writing or reviewing generator checks, validators, audits or calibration harnesses, read
+[`GUARDS.md`](GUARDS.md). It defines the ledger/model/artifact tiers, subject-specific
+bidirectional calibration, zone-fill semantic finalization and matched-copper guard contract.
+
 Before external autorouting, classify routing ownership. `PCB.md` defines the
 three modes: an **exploratory** Freerouting scout is inspiration only, **critical**
 geometry stays generator/manual-owned, and only the declared **routine** scope
@@ -454,7 +458,7 @@ per project. Do not conclude the file is safe because no code you can find write
    `Unknown argument`: `sch export pdf` and `pcb export svg` take **`--exclude-drawing-sheet`**;
    `pcb export pdf` **omits the sheet by default** and takes `--include-border-title` to opt
    back in.
-5. **Domain guards** for anything the tools don't model (see *Guards*, below).
+5. **Domain guards** for anything the tools don't model (see [`GUARDS.md`](GUARDS.md)).
 
 **Text on a generated sheet does not reflow, and nothing checks it.** Adding one note
 lands it silently on top of another; growing a component row pushes its east end into the
@@ -491,8 +495,8 @@ class of error the rule exists to fix. KiCad's PDF export draws glyphs as vector
 explanation of it is not.) Line pitch is unaffected — 1.610 either way.
 
 **Net labels are not text objects, and they rotate.** A text-overlap guard that iterates the
-generator's *text* list never compares them — the same blindness as the property case under
-*Guards*, one object class further out. They also need their own box, because KiCad justifies
+generator's *text* list never compares them — the same data-model blindness described in
+[`GUARDS.md`](GUARDS.md), one object class further out. They also need their own box, because KiCad justifies
 a label **left at 0°/90° and right at 180°/270°**, and draws 90° and 270° with the *same*
 glyph rotation: the advance therefore runs **+x, up, −x, down** for 0/90/180/270, and the
 glyph body of a rotated label sits on the **−x** side of its anchor, not centred on it.
@@ -594,7 +598,7 @@ netlist at exit 0.) A strict `LIBPINS[(lid, unit)]` lookup raises `KeyError`
 on every one of those, and on a genuine multi-unit part with shared supply pins in unit 0 it
 drops them silently — worse than the flat lookup it replaced. So: pins for unit *u* =
 `NAME_0_*` **∪** `NAME_u_*`, and the same for body style (0 is common to 1 and 2). Then raise
-if the pin is in neither, rather than searching the other units. Add unit number to the enumerated parameter space under *Guards* as a **required**
+if the pin is in neither, rather than searching the other units. Add unit number to the enumerated parameter space in [`GUARDS.md`](GUARDS.md) as a **required**
 dimension.
 
 **Resolve `extends` before embedding.** **12 249 of the 22 784 top-level symbols in the stock
@@ -622,8 +626,8 @@ they exchange **pin 1 and pin 2 of every two-pin part**. Clean ERC, clean netlis
 part. Calibrate `pn()` by placing one part at 90° **with** `(mirror y)`, exporting the
 netlist, and checking which pin reached which net — never by confirming that the board you
 already have comes out right; an earlier version of this snippet had the order backwards and
-still scored 164/164 on a real board. See *A perfect score on your own design may have tested
-nothing* under **Guards** for why.
+still scored 164/164 on a real board. See [`GUARDS.md`](GUARDS.md) for why unexercised cells
+make a perfect score on one design incomplete evidence.
 
 **Parse balanced blocks per item; never pair two fields with one regex.** A reviewer checking a
 resistor pack's element mapping wrote `\(at ([-\d.]+) ([-\d.]+).*?\(number "(\d+)"` with
@@ -1175,7 +1179,7 @@ access, not engineering, so it can be revisited.
     under `Damp heat`, `Endurance`, `Humidity`, `Life`, `High Temperature Resistance`,
     `Temperature Cycling`, `Robustness`, or a bare `Specifications and Test Methods` grid with
     numbered rows. Grep those too, and page through the specification table rather than
-    trusting one keyword. Same discipline as *bounded searches lie* under **Guards**: if a
+    trusting one keyword. Same discipline as the bounded-search rule in [`GUARDS.md`](GUARDS.md): if a
     search reports absence, verify the search could have seen the thing.
   * **An absence claim in a document is a claim, and it will be quoted.** Prose that says the
     vendor "does not specify" something reads as a fact the next reader will act on. Either
@@ -1191,189 +1195,13 @@ access, not engineering, so it can be revisited.
   leaks less" is exactly the remembered fact *Never quote a spec from memory* exists to stop.
 
 
-## Guards (checks, validators, audits)
+## Guards, validators and audits
 
-Apply the global guard checklist in `~/.claude/CLAUDE.md`. EDA-specific instances:
-
-- **A guard whose precondition moves silently stops guarding.** A track moved inside a rule
-  area that relaxed clearance to 0.6 mm; the plane pulled back to 0.601 mm; DRC stayed green
-  while the stated 1.0 mm design minimum was gone. DRC was not wrong — it was answering a
-  different question than the one that mattered. Keep an independent audit that re-measures
-  real geometry, and say in the docs that *the audit*, not DRC, enforces the figure, so nobody
-  deletes it as redundant.
-- **A guard is only as strong as its weakest link to a real object.** When the empty-interval
-  bullet under *Close every external interface* moved a bound from the resistors onto the gate
-  clamps, the guard's arithmetic was fine and completely hollow: it computed
-  `CLAMP_VBR_MAX + CLAMP_VF` and asserted the result was inside the absolute maximum, and both
-  are module constants — so **a board with no clamps on it at all passes that check**, because
-  nothing in it reaches for a component. Arithmetic over constants proves the design *intent*,
-  never the design. If a safety bound is provided by a part, assert the part exists, is on the
-  right net, and is the right MPN. **And calibrate one known-bad input per MECHANISM, not per
-  variable:** the pre-existing calibration perturbed the resistor, the only variable the guard
-  read, while both real failure modes — a substituted higher-breakdown clamp, and no clamp
-  fitted — change no resistor, so a passing suite proved nothing about either. Enumerate the
-  things that *produce* the bound and inject into each; here that turned one calibration into
-  three. Corollary for reviews: when a review moves a bound from one mechanism to another, the
-  guard **and** its calibrations both have to move. Fixing only the number leaves a guard
-  watching the wrong thing, which is worse than the original error because it now looks
-  deliberate.
-- **A guard is blind to whatever its data model omits, and that blindness is silent.** A
-  text-overlap check iterated the generator's list of *text* objects and passed a caption
-  printed straight through a power symbol's net name — because a net name is a symbol
-  **property**, not a text object, so it was never in the collection being compared. The
-  guard was not wrong about the objects it saw; it could not see the colliding one. When
-  you write a guard, enumerate what the design contains and ask which of those object
-  classes your loop actually visits — properties, symbol graphics, zone fills and
-  drawing-sheet items are the usual omissions. Calibrating with a fault built from the
-  class you already iterate will never reveal this. It then recurred on the same board one
-  class further out — **net labels** are not text objects either — so add the missing class
-  *and* re-read the enumeration; see *Net labels are not text objects, and they rotate*.
-- **A perfect score on your own design may have tested nothing.** The `pn()` transform above
-  was validated at **164/164 pins** on a real board and was still wrong for a third of its
-  input space: that board contained no mirrored symbols, so four of the twelve rotation ×
-  mirror combinations (4 angles × 3 mirror states) were never exercised, and those four swap
-  pin 1 with pin 2. The denominator below is 24 because the enumeration checks **both pins**
-  of a two-pin part in each of the twelve cells — say which, or the arithmetic reads as a typo
-  in the one paragraph that is about reporting coverage honestly. Your design
-  is a *sample*, and the branches it never reaches are precisely the ones nobody has looked
-  at. For any helper with a small discrete parameter space — rotation × mirror, layer set,
-  package variant, pad shape, unit number — **enumerate the space and check every cell against
-  ground truth** (here: place one part per combination, export the netlist, ask KiCad which pin
-  reached which net). Report coverage, not pass rate: "164/164" and "16/24" were the same code.
-- **Read the shape of a failure, not its count — and test your theory of it.** A harness
-  reporting **0/24** is almost never telling you the thing under test is maximally wrong; it is
-  telling you the harness did not run. A wrong coordinate transform puts labels on the *other
-  pin*; it does not make them land on nothing. Distinguish "wrong answer" from "no answer"
-  before concluding anything. Then be equally sceptical of your diagnosis: *"the invalid sheet
-  UUID broke it"* was a confident, plausible and entirely wrong explanation of one such failure
-  — a mismatched sheet UUID netlists fine, and the real cause was a `lib_symbols` name that did
-  not match its `lib_id`. Isolating the two took one minute and reversed the conclusion. A
-  cause you did not test is a guess you are about to write down as a fact.
-- **Bounded searches lie.** A `\(text "([^"]{5,600})"` regex silently returned 19 of 26 text
-  items and produced a confident "not found" for content that was present. If a search reports
-  absence, verify the search could have seen the thing.
-- **Derive limits from constants**, never hardcode. A DAC code cap computed from the reference,
-  divider ratio and gain moves when those change; a magic `0xD999` silently goes stale.
-- **Fail closed, and raise rather than clamp.** Silently clamping an over-limit request makes
-  a sweep record two different setpoints at the same actual voltage — data that looks valid.
-- **A guard keyed on name literals must assert its subject exists.** `HV_NETS = {"+110V", …}`
-  with no existence check meant renaming the net silently removed the entire rail from the
-  audit — which still printed PASS. Same flaw in the matching `.kicad_dru` rules, so DRC went
-  green in lockstep. Assert the named nets are present, or key on a netclass instead.
-- **Then make the guard survive a rename, or it becomes the thing that gets deleted.** The
-  bullet above is necessary and not sufficient. A symmetry audit that hardcoded
-  `"Net-(JP1-A)" ↔ "GND"` did assert its subject, and when the net was renamed to `/sense+` it
-  correctly refused with `UNVERIFIED` rather than reporting a clean board — the guard working
-  exactly as designed. But a rename is not a design change, and a guard that demands a code
-  edit every time one happens is the guard someone eventually "fixes" by removing the
-  assertion. **Derive the name from the thing that defines it.** Those two nets are whatever
-  sits on R1 pads 2 and 3, by definition of a 4-terminal shunt:
-
-  ```python
-  pos, neg = pads["2"].GetNetname(), pads["3"].GetNetname()
-  need(pos and neg and pos != neg, "R1's Kelvin taps are unnamed or shorted")
-  SWAP[pos], SWAP[neg] = neg, pos
-  ```
-
-  Now a rename cannot unclassify anything, and the guard still fails closed on a missing part,
-  an unnamed net, or both taps on one net. Note [`PCB.md`](PCB.md)'s *derive the mirror's net
-  map from the schematic* already said this in spirit — and the implementation still hardcoded
-  strings, which is why it is worth saying as a mechanic and not only as a principle.
-- **An exemption must be scoped to the pair, not to one object.** A "package floor" that fires
-  when *either* object belongs to that package is a mute button: a router-placed HV track
-  0.70 mm from an exposed pad inherited a 0.60 mm package excuse and passed both DRC and the
-  audit. Require both objects to belong to the package, and bound any genuine exception
-  (e.g. pin escapes, which pitch really does fix) by a measured floor so a *new* closer object
-  cannot inherit it.
-- **Set floors to the standard, not the standard minus epsilon.** Every floor in one audit sat
-  0.01 mm under the figure it cited (`0.79` for "exactly IPC A6 = 0.80"), so it passed
-  geometry that did not meet the standard it claimed to enforce.
-- **A rating is not a limit.** The sibling failure to the one above: a check whose threshold is
-  the *destruction* point instead of the *design* point passes everything that is not already
-  broken. A fault-power guard compared dissipation against nameplate, so it passed parts
-  sitting in the high nineties of their rated power — precisely the margins that had motivated
-  writing it, and it reported them as fine. (The worked example under *Close every external
-  interface* is a sibling case that lands just **over** nameplate at 103 %; a nameplate
-  comparison catches that one and still waves through everything at 99 %, which is the point.) It only became a guard once it carried an explicit
-  derating factor (60 % of nameplate for a permanent fault). Whenever a check compares against
-  a datasheet maximum — power, voltage, current, temperature — ask what fraction of it you are
-  actually willing to ship, and put *that* number in the comparison. Then re-run the
-  known-bad calibration, because a threshold this loose passes the calibration inputs too.
-- **A retraction that lands only in the document is HALF a retraction — grep the runtime output
-  too.** An independent review showed that a claimed *"bottom-leg match resolved to 0.027 mΩ at
-  50 A"* was code granularity, not accuracy: the ADC's ±1 µA input leakage into the divider's
-  90.9 kΩ is ±2 mΩ-equivalent and swamps it. The claim was withdrawn from the design document,
-  the section rewritten, an open item added — and the generator carried on printing
-  `bottom-leg match resolved to 0.027 mOhm at 50 A` to the console on every run. **The operator
-  reads the console, not §8**, and a number surviving in runtime output is still in circulation
-  no matter what the document now says; worse, it arrives with more authority, because it looks
-  like a measurement the tool just made. When you retract a claim, **grep the whole repo for the
-  NUMBER**, not the sentence — `0.027` was the only reliable handle, the surrounding prose
-  differed everywhere. And fix it by **re-labelling, not deleting**: the figure is still the true
-  LSB size and worth printing, so it now reads `bottom-leg LSB 0.027 mOhm (granularity, NOT
-  accuracy -- ADC leakage is +/-2 mOhm here)`. Deleting it would have lost a real number;
-  leaving it bare asserted something false.
-- **Protection on a precision node has a cost.** A TVS sized for an 85 V input leaks µA near
-  breakdown — comparable to the entire load on a node built for 134 µVpp. Clamp at the victim
-  end, disconnect with a relay, or document the residual risk; don't reflexively fit the part.
-
-### Calibrations
-
-- **Calibrate against a known-bad input.** Copy the board, inject the exact fault the guard
-  exists to catch (e.g. widen the EP land back to the unsafe stock size), and watch it exit
-  non-zero. A guard never seen to fire is not a guard.
-- **Calibrate a branch BEFORE you fix the defect that has been exercising it.** A check with
-  two branches had a calibration for one of them. The other — orphaned pour islands — had none,
-  and nobody noticed, because the real board *had* orphans and the branch fired on every run.
-  That is genuine evidence, and it **expires the moment you fix the board**: remove the islands
-  and the branch goes silent, untested, still reporting PASS — and the loss is invisible
-  precisely because the output improved. When you are about to remove the condition that has
-  been exercising a guard, writing that guard's calibration is part of the fix, not follow-up
-  work. Write it first, watch it fire while the defect is still there, then fix the defect.
-- **On a board that ALREADY exhibits the fault, a calibration must be DIFFERENTIAL.** Having
-  written that missing calibration, the obvious form is: inject the fault, assert the check
-  raises, assert the message matches. On a board carrying 16 orphaned islands already, **that
-  passes without testing the injection at all** — the check raises because of the 16, the
-  message matches because it always would, and the harness reports FIRED having proved nothing.
-  The naive form is wrong on exactly the boards where the guard matters most. Count the fault
-  instances *without* the injection, count them *with* it, and require the count to rise **by
-  exactly one** and the report to name the object you injected. That is sound whether the clean
-  board has zero instances or sixteen, and it turns `FIRED` into `orphan-island 0 -> 1`, which
-  is a claim with content. General shape: **a calibration must be a measurement of the
-  injection's effect, not of the board's state. Any calibration whose assertion could pass on
-  the un-injected board is decorative.**
-- **A calibration is code, and it breaks in ways that look like it working.** It counts only
-  when the injection **actually created** the intended fault, the input lies in the guard's
-  **active region**, the site is **not on its exemption list**, and the guard raises the
-  **expected type and a message fragment naming the intended arm**. A silent return, an
-  unexpected exception, and the right type with the wrong message are three different
-  calibration failures. Restore every injected mutation in `finally`, or a failed calibration
-  poisons the ones after it. Five real failures in one suite, each reporting success:
-  - *harness* — it caught only `AssertionError` while the ledger functions deliberately raise
-    `ValueError`, so guards that had reached their intended refusal reported "did not fire";
-  - *the input did not create the fault* — "delete a wire and watch a pin dangle" popped the
-    **last** `SEGS` entry, a `PWR_FLAG` stub whose removal dangles nothing, so the calibration
-    passed a guard that had evaluated a healthy design (the differential form above is the
-    general fix);
-  - *the site was exempt* — "carry a host net onto the isolated side" injected on the isolator,
-    which the isolation guard skips by design as a declared barrier crosser; any ordinary part
-    fired immediately;
-  - *another check fired first* — moving a merged land's split lines also changed the land's
-    union, so the union check fired and the containment check under test was never reached;
-  - *blind region* — the rail chosen to test "glyph drawn over its own wire" had a
-    **horizontal** wire, and that arm only has a direction to compare for vertical ones.
-
-  ```python
-  except ValueError as e:
-      if "wrong side" not in str(e):
-          raise AssertionError(f"guard fired for the wrong reason: {e}")
-  ```
-
-  Where no input in the guard's active region exists, raise `UNVERIFIED` — a calibration that
-  could not run is not a calibration that passed.
-- **Calibration must cover the case that matters, not the case you already fixed.** A cap guard
-  tested `NaN` and `0.01` — both outside its acceptance band — and never tested a *plausible*
-  bad measurement inside it, which is the one that raised the cap to full scale.
+Read [`GUARDS.md`](GUARDS.md) before writing or reviewing generator checks. It owns the
+ledger/model/artifact classification, subject-specific two-direction calibration, fail-closed
+coverage rules, semantic zone-fill finalization and matched-copper gate pattern. Keep those
+contracts out of project-specific prose: encode them in the generator or audit harness and bind
+their reports to the emitted artefact.
 
 
 ## Reviewing someone else's numbers

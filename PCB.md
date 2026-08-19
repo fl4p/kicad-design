@@ -9,11 +9,12 @@ Everything in `SKILL.md` still applies here: generate rather than hand-place,
 climb the whole verification ladder, and write guards that fail when they cannot
 evaluate their input.
 
-**This file is the board-layout core.** Three companions carry the rest, so a task pays
+**This file is the board-layout core.** Four companions carry the rest, so a task pays
 only for what it needs:
 
 | file | read it when |
 |---|---|
+| [`GUARDS.md`](GUARDS.md) | writing or reviewing board audits, geometry checks or calibration harnesses |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a package |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or a slow generator |
 | [`RELEASE.md`](RELEASE.md) | verifying a board, or answering "is this ready to fab?" |
@@ -251,13 +252,13 @@ Four traps, all met on one precision current-sense board:
   current pours had outlines that differed only cosmetically while their *fills* differed by
   3.4 mm².
 
-- **Compare fills geometrically, never by vertex equality.** KiCad segments arcs into chords,
-  and two mirror-image arcs get their chords in different places even when the shapes are
-  identical — so point-set equality reports pure noise as a defect. Measure (a) filled area and
-  (b) the largest distance from any mirrored vertex to the other polygon's boundary. Measured
-  on that board: chord noise **~0.005 mm**, real defects **0.8 – 2.5 mm**. Put the tolerance an
-  order of magnitude above the noise and state both numbers next to it, so the next reader can
-  see the check has headroom rather than being tuned to pass.
+- **Compare fills semantically, never by vertex equality or area alone.** KiCad segments arcs
+  into chords, and two mirror-image arcs get their chords in different places even when the
+  shapes are equivalent. Conversely, equal areas can hide a neck or a severed region. For a
+  load-bearing matched pour, use [`GUARDS.md`](GUARDS.md)'s two independent gates: an
+  artifact-derived masked shape residual with bounded masks and topology validation, plus an
+  unmasked raw-quantity limit derived from the physical error or thermal budget. Measure the
+  legal fill noise before setting either geometric tolerance.
 
 **Symmetry is not the whole objective — check the loop area too.** A mirror-symmetric
 differential pair can still be a large pickup loop, and the audit that proves the symmetry
@@ -282,8 +283,9 @@ make the script *refuse* if it does not — symmetry is not worth losing orienta
 
 Finally: a symmetry audit is exactly the kind of guard that must fail closed. An unreadable
 outline, an object class the parser never visited, or a pair that could not be compared has to
-raise — "0 asymmetries" out of a scan that examined nothing is the anti-monotone false PASS,
-and it is very easy to write here because the happy path prints the same thing.
+raise — "0 asymmetries" out of a scan that examined nothing is the anti-monotone false PASS.
+Follow [`GUARDS.md`](GUARDS.md)'s subject inventory, stable failure IDs and bad/legal calibration
+pair so the audit proves both detection and valid-domain headroom.
 
 ## Surface leakage: measure the PATH, not the gap
 

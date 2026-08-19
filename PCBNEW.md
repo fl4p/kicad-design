@@ -3,7 +3,8 @@
 Board *scripting* — driving `pcbnew` from Python, making its output reproducible, and
 making a slow generator fast. Layout judgement lives in [`PCB.md`](PCB.md); land
 patterns in [`FOOTPRINTS.md`](FOOTPRINTS.md); release checks in
-[`RELEASE.md`](RELEASE.md).
+[`RELEASE.md`](RELEASE.md). Read [`GUARDS.md`](GUARDS.md) when the script emits or
+calibrates domain checks, and for the semantic zone-fill finalization contract.
 
 ## PCB / `pcbnew` notes
 
@@ -197,6 +198,17 @@ zones are re-filled, so any geometric measurement afterwards is against stale co
 false negative when *calibrating* a clearance guard: tightening the rule to force a violation
 appears to do nothing, and the guard looks broken when in fact the test was.
 
+For a generator-owned board, a refill is not complete merely because the board was filled once
+or because the fill happened to run inside an orphan-stitching branch. Use the flow in
+[`GUARDS.md`](GUARDS.md): initial fill → discover and place legal orphan fixes → unconditional
+final refill outside that branch → snapshot filled geometry → refill the same loaded board →
+require an empty per-zone `BooleanXor` with unchanged topology → save. Compare zones by stable
+semantic identity and fail if pairing is ambiguous. Measure save/reload/refill behavior separately
+on a scratch copy; report a cycle and any guard verdict it flips instead of gating an empirically
+unreachable fixed point. Keep in-memory semantic settling, save/reload stability and byte
+reproducibility separate; a stable P−N difference can hide equal common-mode movement of both
+pours.
+
 **A zone SETTING can destroy copper asymmetrically, and nothing checks settings.**
 `island_removal_mode` on a current-path plane had reverted from `NEVER` to `ALWAYS`, and with
 it went **37 mm² from one inner plane and not its mirror** — In1 856.21 mm² against In2
@@ -249,7 +261,10 @@ only the obvious half leaves the md5 still wobbling.
 
 Therefore: **canonicalise ids and item order first, then fill.** Filling before
 canonicalising bakes the old order into the polygons and the md5 keeps moving while
-every geometric check reports PASS.
+every geometric check reports PASS. After any fill-dependent edits, run the unconditional final
+fill and in-memory semantic-settle check above. Characterize save/reload/refill separately. Do not
+iterate until scalar `Area()` stabilizes; equal areas can describe different shapes and repeated
+filling can settle on the wrong property.
 
 ## Geometry helpers are guards, and fail the same way
 

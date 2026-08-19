@@ -7,13 +7,18 @@ Every rule here exists because the failure it describes actually shipped and had
 be caught — not because it is general advice. Each one names the failure it prevents,
 and keeps the concrete numbers where they make the rule easier to apply.
 
-Four files, so schematic-only work does not have to load the board material:
+Focused companion files keep schematic-only work from loading board, footprint, release or
+guard detail it does not need:
 
 | File | Read it when |
 |---|---|
 | `SKILL.md` | always — shared practice plus schematic capture |
 | `SETUP.md` | before **any** task that will read a datasheet, schematic-only included — can this machine actually fetch and validate them? Run it at the start, not when you hit the wall. |
-| `PCB.md` | the task touches the board: `pcbnew`, DRC, footprints, zones, stackup, creepage |
+| `GUARDS.md` | writing or reviewing generator checks, audits, validators or calibration harnesses |
+| `PCB.md` | the task touches board layout, zones, stackup, creepage or autorouting |
+| `PCBNEW.md` | scripting `pcbnew`, reproducibility or generator performance |
+| `FOOTPRINTS.md` | selecting, generating or modifying footprints and land patterns |
+| `RELEASE.md` | DRC severity, fab output or release readiness |
 
 Topics covered:
 
@@ -27,8 +32,8 @@ Topics covered:
 - **Copper, mask and paste are three independent layers** — narrowing a pad for creepage
   does not move its solder-mask or paste aperture.
 - **Datasheet discipline** — read the land-pattern page, don't recall it.
-- **Guards** — the anti-monotone false-PASS failure mode, and how to calibrate a check
-  against the case that actually matters.
+- **Guards** — explicit ledger/model/artifact tiers, subject-specific bad and legal
+  calibrations, semantic zone-fill finalization and matched-copper checks.
 - **Reviewing someone else's numbers.**
 
 ## Install
