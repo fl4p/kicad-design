@@ -1,128 +1,140 @@
-# Verifying and releasing a board
+# Verify and release a board
 
-The board-side rungs of the verification ladder, and the separate question of whether a
-board that is *manufacturable* is the one you actually want built. Read the ladder before
-believing a green DRC; read the release half before ordering.
+Read this reference for the board-side verification ladder, fabrication export, BOM evidence, or a
+decision about whether a board is ready to order. Apply [`THERMALS.md`](THERMALS.md) separately
+when temperature or heat flow is load-bearing.
 
-Release checks do not establish temperature or heat-flow performance. When those are project
-requirements, apply [`THERMALS.md`](THERMALS.md) and bind its calculation/model/measurement
-evidence to the released artifact.
+## Contents
 
-## Board-specific rungs of the verification ladder
+- [Run board verification](#run-board-verification)
+- [Resolve effective rule maps](#resolve-effective-rule-maps)
+- [Separate manufacturable from final](#separate-manufacturable-from-final)
+- [Export and measure fabrication data](#export-and-measure-fabrication-data)
+- [Verify BOM and sourcing evidence](#verify-bom-and-sourcing-evidence)
+- [Bind outputs to their source artefact](#bind-outputs-to-their-source-artefact)
 
-DRC green means "no rule was broken", not "the design is right". In particular:
+## Run board verification
+
+Treat a green DRC as “no active rule reported a violation,” not as proof that the design is right:
 
 ```sh
-$K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
+K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
+"$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
-- **`--exit-code-violations` is not optional either.** Without it `pcb drc` writes
-  every violation to the report and still **exits 0** — measured at 175 violations
-  exiting `0` bare and `5` with the flag. Any wrapper that trusts `$?` passes a
-  board it never checked. See *The verification ladder* in `SKILL.md`.
-- **`--schematic-parity` is not optional.** It is the only check that the board
-  still matches the netlist.
-- **`--severity-all` does not mean "all rules".** It selects error + warning +
-  exclusions; it does **not** resurrect a rule set to `ignore` in
-  `.kicad_pro` → `board.design_settings.rule_severities`. Calibrated: with a
-  footprint's courtyard deleted, `--severity-all` reported **no**
-  `missing_courtyard` while the rule was `ignore`, and reported it as soon as the
-  same run had it at `error`. So "DRC: 0 violations" is a statement about the
-  current severity map as much as about the board — and one real project quietly
-  carried five rules at `ignore` (`footprint_filters_mismatch`,
-  `footprint_type_mismatch`, `missing_courtyard`, `npth_inside_courtyard`,
-  `pth_inside_courtyard`). Worse, that map lives in the `.kicad_pro` that
-  `SKILL.md` warns a generator can rewrite wholesale, so it is a guard
-  precondition that moves silently. **Before believing a green DRC, list every rule at `ignore` in the
-  release report — including KiCad's own defaults.** `missing_courtyard`,
-  `footprint_filters_mismatch` and both `*_inside_courtyard` rules ship at
-  `ignore`, so a diff-against-defaults reports nothing and never fires on the
-  very example above; enumerate, then diff to catch a map someone edited. (On the project above, flipping all five back produced no additional
-  violations — the mechanism is real, that instance was clean.)
-- **A rule area that relaxes a constraint is keyed on *position*.** Anything that
-  later moves into it silently stops being held to the strict value, and DRC
-  stays green. Any relaxation needs an independent geometric audit that measures
-  real clearance (binary-search `SHAPE::Collide`) rather than asking the rules.
-- **Re-run the layout script after *any* schematic change**, not just after
-  connectivity changes — see the parity note in [`PCBNEW.md`](PCBNEW.md).
-- **Only KiCad's own connectivity is authoritative.** Third-party analyzers
-  rebuild nets with their own union-find over pads, tracks, vias and fills, and
-  on a 2-layer board they routinely report "GND plane split, 2 islands, signals
-  crossing" for F.Cu fragments that are bridged through the B.Cu pour — alarming,
-  and entirely normal. Check any connectivity claim against
-  `board.GetConnectivity().GetUnconnectedCount(True)` and DRC's unconnected count
-  before acting on it. The same class of tool flags *membership* of a rule area
-  without reading its restriction flags: a via inside a keepout that explicitly
-  permits vias is not a violation. Triage third-party findings before promoting
-  any of them to a blocker, and say in the review which ones you dismissed and why.
+- Keep `--exit-code-violations`; without it DRC can write violations and exit zero.
+- Keep `--schematic-parity`; it checks that the board still agrees with the schematic.
+- Capture the command status before piping output, and judge the report contents as well.
+- Re-run the layout generator after every schematic change that can alter values, fields,
+  footprints, or connectivity.
+- Independently audit any rule area that relaxes a physical constraint. Position-dependent rules
+  can remain green after a new object moves into the relaxed region.
 
-## Is it ready to fab? — manufacturable and final are different questions
+Check third-party connectivity findings against KiCad's own connectivity and DRC. External tools
+may reconstruct nets without understanding through-plane connections, zone fills, or rule-area
+restriction flags. Record which findings were dismissed and the authoritative evidence used.
 
-A board can be DRC-clean, parity-clean and perfectly manufacturable and still be the **wrong
-board to order**. Separate the two questions, because they have different blockers and people
-conflate them:
+## Resolve effective rule maps
 
-- **Manufacturable** — can a fab build this from the data. Geometry, exports, stackup.
-- **Final** — is this the revision you want in your hand. Any pending change that lands on the
-  *fabricated artefact* is a blocker here, and that includes **silkscreen**, not just copper.
-  A missing revision marker or a dropped hazard warning is a respin exactly like a missing
-  resistor is.
+`--severity-all` does not resurrect rules whose effective severity is `ignore`. Before calling ERC
+or DRC clean:
 
-Everything that is neither — the BOM's MPNs, an interface contract, a schematic note's
-numbering — is an assembly or release concern. Say which bucket each finding is in when asked
-"is it ready", or the answer collapses into an unhelpful "no".
+1. Resolve the effective severities, including KiCad defaults absent from a sparse project map.
+2. List every ignored rule and every exclusion in the release report.
+3. Record pin-map changes that alter ERC compatibility.
+4. Diff `.kicad_pro` before and after each generator or GUI-assisted transformation.
+5. Treat a missing, empty, or unreadable map as `UNVERIFIED`, not as an empty ignore list.
 
-### The manufacturability test is the export, not an opinion
+Do not rely only on a diff against defaults: a load-bearing rule may already default to `ignore`.
+Enumerate first, then use the diff to expose project-specific changes. Restore unintended project
+file mutations before generating the reports bound to the release.
 
-Run it. It costs seconds and it is the only check that proves the data a fab receives is
-complete:
+## Separate manufacturable from final
+
+Answer two questions independently:
+
+- **Manufacturable:** can the fab build the board from the supplied geometry, stackup, drill, and
+  other outputs?
+- **Final:** is this the exact revision the user wants fabricated, including silkscreen, hazard
+  markings, revision identifiers, and all pending board changes?
+
+Classify BOM, assembly, integration, and documentation findings separately. A board can be
+manufacturable while still blocked from ordering, and a sourcing problem does not necessarily make
+its bare PCB unmanufacturable.
+
+## Export and measure fabrication data
+
+Run the actual exports:
 
 ```sh
-$K pcb export gerbers --output fab  x.kicad_pcb
-$K pcb export drill   --output fab/ x.kicad_pcb
-$K sch export bom --output fab/bom.csv --group-by 'Value,Footprint,MPN' \
+K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
+"$K" pcb export gerbers --output fab  x.kicad_pcb
+"$K" pcb export drill   --output fab/ x.kicad_pcb
+"$K" sch export bom --output fab/bom.csv --group-by 'Value,Footprint,MPN' \
      --fields 'Reference,Value,Footprint,MPN,Manufacturer,${QUANTITY}' x.kicad_sch
-$K pcb export pos --output fab/cpl.csv --format csv --units mm --side both x.kicad_pcb
+"$K" pcb export pos --output fab/cpl.csv --format csv --units mm --side both x.kicad_pcb
 ```
 
-Check every exit status **and** grep the logs — and confirm the copper layer count you expect
-actually appears, since a 4-layer board that emits two copper gerbers is a stackup problem, not
-an export problem.
+Check every exit status and log. Confirm that the expected copper layers appear. Measure from the
+board rather than memory:
 
-Then measure the handful of numbers a fab quotes against, from the board rather than from
-memory: min track width, via pad and drill, **annular ring** `(pad − drill) / 2`, min pad
-drill, board outline extent, and an explicit `(stackup …)` block.
+- minimum track width and clearance;
+- via pad, drill, and annular ring `(pad - drill) / 2`;
+- minimum plated and non-plated drill;
+- board outline dimensions;
+- explicit stackup and finished thickness;
+- any fab-specific mask, paste, silk, slot, or edge constraint.
 
-**Assert the outline is closed.** Count Edge.Cuts endpoints: every one must be shared by
-exactly two shapes. An open outline still exports a plausible `.gm1`, and the fab discovers it.
+Assert that the outline is closed. Count `Edge.Cuts` endpoints and require each segment endpoint to
+belong to a closed contour; handle inherently closed circles and rectangles explicitly:
 
 ```python
-pts = collections.Counter()
-for d in board.GetDrawings():
-    if board.GetLayerName(d.GetLayer()) != "Edge.Cuts": continue
-    if d.GetShape() in (pcbnew.SHAPE_T_RECT, pcbnew.SHAPE_T_CIRCLE): continue  # closed already
-    pts[k(d.GetStart())] += 1; pts[k(d.GetEnd())] += 1
-open_ends = [p for p, c in pts.items() if c != 2]
+points = collections.Counter()
+for drawing in board.GetDrawings():
+    if board.GetLayerName(drawing.GetLayer()) != "Edge.Cuts":
+        continue
+    if drawing.GetShape() in (pcbnew.SHAPE_T_RECT, pcbnew.SHAPE_T_CIRCLE):
+        continue
+    points[key(drawing.GetStart())] += 1
+    points[key(drawing.GetEnd())] += 1
+open_ends = [point for point, count in points.items() if count != 2]
 ```
 
-### The BOM trap: MPN fields live in the schematic, not the footprint
+Calibrate this for the outline primitives the project permits; endpoint degree alone is not a full
+topology proof for arbitrary self-intersections.
 
-Testing `footprint.HasFieldByName("MPN")` on a board reported **71 of 71 components missing an
-MPN**, which was wrong and briefly went into a review. Symbol fields do not propagate to
-footprints unless the project is configured to push them. Read MPNs from `netlist.net` or the
-schematic — the same board had 67 of 71, the exceptions being mounting holes, which need none.
+## Verify BOM and sourcing evidence
 
-This is *"bounded searches lie"* in a new costume: the test returned data, the data was
-uniform, and uniformity read as a finding rather than as a broken probe. A result that
-condemns *everything* deserves the same suspicion as one that condemns nothing.
+Read `MPN`, manufacturer, and specification fields from the schematic or exported netlist. Symbol
+fields do not automatically propagate to board footprints, so a footprint-only scan can falsely
+report every component as missing its MPN. Treat a result that condemns everything with the same
+suspicion as a check that finds nothing.
 
-While there, flag components whose Value is still a placeholder — a library name like
-`R_Small` or a bare `R` on a fitted part means nobody can build it.
+Enforce the BOM in both directions: every fitted part needs an appropriate BOM row, and every BOM
+row must resolve to fitted references. Exempt only deliberate non-procured objects such as mounting
+features, and make the exemption explicit. Reject fitted placeholder values such as a bare `R` or a
+library symbol name.
 
-### Commit the outputs with the hash they came from
+For every procured line, verify these as separate facts:
 
-Export, then record the board md5 alongside the gerbers, and commit both. Otherwise there is no
-way to prove later which copper is in the boards on the bench — and a board file that has been
-opened and re-saved in the GUI since the export will not match, for reasons that are pure
-reordering (see *`LoadBoard` → `Save` does not round-trip* in [`PCBNEW.md`](PCBNEW.md)) and
-therefore invisible in a diff.
+- exact manufacturer ordering code and package;
+- required tolerance, voltage, temperature, dielectric, matching, or performance grade;
+- current lifecycle state;
+- current stock or an explicitly accepted lead time;
+- datasheet revision supporting the design constants.
+
+Do not derive one ordering code by copying another part's packaging suffix. Do not treat a
+datasheet ordering table as proof that a code remains active, and do not treat purchase history as
+proof that stock remains available. When one component fails a coupled constraint such as value ×
+voltage × dielectric × package, sweep the complete BOM by that predicate.
+
+## Bind outputs to their source artefact
+
+Record a cryptographic digest of the exact source schematic and board alongside fabrication and
+assembly outputs. Commit or otherwise archive them together. Regenerate after any source change or
+GUI serialization step; ordering-only churn can alter bytes without changing connectivity, so a
+verbal revision label cannot prove which source produced the released copper.
+
+Record the KiCad version, active rule maps, generator revision, and export commands with the
+release. Treat reports and fabrication files as cached outputs that expire when any bound input
+changes.

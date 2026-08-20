@@ -1,11 +1,11 @@
 # kicad-design
 
-A Claude Code skill for KiCad schematic capture, PCB layout, and datasheet-grounded
-review of analog / mixed-signal designs.
+A reusable agent skill for KiCad schematic capture, PCB layout, and datasheet-grounded
+review of analog and mixed-signal designs.
 
-Every rule here exists because the failure it describes actually shipped and had to
-be caught — not because it is general advice. Each one names the failure it prevents,
-and keeps the concrete numbers where they make the rule easier to apply.
+`SKILL.md` contains the invariant workflow and required actions. Named devices and measured
+failures are labeled examples; detailed procedures and scoped case evidence live in companions so
+unrelated tasks load only the domain they need.
 
 Focused companion files keep schematic-only work from loading board, footprint, release or
 guard detail it does not need:
@@ -20,6 +20,7 @@ guard detail it does not need:
 | `FOOTPRINTS.md` | selecting, generating or modifying footprints and land patterns |
 | `RELEASE.md` | DRC severity, fab output or release readiness |
 | `THERMALS.md` | dissipation, junction/ambient limits, heat paths, gradients, thermal pads/vias or validation |
+| `VARIANTS.md` | one generator must emit more than one board |
 
 Topics covered:
 
@@ -35,12 +36,26 @@ Topics covered:
 - **Guards** — explicit ledger/model/artifact tiers, subject-specific bad and legal
   calibrations, semantic zone-fill finalization and matched-copper checks.
 - **Thermals** — opt-in heat, temperature, power-stress and thermally load-bearing copper workflow.
+- **Board variants** — one generator, two boards, without moving the qualified one.
 - **Reviewing someone else's numbers.**
 
 ## Install
 
-Symlink it into the skills directory:
+Symlink a checkout into the skills directory for the runtime that should discover it:
 
 ```sh
-ln -s ~/dev/ee/kicad-design ~/.claude/skills/kicad-design
+kicad_skill_repo=/absolute/path/to/kicad-design
+
+# Codex
+codex_skill_root=${CODEX_HOME:-$HOME/.codex}/skills
+mkdir -p "$codex_skill_root"
+ln -s "$kicad_skill_repo" "$codex_skill_root/kicad-design"
+
+# Claude Code, when that is the target runtime
+claude_skill_root=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills
+mkdir -p "$claude_skill_root"
+ln -s "$kicad_skill_repo" "$claude_skill_root/kicad-design"
 ```
+
+Install only the links for the runtimes in use. For another agent runtime, use its documented
+skills directory rather than assuming either layout.

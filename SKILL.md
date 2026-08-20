@@ -1,1207 +1,266 @@
 ---
 name: kicad-design
-description: Create or modify KiCad schematics, symbols, footprints and PCB layouts, and review electronic designs against datasheets. Use whenever the task involves KiCad, .kicad_sch/.kicad_pcb/.kicad_sym/.kicad_mod files, schematic capture, PCB layout, ERC/DRC, footprint or land-pattern selection, noise budgets, or checking an analog/mixed-signal design against part datasheets — from any repo. Board-side material is split across on-demand companions—PCB.md (layout, zones, DRC, autorouting), FOOTPRINTS.md, PCBNEW.md (scripting, reproducibility), RELEASE.md (fab readiness), GUARDS.md (audits), and THERMALS.md (heat and temperature); SETUP.md is the preflight for datasheet access—distributor API keys, vendor WAFs, PDF validation.
+description: Create, modify, generate, verify, or review KiCad schematics, symbols, footprints, and PCB layouts. Use for .kicad_sch, .kicad_pcb, .kicad_sym, and .kicad_mod work; schematic capture; PCB layout; ERC/DRC; land-pattern selection; reproducible KiCad generators; datasheet-grounded analog or mixed-signal review; release readiness; and domain-specific design guards. Load the task-specific companions named in this skill instead of treating the main file as a complete reference.
 ---
 
 # KiCad schematic and PCB design
 
-Every rule below exists because the failure it describes actually shipped and had to be
-caught. Most were found on precision analog / high-voltage boards, which is where KiCad's
-own checks are thinnest — but nothing here is specific to one design.
+Apply the invariant first, then the required action. Treat named parts and measured failures as
+examples, not as defaults for unrelated projects. Verify every device-specific claim against the
+selected device and the current toolchain.
 
-## Before you start: run the preflight in `SETUP.md`
+## Route the task before acting
 
-Every rule in *Datasheet discipline* below assumes you can actually **get** the
-datasheet. Confirm that first — local cache, which vendor sites this machine can
-reach, which distributor API keys exist, and whether a real browser is available for
-bot-walled vendors. [`SETUP.md`](SETUP.md) has the checks, how to ask the user for
-missing keys, the rate-limit traps that masquerade as auth failures, and a verified
-recipe for fetching PDFs from vendors that refuse curl.
-
-Do it at the start, not when you hit a wall. An agent that discovers mid-task it
-cannot read a datasheet tends to substitute a part and explain the substitution as
-engineering.
-
-## Working on the board? Read the board companions
-
-This file covers what is shared plus schematic capture. **Specialized material lives
-in on-demand companions** — read only the ones the task touches:
+Read only the companions required by the task:
 
 | file | read it when |
 |---|---|
-| [`PCB.md`](PCB.md) | any board task: layout judgement, zones, stackup, creepage, surface leakage, autorouting |
-| [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a part's package |
-| [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or making a slow generator fast |
-| [`RELEASE.md`](RELEASE.md) | verifying a board, the DRC severity map, or "is this ready to fab?" |
-| [`GUARDS.md`](GUARDS.md) | writing or reviewing checks, validators, audits or calibration harnesses |
-| [`THERMALS.md`](THERMALS.md) | heat, temperature, dissipation, gradients, thermal pads/vias or thermal validation |
+| [`SETUP.md`](SETUP.md) | the task requires a datasheet, current part status, stock, or distributor data |
+| [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or autorouting |
+| [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
+| [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |
+| [`RELEASE.md`](RELEASE.md) | running board verification, inspecting severity maps, exporting fabrication data, or deciding release readiness |
+| [`GUARDS.md`](GUARDS.md) | writing or reviewing generators, validators, audits, or calibration harnesses |
+| [`THERMALS.md`](THERMALS.md) | heat, dissipation, temperature, gradients, thermal pads/vias, or temperature-dependent accuracy matter |
+| [`VARIANTS.md`](VARIANTS.md) | one generator must emit multiple boards without changing a qualified incumbent |
+
+Use the helpers in [`scripts/`](scripts/README.md) instead of reimplementing netlist parsing,
+library geometry, reproducibility, ERC/DRC invocation, or autoroute promotion.
+
+Run the datasheet preflight only when the task needs datasheet or sourcing evidence. Do not delay a
+purely graphical edit or a local file-format diagnosis with unrelated network and distributor
+checks.
+
+## Preserve the declared source authority
+
+Determine the authority before editing:
+
+- Regenerate generator-owned schematics and boards from their source.
+- Edit an explicitly hand-maintained board directly; do not invent a generator merely to enable a
+  transformation.
+- Treat an autorouted or otherwise transformed hand-maintained board as a derived candidate until
+  the project explicitly promotes it.
+- Warn that GUI edits to generated artefacts will be overwritten, and check for a running KiCad GUI
+  holding a stale copy before regenerating.
+
+Keep generators surgical and reproducible:
+
+- Never rewrite a file owned by another generator. Merge a required key into shared JSON such as
+  `.kicad_pro`; preserve unrelated keys and insertion order.
+- Derive schematic UUIDs from stable identity, not counters. Follow [`PCBNEW.md`](PCBNEW.md) for
+  board UUID canonicalization and deterministic item ordering.
+- Run diagnostics on scratch copies. Never call `SaveBoard` or an equivalent serializer on the
+  tracked artefact merely to inspect it.
+- Reject optimized Python execution when load-bearing checks still use `assert`; use explicit
+  exceptions for conditions whose disappearance would create a false pass.
+- Prove regeneration by checking the process status and the output produced in that run. Prefer a
+  temporary output or an explicit generator receipt; do not infer execution only from equal hashes
+  or require an mtime change from a generator that intentionally avoids unchanged writes.
+- Compare the diff size with the intended change. A small field edit that rewrites thousands of
+  lines indicates serialization or canonicalization churn; regenerate from authority before
+  proceeding.
+- Export and inspect the netlist after every structural schematic edit.
+
+## Resolve user-owned design choices
+
+Ask before placement when the answer controls procurement, enclosure fit, compliance, or process:
+
+- layer count and stackup;
+- board outline and mounting;
+- hand assembly versus reflow and acceptable package styles;
+- coating and the resulting spacing standard/table/column;
+- connector family and pinout.
+
+When the user requests an autonomous run, make each choice explicitly and record its rationale in
+the design document. Do not let a layout accident become an undocumented decision.
+
+After a stackup change, derive the enabled copper layers from the board. Reject hardcoded layer
+tuples in generators and audits unless the code also asserts the exact supported stack.
+
+## Close every external interface
+
+Write an electrical contract for every connector pin. Include direction, normal and fault voltage
+and current, domain, return/reference, scaling, power ownership, and behavior while either side is
+unpowered. Put the same truth in the schematic, board markings, and integration document.
+
+Apply these checks:
+
+- Trace every promised function to concrete components and nets. A label such as `VIN` does not
+  implement a divider.
+- Give every floating measurement domain an intentional DC reference. Do not count capacitance,
+  leakage, or protection diodes as a DC reference.
+- Build a power-state matrix for independently powered domains. Follow driven signals into
+  unpowered receivers and bound injection, back-powering, and rail contention.
+- For every clamp path, identify what absorbs current with the receiving rail powered and
+  unpowered. A rail that normally consumes more than the injected current is not a guaranteed sink.
+- Place series fault limiting so the exposed run is downstream of it, and place associated pull-ups
+  on the side that preserves both valid logic levels and the fault-current bound.
+- Size protection at the maximum credible fault, including tolerances and transients, not at the
+  normal signal maximum. Include leakage and capacitance in precision-node budgets.
+- Reject direct connection of two possible power sources unless ORing, current limiting, or
+  isolation makes every connection order safe.
+- Compute feasible intervals before selecting a component value. If the lower bound exceeds the
+  upper bound, require a topology change rather than suggesting another value.
+
+### Silent fallback requires runtime evidence
+
+For any device that automatically substitutes an internal clock, reference, configuration source,
+or other resource, determine whether loss of the expected resource produces an error or merely
+plausible output. When fallback can preserve syntax while invalidating meaning, require runtime
+evidence of the resource actually in use and mark results `unverified` when that evidence is absent.
+
+**Example — ADS1262 external clock.** An ADS1262 intended to use an external clock can continue on
+its internal oscillator when that clock disappears. Schematic checks can prove that the clock pin
+is connected and driven; they cannot prove which oscillator is active during an acquisition. The
+host contract should therefore enable the status byte and verify the device's `EXTCLK` status at
+the acquisition boundary. Verify the register and bit definitions against the exact datasheet
+revision rather than copying this example to another ADC.
+
+## Build the schematic from authoritative geometry
 
-`PCB.md` is the board-layout core and routes to the concern-specific companions.
+Prefer library-derived pins and graphics over memorized offsets. When generating a schematic:
 
-When writing or reviewing generator checks, validators, audits or calibration harnesses, read
-[`GUARDS.md`](GUARDS.md). It defines the ledger/model/artifact tiers, subject-specific
-bidirectional calibration, zone-fill semantic finalization and matched-copper guard contract.
+1. Resolve the selected library symbol, including inherited `extends` content.
+2. Union unit-0 pins and graphics with the selected unit.
+3. Key instances by reference and unit.
+4. Transform pin coordinates in KiCad's order: rotate, then mirror.
+5. Raise when a requested pin cannot be resolved; never search other units as a fallback.
+6. Emit and export a calibration schematic, then compare every supported angle/mirror cell from
+   `kicad_symlib.calibration_plan()` with KiCad's netlist. One exercised cell is not calibration of
+   the transform space.
 
-Read [`THERMALS.md`](THERMALS.md) only when heat or temperature is a design variable:
-dissipation, junction/case limits, current-density rise, exposed pads or thermal vias,
-heat-spreading copper, gradients, temperature-dependent accuracy, enclosure ambient, or
-transient thermal response. Ordinary low-power placement and routing do not need it.
+Use balanced S-expression blocks when parsing KiCad files. Do not pair fields with a single
+cross-block `.*?` regular expression; it can combine a property coordinate with an unrelated pin
+number and return plausible fabricated geometry.
 
-Before external autorouting, classify routing ownership. `PCB.md` defines the
-three modes: an **exploratory** Freerouting scout is inspiration only, **critical**
-geometry stays generator/manual-owned, and only the declared **routine** scope
-may cross the manifest-promotion boundary.
-
-For a project without a tracked autoroute contract, use
-`scripts/kicad_autoroute_scaffold.py plan` → digest-approved `apply` → `check`;
-do not invent `autoroute.json` or patch a generator by pattern matching. A v2
-candidate is promotable only after the pinned adapter independently regenerates
-the supplied seed and matches its route/non-routing/context attestation. After
-implementing a blocked generator or audit template, update its pin through
-`repin-plan` plus digest-approved `apply`.
-
-**"Is this ready to fab / ready to order?" is a board question**: go straight to
-[`RELEASE.md`](RELEASE.md), which separates *manufacturable* from *final* and gives
-the export-and-measure checklist. Answering it from DRC alone gets it wrong in
-both directions.
-
-## Core principle: preserve the declared source authority
-
-Prefer a generator for new designs: emit the `.kicad_sch` and use a `pcbnew` script for the
-`.kicad_pcb` so the design is diffable, reviewable, and reproducible. Once a project declares
-its authority, preserve it. Regenerate generator-owned boards; keep an explicitly
-hand-maintained `.kicad_pcb` board-owned; never retrofit or infer a generator merely to enable
-autorouting. For hand-maintained boards, transformations such as autorouting produce derived,
-non-editable build boards and never replace the editable source board.
-
-Hand-editing a generated file is still a bug waiting to happen — put a note in the docs saying
-the artefact is generated and the generator is the source of truth.
-
-**Verify reproducibility**: `md5` the output, re-run the generator, `md5` again. Equal or the
-generator has hidden state — **but only if the generator actually ran**. Assert its exit
-status is 0 *and* that the output's mtime moved, in the same breath as comparing the hashes: a
-re-run under an interpreter that cannot import `pcbnew` leaves the file untouched, so the two
-md5s match and the check reports PASS having tested nothing. See *Generator hygiene* below.
-
-Warn the user that GUI edits will be overwritten on the next run, and check for a running
-Eeschema/pcbnew holding a stale copy before regenerating.
-
-Generator hygiene, each learned the hard way:
-
-- **Never write a file another generator owns.** The schematic generator rewrote
-  `<project>.kicad_pro` wholesale every run, deleting 286 of its 295 lines — the board design
-  settings, net classes and custom-rules linkage. The PCB script carefully protected the
-  *schematic's* keys from itself; the protection was one-directional. DRC then ran on KiCad
-  defaults and went green on a board that was not compliant. Seed shared files only if absent.
-
-  **When you must ADD a key to a shared file, merge — never rewrite.** Seeding-if-absent is
-  right for a fresh checkout and does nothing for the file that already exists, so a setting
-  introduced later never reaches any current project. Load the JSON, `setdefault` the one key,
-  and write it back **preserving insertion order** (no `sort_keys`, or the diff is the whole
-  file and the next reviewer cannot see what changed). Report what moved:
-
-  ```python
-  pro = json.load(open(path))
-  changed = []
-  sev = pro.setdefault("erc", {}).setdefault("rule_severities", {})
-  for rule, level in WANT.items():
-      if sev.get(rule) != level:
-          changed.append(f"{rule}: {sev.get(rule, '<KiCad default>')} -> {level}")
-          sev[rule] = level
-  if changed:
-      json.dump(pro, open(path, "w"), indent=2)     # NOT sort_keys
-  ```
-
-  Verify it was surgical rather than assuming: on one project this landed as **+12 lines**
-  with all 13 top-level keys and the board's 62 DRC severity entries untouched. Check that,
-  and the failure this bullet is about cannot recur through the back door.
-- **Derive UUIDs from stable identity**, never from a counter. Counter-derived UUIDs meant
-  inserting one resistor changed 78 of 81 symbol UUIDs, and KiCad matches footprints to
-  symbols by that path — so a one-part edit re-orphans the whole board. Hash the reference
-  designator / net name / coordinates instead. On the board side this **cannot** be done
-  through the API: `pcbnew` gives every item it creates a random UUID and exposes `m_Uuid`
-  **read-only** (there is no `SetUuid`), so it takes a post-save rewrite of the `.kicad_pcb`.
-  [`PCBNEW.md`](PCBNEW.md) covers that and the second, less obvious cause of a wobbling md5.
-- **Verify the generator actually ran before believing a reproducibility check.** (Stated in
-  *Core principle* above because an agent that skims the principle box implements the broken
-  version.) Cost: a confident "reproducibility verified" on a board whose generator had not
-  executed once. Note this applies to **your own script's** exit status; `kicad-cli`'s means
-  almost nothing unless you pass `--exit-code-violations` — see *The verification ladder*.
-- **Never let a DIAGNOSTIC write the real artefact. Probe on a copy.** The generated file is
-  usually not what the API would write: `pcb_design.py`-style scripts finish with a
-  canonicalisation pass (`canonical_order(canonical_uuids(...))`) that makes the `.kicad_pcb`
-  a deterministic function of its inputs. Any ad-hoc `board.Save(PCB)` or
-  `pcbnew.SaveBoard(PCB, b)` re-serialises through pcbnew and **silently drops that pass** —
-  KiCad's own item order instead of the canonical one, and a file that no longer reproduces
-  its own md5.
-
-  Note what does *not* break, because it is the reason this is easy to miss: the **UUIDs
-  survive**. `canonical_uuids` writes uuid5-derived ids into the file and pcbnew reads them
-  back, so the damaged and repaired boards held the **same 1859 unique ids, identical set
-  hash**. Only `canonical_order` was lost. Every UUID-based check you might reach for to
-  reassure yourself will pass on the damaged file.
-
-  Cost, measured: chasing which tool was stripping a `.kicad_pro`, a probe was run in the
-  obvious form — load the board, save it, re-read the project — with its write pointed at the
-  tracked board instead of a scratch path. That took the verified `b285f321…` to
-  `d4e5fc2a…`, and the damaged blob was committed before the mistake was noticed. The
-  diagnostic answered its question correctly and destroyed the artefact it was asking about.
-
-  ```python
-  b = pcbnew.LoadBoard(str(PCB))
-  pcbnew.SaveBoard("/tmp/probe.kicad_pcb", b)   # <- scratch path, ALWAYS
-  ```
-
-  **The tell is diff size against change size.** A field edit that touched 15 lines produced a
-  **23,770-line** diff; a whole-file churn where you made a local change means the file was
-  rewritten by something other than the generator. Check `git diff --stat` on generated
-  artefacts before staging them, and re-derive the md5 you verified rather than trusting that
-  the file on disk is still the one you checked.
-- **Do not put a load-bearing check behind a bare `assert`.** `python -O` / `PYTHONOPTIMIZE=1`
-  deletes every `assert` statement in the file, silently and with no message — so a generator
-  invoked from a Makefile or CI wrapper that happens to set `-O` emits the same artefact with
-  *zero* checking. Anything whose absence is a false PASS must be `if not cond: raise ...`.
-  Keep `assert` for genuine can't-happen invariants only, and put
-  `if not __debug__: sys.exit("refusing to run under -O: the guards are gone")` at the top of
-  any generator that has guards worth having.
-
-  **A guard suite's own calibrations cannot detect this**, which is why it survives review in
-  well-guarded projects. Calibrations inject a *non-empty* fault and watch the check fire; `-O`
-  removes the check for *every* input, and the empty-input branch was never exercised anyway.
-  Measured on a project with fifteen calibrated checks: `python3 -O audit_pcb.py` printed all
-  15 calibrations `FIRED`, all 9 checks `PASS`, and exited **0**, having evaluated nothing.
-  The more thorough the calibration story, the more convincing that output is.
-- **Export the netlist after every structural edit and read it.** Two separate reroutes
-  silently merged nets (SCLK+SDI+~CS, then VREF10+GND) because stub endpoints share a column.
-  ERC reported *a* problem but not which nets had merged; only the netlist showed that.
-- **Beware substring replaces hitting `def` lines.** `s.replace("check_foo()", …)` also matches
-  inside `def check_foo():`. Anchor on the full line, or verify the file still parses.
-
-
-## Ask before you assume: the choices that are the user's, not yours
-
-Some parameters look like engineering defaults but are actually **procurement and
-budget decisions the user owns**. Picking one silently and then writing three
-pages of rationale for it makes it expensive to change later. Ask up front, in
-one message, before any placement:
-
-- **Layer count.** 4 layers is the reflexive answer for a mixed-signal board.
-  Ask instead of assuming, and if you have a preference, give the *number* that
-  supports it. Beware of writing the rationale after the choice: a stack defended
-  by several plausible arguments with no quantity attached to any of them is a
-  default wearing a justification. Note that inner planes are not automatically
-  better for sensitive nodes — a plane 0.2 mm below a high-impedance node loads it
-  ~8x harder than one 1.6 mm below it on a 2-layer board.
-- **Board outline and mounting** — enclosure-driven.
-- **Assembly process** — hand-solder vs reflow decides whether a QFN or a
-  PowerPAD is acceptable at all.
-- **Conformal coating** — it changes which IPC-2221 column applies, so it decides
-  HV geometry, not just finish. Do **not** carry "0.8 mm uncoated / 0.4 mm coated"
-  around as a constant. IPC-2221 Table 6-1 is banded (…101–150, 151–170, 171–250,
-  251–300, 301–500 V…), the columns differ from each other within a band, and the
-  values move by an order of magnitude across the table. Quote the **row you
-  actually used**. Every spacing number you
-  write down must carry `standard + revision + table + column + voltage band +
-  the voltage actually used`, or it is not checkable and will be misapplied at a
-  different voltage. Note the current revision is **IPC-2221C** (Dec 2023); the
-  figures quoted here and in `FOOTPRINTS.md` are the B-era ones and have **not** been
-  re-verified against C's Table 6-1 — read it before leaning on a marginal number,
-  and see `FOOTPRINTS.md` for which column (A5–A7 assembly vs B1–B4 bare-board) applies.
-- **Connector types and pinout** — usually fixed by what plugs into it.
-
-**If the user forbids questions** ("don't ask me anything", or an autonomous run), you still
-owe them the decision — you just cannot collect it. Make each call yourself, state it in the
-brief you hand any downstream agent, and record it in the design doc as a *decision with its
-rationale*, not as an emergent property of the layout. A choice made silently and a choice made
-explicitly cost the same to make and wildly different amounts to revisit.
-
-Converting a finished board between layer counts is very doable when a generator
-is the source of truth — expect a handful of DRC violations, not a redesign — but
-every inner-plane *decision* has to be re-derived, and the design document's
-rationale sections have to be rewritten rather than patched. Cheaper to ask.
-
-Related, when a stack changes: **every layer literal is now a liability.** A
-hardcoded `CU = (F_Cu, In1_Cu, In2_Cu, B_Cu)` in an audit keeps "checking" layers
-that no longer exist. Derive the layer set from `board.GetCopperLayerCount()` and
-assert it equals what the audit was written for.
-
-
-## Close every external interface before calling the schematic complete
-
-Write an electrical contract for every connector pin: signal direction, normal and fault
-voltage/current, power domain, reference/return, whether the signal is raw or already scaled,
-who sources power, and behaviour when either side is unpowered. Put the same truth on the
-schematic, board silkscreen and integration document. A name such as `VIN` does not implement
-a divider, and a `5V` pin is unsafe until its input/output direction is unambiguous.
-
-- **Trace every claimed function to components and nets.** If the brief says "divided voltage
-  input", point to the divider and protection, or label the connector explicitly as a
-  pre-scaled low-voltage input with its limit. Labels and prose are not circuitry.
-- **Give every floating measurement domain an intentional DC reference.** For each isolated
-  analog domain, prove how its ground and the source common mode are established relative to
-  the converter input range. Capacitors, input leakage and protection diodes do not count as
-  a DC reference. If several sensors cannot share that reference, revisit the topology rather
-  than hoping differential inputs will absorb the common-mode difference.
-- **Build a power-state matrix for independently powered domains.** Check every combination of
-  supplies on and off. Follow driven outputs into unpowered receivers, clamp diodes and exposed
-  power pins; compute or bound injection current, back-powering and rail contention. Apply an
-  isolator's default-state table to the voltage actually present at VCCI/VCCO — "host off" is
-  not the same as "isolator side unpowered" when a separate brick still feeds it.
-- **A part that auto-detects a resource and silently falls back has moved a guard off the
-  board and onto the host — say so, in the interface contract.** The ADS1262 takes an external
-  clock, and SBAS661C §9.4.8 is explicit: *"If no external clock is detected, the ADC
-  automatically selects the internal oscillator."* No error, no flag on any pin. A cut clock
-  wire, an unfitted oscillator or an unplugged link does not stop conversions — the part keeps
-  emitting well-formed, plausible, *unsynchronised* data, and nothing in the numbers looks
-  wrong. Absence of the resource encodes "resource fine", which is the anti-monotone shape,
-  living inside the silicon where no schematic or netlist guard can reach it.
-  The schematic can still guard what it owns (is the pin on the right net, is that net
-  *driven*, does the source exist) — do all of that, it catches the build errors. But the
-  runtime case has exactly one answer: find the **status bit that reports which resource is in
-  use** (here `EXTCLK`, bit 5 of the STATUS byte), require the host to read it **on every
-  device at the start of every acquisition**, and make a run that could not confirm it
-  `unverified` rather than good. Check what *enables* that status register too — on this part
-  the byte only appears if `INTERFACE` bit 2 is set, so a host that skips it gets no error and
-  no evidence, which is the same failure one level up. Write all of this into the interface
-  contract; a host integrator cannot infer any of it from the pinout.
-- **A rail clamp is not a current sink.** For every clamp path, identify what absorbs the
-  current with the receiving rail both powered and unpowered. A logic rail that normally
-  consumes more than the injected current is not proof: its load may be absent, disabled or
-  disconnected in the fault state. For every fault inside the accepted envelope, provide a
-  guaranteed shunt/return path, bound the resulting rail rise and back-power current, and
-  include the sink in the maximum-fault stress ledger. Only a fault explicitly excluded from
-  that envelope may be documented as unsupported; documentation is not a substitute for an
-  in-scope protection path.
-- **Protection on a precision node has a cost.** A high-voltage TVS can leak on the same scale
-  as the entire signal budget near breakdown. Bound leakage and capacitance at the operating
-  point; clamp at the victim, disconnect the fault path, or document the residual risk rather
-  than fitting protection reflexively.
-- **Size protection at the maximum credible fault, not the normal signal maximum.** Include
-  supply tolerance and transients, component tolerance, working-voltage limits and the
-  protection part's failure mode. Use [`THERMALS.md`](THERMALS.md) for continuous/pulse power,
-  ambient and junction corners, and package derating. If prose calls the fault 110 V while the
-  arithmetic uses 100 V, the protection check has failed even if ERC and DRC pass.
-- **Do not join two possible power sources directly.** State which connector powers which rail,
-  or add ORing, current limiting or isolation that makes either connection order safe.
-- **A series limiter belongs at the connector, and the pull-up on the exposed side of it.**
-  What is exposed is usually the *run*, not just the pin: an open-collector status output on a
-  +110 V op-amp sat **0.670 mm** from the 0–100 V output land — a spacing that meets
-  IPC-2221C Table 6-1 **A7** (0.4 mm, coated) but not **A6** (0.8 mm, uncoated) in the
-  110 V row, i.e. it is compliant only if the board is actually coated — and its track then
-  crossed the board 1.02 mm from the
-  output track, ending at a Raspberry Pi GPIO with nothing in series. Put the limiter at the
-  *device pin* and that whole run is downstream of it, so a bridge or coating void onto the run
-  simply bypasses it. Everything **upstream** of the limiter is what gets protected, so it goes
-  last, beside the connector, with the clamp.
-  The pull-up then has to move to the exposed side, and this is the part that is easy to get
-  backwards. Leave it at the connector and it forms a divider with the limiter, so a valid
-  `V_OL` caps the limiter at a few kΩ. Moving the pull-up upstream removes the divider and lets
-  the limiter be large enough to bound fault current. Size the pull-up against the receiver's **worst-case**
-  input leakage, not its typical: 100 kΩ × 5 µA is already 0.5 V of `V_OH` droop, and it is
-  what bounds how large the pair can get. Record which side each part is on and why, or the
-  next tidy-up moves the pull-up back.
-  Bound the limiter at the fault rail rather than the maximum signal, check working voltage
-  independently, and complete its package/pulse/temperature sizing in [`THERMALS.md`](THERMALS.md).
-- **When two requirements squeeze a value from both sides, assert the FEASIBLE INTERVAL, not
-  the chosen value.** Two node-definition resistors had to hold reverse `V_GS` under a 20 V
-  absolute maximum (`R ≤ 5.75 kΩ`) and leakage injection under the allocated 0.1 ppm
-  (`R ≥ 25 kΩ`). **The interval is empty; no value of `R` exists.** The guard did not say so,
-  because it was written the way component-sizing guards usually are — take the fitted value,
-  compute both consequences, check each against its limit. Fed the right leakage number it
-  would have failed with *"R is too large"*, which is **the wrong diagnosis**: it sends the
-  next person to try a smaller resistor, which fails the other requirement. Neither message
-  says "you cannot get there from here". Compute `lo = f(constraint_a)`, `hi = g(constraint_b)`
-  and `if lo > hi: raise "no value satisfies both"` **before** ever looking at what is fitted.
-  An empty feasible set is a different fault from a badly chosen value and needs a different
-  message, because the fix is a topology change rather than a BOM change — and it usually means
-  **a component is missing from the story, not that a number is wrong**. Here it meant the gate
-  clamps, carried as belt-and-braces, were in fact the primary protection and always had been:
-  the circuit was right and the rationale was wrong, which is the more dangerous state, because
-  the next person to simplify it deletes the part doing the work. State which corner each bound
-  comes from, too. If temperature changes which mechanism holds a bound, enumerate the hot and
-  cold cases separately as described in [`THERMALS.md`](THERMALS.md).
-
-
-## The verification ladder
-
-Each rung catches what the one below cannot. Climb all of it; stopping early is how
-plausible-but-wrong artefacts ship.
-
-> **Reusable helpers live in [`scripts/`](scripts/README.md)** — project-agnostic modules
-> for the tasks below: `kicad_verify.py` (ERC/DRC + severity maps, with the report-derived
-> ignore list as the primary source and `.kicad_pro` as cross-check), `kicad_netlist.py`
-> (parse an exported netlist, assert component counts), `kicad_symlib.py` (read pin
-> geometry from `.kicad_sym` instead of computing it), `kicad_repro.py` (digest-based
-> reproducibility, including the concurrent-writer case). Read
-> [`scripts/README.md`](scripts/README.md) for what each guard returns when it *cannot
-> evaluate its input* — several deliberately raise rather than pass.
->
-> **One calibration gap, carried deliberately:** `kicad_symlib.transform_pin()` is **not
-> calibrated against KiCad**. Non-90° angles are rejected and all 12 angle/mirror cells
-> are enumerated, but nothing compares a cell's output against what KiCad actually nets
-> up, and no unit test can — the only ground truth is an exported netlist. Run
-> `calibration_plan()` in the project at hand before trusting the transform, and do not
-> treat its output as verified geometry until you have.
-
-```sh
-K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli   # not on PATH by default
-$K sch export pdf --black-and-white -o out.pdf x.kicad_sch  # 1. does it even parse?
-$K sch erc --severity-all --exit-code-violations -o erc.rpt x.kicad_sch  # 2. ERC
-$K sch export netlist --format kicadsexpr -o n.net x.kicad_sch  # 3. are the NETS right?
-$K pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
-```
-
-**`--exit-code-violations` is not optional, and leaving it off is the highest-leverage false
-PASS available to you.** Without it, `kicad-cli sch erc` and `pcb drc` write every violation
-into the report and then **exit 0**. Measured: a board carrying 175 DRC violations exits `0`
-bare and `5` with the flag. So a CI step, a `set -e` script, or an agent that "asserted the
-exit status is 0" passes a board it never checked — the anti-monotone false PASS this whole
-document is about, sitting in its own ladder. Either pass the flag, or parse the report and
-assert the violation count; never take `$?` alone as the verdict.
-
-**And the flag is defeated by a pipe.** `$K pcb drc --exit-code-violations … | tail` exits **0**
-whatever the board does, because `$?` then belongs to `tail` — measured: exit 0 with 42
-violations present. Capture the status before piping (or set `pipefail`), and judge the run by
-the report contents regardless.
-
-**`--severity-all` is not optional for ERC either, and "ERC = 0" is a statement about the
-severity map as much as about the schematic.** `.kicad_pro` carries `erc.rule_severities`,
-plus `erc_exclusions` and a `pin_map`, exactly parallel to the DRC map that `RELEASE.md` treats as
-a first-class guard precondition. (This used to say "43 rules on KiCad 9.0.4". Do not quote a
-count: the map is **sparse** — KiCad writes only entries it has reason to write, so the number
-is a property of that file's edit history, not of KiCad. Measured across four real projects on
-one machine: 0, 0, 33 and 44 entries.) A rule set to `ignore` is not
-resurrected by `--severity-all`, and one real project silently carried four at `ignore`
-(`footprint_filter`, `four_way_junction`, `simulation_model_issue`, `single_global_label`).
-Worse, that map lives in the same `.kicad_pro` that a generator can rewrite wholesale — see
-*Never write a file another generator owns* above, where doing exactly that reset DRC to
-defaults. **Before believing a green ERC, list every rule sitting at `ignore` — INCLUDING KiCad's
-own defaults — in the release report.** Do not lead with "diff against defaults": all four
-rules above *are* the stock defaults, so a diff reports no difference and the guard that was
-supposed to catch them fires never. Diffing is the secondary check, for spotting a map that
-someone changed; enumerating the `ignore`s is the one that works, and do the same for `pin_map`, which decides whether
-two outputs driving each other is an error at all.
-
-**And the enumeration has its own false PASS, which a review of this file found in this very
-paragraph.** Because `erc.rule_severities` is sparse, it is frequently **absent entirely** —
-two of the four projects measured above have no map at all. Enumerate `ignore`s over a missing
-map and you get `[]`, which reports *"no rules are ignored"* at the exact moment you know
-least, while KiCad's built-in defaults — including the four named above — are fully in force.
-Absence of the map encodes absence of the problem: the same anti-monotone shape this section
-exists to prevent, sitting inside the remedy for it. **A missing or empty `rule_severities` is
-`unverified`, not clean.** Resolve the enumeration against KiCad's built-in default map and
-report the effective severity of every rule, or say the severity map could not be established
-and refuse to call the ERC green. (`RELEASE.md`'s DRC half is not exposed to this: the same board
-had 62 entries in `board.design_settings.rule_severities` — but that is luck, not structure,
-so give the DRC side the same tri-state.)
-
-**And the map can vanish without the BOARD-side sources naming the file — so "who owns
-`.kicad_pro`" is not a question you can settle by grepping the layout script.** The bullet
-above frames this as one generator rewriting another's file wholesale, which is the version
-you can find by reading code. Measured on a real project: running the **board** generator
-emptied the whole `erc` object — `rule_severities` **46 → 0**, plus `erc_exclusions`, `meta`
-and the 12×12 `pin_map`, **224 lines of JSON** — reproduced once under control, with the map
-restored to 46 immediately beforehand, KiCad closed and both `~*.lck` files gone, and observed
-emptied after earlier runs too. Nothing in the board generator or its modules references
-`kicad_pro` or `.pro`; the *schematic* generator does name it, and its `ensure_project_erc()`
-merge is correct and preserved the block every time. Each of `pcbnew.LoadBoard` +
-`SaveBoard`, `board.Save(path)`, `kicad-cli sch erc`, `kicad-cli pcb drc --schematic-parity`,
-`kicad-cli sch export netlist` and the project's own `pcbnew`-based audit **preserves** it in
-isolation. The mechanism was not identified; a settings flush on the pcbnew/`SETTINGS_MANAGER`
-path is the suspect and remains a hypothesis.
-
-**Then measure what the map is actually worth before claiming a consequence — the first
-draft of this entry got it backwards.** That map stored 20 rules at `error`, 23 at `warning`
-and 3 at `ignore`, which reads like a large loss. Compared against a shipped KiCad template,
-almost all of it restates defaults: `label_dangling` and `missing_power_pin` are **already
-`error`** without any map, and the three `ignore`s are **already ignored**. The single rule
-that genuinely deviates is `single_global_label`, which the project raises to `warning` from
-a default of `ignore` — so losing the map *re-ignores that one rule* and changes nothing
-else on this board. The direction is the opposite of the intuitive one, and you cannot know
-which without doing the comparison. That is precisely why the verdict is **`unverified`**
-rather than "green" or "disaster": absent the map you do not know the effective severities,
-and the sparse-map caveat above means you cannot infer them from the entry count either.
-
-Practical consequence, and it is cheap: **treat `.kicad_pro` as an OUTPUT of every board
-run.** `git diff --stat` it after the layout script, restore it before running ERC, and make
-the severity-map enumeration a precondition of the ERC rung rather than something checked once
-per project. Do not conclude the file is safe because no code you can find writes it.
-
-1. **Parse.** A malformed file fails with a bare `Failed to load schematic` and no line number.
-2. **ERC = 0.** Necessary, nowhere near sufficient — and see the severity-map caveat above.
-3. **Read the netlist.** ERC cannot tell you that a feedback tap is on the wrong side of a
-   resistor. Print every net with its nodes and read them against intent. This is the single
-   highest-value check. **Assert the component count before reading anything else** — an
-   export that instantiated nothing still exits 0 and still writes a plausible-looking file
-   (827 bytes, `(nets))`, no `(comp …)` at all). "No nets look wrong" is trivially true of a
-   netlist with no nets in it.
-
-   **The netlist export format is not stable across major versions.** KiCad 9 wrote it
-   compactly — `(net (code "1") (name "X")` with each `(node (ref "U1") (pin "3"))` on one
-   line. KiCad 10.0.5 pretty-prints **every token onto its own line**. Any regex written
-   against the 9.x shape — anything needing a literal space after `(net`, or `(node (ref …)
-   (pin …))` on one line — matches **nothing** against a 10.x export. Observed live: a
-   verifier that had passed all session began reporting every net "absent", and a second,
-   independent parser in the same project broke the same way in the same hour.
-
-   That failure was loud only by luck. The parser returned a near-empty dict, and it looked
-   like a failure solely because the expectations table was non-empty; with an empty table it
-   would have reported a clean pass over a file it had entirely failed to read. **A parser
-   must assert it understood its input**: count the `(net` openers and require the parsed net
-   count to equal it, and require every net to have at least one node. Then write the matcher
-   whitespace-agnostically (`\(net\s`, `\s+` between tokens) so it spans both formats — verify
-   that by parsing an old committed netlist *and* a fresh export.
-
-   **Do that matching in Python `re` over the whole file, never in a line-based tool.** The
-   whitespace after `(net` is now a *newline*, so `grep -cE '\(net\s'` returns **0** on a 10.x
-   export while the identical pattern in `re.findall` over the file returns 51 — an agent that
-   implements the opener-count in shell reproduces the exact bug this bullet is about. Count
-   `\(net\s` and not a bare `(net`, which also matches the enclosing `(nets`.
-4. **Render it and actually look.** Export the PDF and view the image. Overlapping text,
-   symbols drawn over their own wires, and collided labels are invisible to every CLI check.
-   Keep the worksheet frame out of board renders: it plots in the same colour family as copper
-   and its rules run edge-to-edge — on an isolated board they look exactly like copper marching
-   straight across your isolation barrier. Nearly cost a false "serious violation" finding;
-   settle that class of question by asking the *file* whether anything lives on a copper layer,
-   not by squinting at a render. The flag differs per subcommand, and guessing earns an
-   `Unknown argument`: `sch export pdf` and `pcb export svg` take **`--exclude-drawing-sheet`**;
-   `pcb export pdf` **omits the sheet by default** and takes `--include-border-title` to opt
-   back in.
-5. **Domain guards** for anything the tools don't model (see [`GUARDS.md`](GUARDS.md)).
-
-**Text on a generated sheet does not reflow, and nothing checks it.** Adding one note
-lands it silently on top of another; growing a component row pushes its east end into the
-text column beside it. Only rung 4 sees this. Budget the extents before placing, because
-the stroke font is wider than it looks — measured with KiCad's own text-extent engine
-(`EDA_TEXT::GetTextBox`, the same stroke font that draws the sheet):
-
-| quantity | multiple of the nominal text size |
-|---|---|
-| per-character advance, lowercase | ≈ **0.80** |
-| per-character advance, **UPPERCASE** | ≈ **0.91** (p90 1.15) |
-| line pitch | ≈ 1.61 |
-
-Planning with 0.7 put five collisions on one sheet, and every one of them was on an ALL-CAPS
-heading running 1.4× wider than budgeted. Use ~0.95 × size per character for anything with
-capitals in it, and remember that a block of *n* lines occupies `1.61 × size × (n − 1)` plus
-one line of height.
-
-**A guard that *rejects* overlaps needs the p90, not the typical — 1.15, not 0.95.** Those
-are two different jobs done with one number. Placing text, you want the honest average and a
-box that does not invent collisions. *Checking* text, a narrow box does not report a near
-miss; it passes a real overstrike whose leading glyph starts inside the strip the model
-dropped. Measured on `hw/shunt-reversal`: the plotted ink of `NW` runs 2.54 mm from its
-anchor at size 1.27, i.e. **1.0 × size per character**, already past a 0.95 box. Widening a
-guard costs far less than it looks — that sheet reports zero collisions at 0.95, 1.0 and 1.15
-alike, so the conservative constant bought coverage for free. Set it from the p90 and let a
-real false positive, if one ever appears, be the thing that argues it down.
-
-**Measure with KiCad, not with `pdftotext -bbox`.** The earlier lowercase figure here was
-0.67, taken from a `pdftotext` pass over an exported sheet — about 20 % low, which is the same
-class of error the rule exists to fix. KiCad's PDF export draws glyphs as vector strokes and
-*additionally* emits an invisible selectable-text layer in a substituted base font;
-`pdftotext` measures the substitute, not the strokes. (The discrepancy is confirmed; that
-explanation of it is not.) Line pitch is unaffected — 1.610 either way.
-
-**Net labels are not text objects, and they rotate.** A text-overlap guard that iterates the
-generator's *text* list never compares them — the same data-model blindness described in
-[`GUARDS.md`](GUARDS.md), one object class further out. They also need their own box, because KiCad justifies
-a label **left at 0°/90° and right at 180°/270°**, and draws 90° and 270° with the *same*
-glyph rotation: the advance therefore runs **+x, up, −x, down** for 0/90/180/270, and the
-glyph body of a rotated label sits on the **−x** side of its anchor, not centred on it.
-
-Then fix the drafting, not just the guard: **one node, one label.** Stubbing each pin of a
-series pair and labelling both with the same net name — instead of wiring the two pins
-together — puts two copies of that name on the gap between them, pointing at each other. On
-`hw/shunt-reversal` that gap was 11.43 mm and each `ADC_CH0` ran ≈8.4 mm at 1.27 mm, so the
-pair drew one unreadable blot while ERC, the netlist and every other guard stayed clean; it
-survived on **seven** divider mid-nodes until someone looked at the plot. Wire the pins into
-one node and label the wire between them once — that also drops the label count, so the
-collision is removed rather than relocated.
-
-Rungs 4 and 5 are where most real defects are caught, and both are easy to skip.
-Board-side rungs — `--schematic-parity`, and why a green DRC can still hide a lost
-clearance — are in [`RELEASE.md`](RELEASE.md).
-
-Treat verification summaries as cached output. Regenerate ERC, DRC, parity and audit reports
-before release, then derive or check the documented counts against those files. A design note
-that says "two warnings" beside a current zero-warning report is a failed verification step,
-not harmless stale prose.
-
-After any value, net-name, topology or safety-limit change, sweep every representation of that
-fact: generator comments and schematic annotations, connector labels and silkscreen, BOM and
-assembly instructions, current integration/design documents, and firmware or host-side limits.
-Search explicitly for the old value or name. Preserve dated reviews as point-in-time records;
-mark findings resolved or superseded with a date and a reference to the current evidence rather
-than rewriting the original finding. A generated artefact can be electrically current while the
-instruction that tells someone what to fit remains dangerously stale; any contradiction among
-the live release artefacts is a release failure, and historical records must be clearly marked
-when they are no longer current.
-
-
-## KiCad file-format gotchas
-
-| Trap | Reality |
-|---|---|
-| **Raw newlines in quoted strings** | Break the parser. `Failed to load schematic`, no line number. Escape as `\n`. Cost: a 175-violation file that turned out to be unparseable. |
-| **Symbol Y axis is inverted** | Library Y is up, schematic Y is down. Global pin pos = `(X + px, Y - py)` for angle 0. |
-| `Device:R` / `Device:C` | Both connect at **±3.81 mm**, regardless of the drawn body size. Do not infer from the graphic. The `_Small` variants (`R_Small`, `C_Small`, `C_Polarized_Small`, `L_Small`, `D_Small`) connect at **±2.54 mm** — generators reach for them constantly and the 1.27 mm error dangles every wire silently. |
-| `Device:R_Pack02` | Elements are **1↔4 and 2↔3**, bodies drawn *vertically*. Not 1↔2 / 3↔4. Get it backwards on a matched filter pair and you short the source across one resistor and the ADC inputs across the other — netlist and ERC both stay clean. Resistor packs are the natural way to make a matched pair un-mismatchable, so this row earns its keep. |
-| `Connector_Generic:Conn_01xNN` | Pins face **left** at `x = X - 5.08`, but the body is **vertically centred on the placement point**, so pin 1 sits *above* it: `y = Y - 2.54*floor((N-1)/2) + 2.54*(n-1)`. Verified N = 1…12. Dropping the centring term is right only for N ≤ 2 and puts an 8-way header 7.62 mm out — every wire off-grid and dangling, silently. For 2-row parts there is no bare `Conn_02xNN` **for N ≥ 2** (`Conn_02x01` is the one exception and does exist) — the library ships `_Odd_Even`, `_Counter_Clockwise`, `_Row_Letter_First`, `_Row_Letter_Last` and `_Top_Bottom`, and using the bare name is a symbol-not-found, i.e. the exit-139/0-component failure below. Even pins sit on the **right** at `x = X + 7.62` for **`_Odd_Even` only**; the other variants number differently, so which pins are on which side changes with the suffix. N in the centring formula is the number of **positions per row** — 8 for `Conn_02x08`, not 2. Better: don't encode any of this, call `pn()`. |
-| **Power symbols** | Pin is at `(0,0)` with length 0 → the connection point *is* the placement point. |
-| **Labels** | Attach only if placed exactly **on** the wire. 1.27 mm off = dangling, silently. |
-| **NC pins** | Either omit them from the symbol or place explicit `(no_connect …)`; otherwise ERC complains forever. |
-| **Multi-pad nets in footprints** | Take the **union** of every pad carrying one pad number, not the first and not the largest. On a **notched split land**, vendors merge same-net pins into one land and mark the split with a notch modelled as two *equal* overlapping pads, so "largest" is a coin flip returning about half the real land. Union is identical in the common case and correct in the rare one. See *Vendors merge same-net lands* below; exposed-pad/via construction is in [`THERMALS.md`](THERMALS.md). |
-| **`lib_symbols` entry names** | Must be the full `lib_id` (`"Device:R"`), not the bare name you grabbed out of the source library (`"R"`). KiCad never says *symbol not found*: the same one-line mismatch either **segfaults `kicad-cli` (exit 139, no output file)** or writes a netlist with **zero components and exit 0**, depending on unrelated details of the same file. Both reproduced on 9.0.4 from one string. Rename on the way in, and assert the netlist's component count. |
-| **`PWR_FLAG`** | Needed once per net whose only source is a passive connector pin, else `power_pin_not_driven`. Put them in an isolated block — branching off a live stub collides with neighbouring pins. |
-
-### Derive geometry from the library, never from arithmetic
-
-The single biggest source of defects is hand-computed pin offsets. Parse the `lib_symbols`
-you are about to embed and expose `pn(ref, unit, pin)`:
-
-```python
-def _xf(px, py, ang, mirror):
-    x, y = px, -py                       # schematic Y is flipped vs the symbol editor
-    a = math.radians(ang); ca, sa = round(math.cos(a)), round(math.sin(a))
-    x, y = x*ca + y*sa, -x*sa + y*ca     # rotate FIRST...
-    if mirror == 'x':   y = -y           # ...then mirror, in global coordinates
-    elif mirror == 'y': x = -x
-    return (x, y)
-
-def pn(ref, unit, num):                  # -> exact global coords of that pin
-    lid, X, Y, ang, mir = INST[(ref, unit)]     # keyed on (ref, UNIT), see below
-    for n, lx, ly in LIBPINS[(lid, unit)]:
-        if n == str(num):
-            dx, dy = _xf(lx, ly, ang, mir)
-            return (round(X+dx, 4), round(Y+dy, 4))
-    raise KeyError(f"{ref} unit {unit} has no pin {num}")   # never fall through
-```
-
-Then wire with `poly(pn("U3",1,"2"), pn("U5",1,"5"))` and the coordinates cannot drift.
-
-**`unit` is mandatory, not decoration.** A dual or quad op-amp is **one refdes with several
-unit instances**, each placed at a *different* (X, Y), and the units do not share a pin space.
-`Amplifier_Operational:LM2904` on 9.0.4:
-
-```
-LM2904_1_1  pins 3(-7.62,2.54) 2(-7.62,-2.54) 1(7.62,0)
-LM2904_2_1  pins 5(-7.62,2.54) 6(-7.62,-2.54) 7(7.62,0)
-LM2904_3_1  pins 8(-2.54,7.62) 4(-2.54,-7.62)      <- the SUPPLY unit
-```
-
-Key `INST` on refdes alone and it cannot even hold unit A and unit B; flatten `LIBPINS` across
-units and a lookup by pin number returns unit 2's offset applied to unit 1's placement point.
-Every offset above is on-grid, so the grid/orthogonality guard below **cannot catch it** — you
-get a wire onto a neighbouring pin, or a dangle, in silence. Unit 3 is where pins 8 and 4 live,
-which is the whole *Decoupling is a current loop* section.
-
-**Unit 0 is "common to all units" and you must union it in, or the fix becomes a regression.**
-Measured on the stock **10.0.5** libraries (2026-08-09): **666 `NAME_0_*` sub-symbols carry
-pins, and 193 symbols keep *all* their pins there** — `Driver:DRV2510-Q1` has a
-`DRV2510-Q1_0_0` with 17 pins and no `_1_1` at all. (On 9.0.4 these were 664 and 191, and that
-part lived in `Driver_Haptic`, a library **10.0.5 no longer ships** — it was folded into
-`Driver.kicad_sym`. A stale `lib_id` in a worked example is not cosmetic here: by the
-`lib_symbols` row above it either segfaults `kicad-cli` at exit 139 or writes a 0-component
-netlist at exit 0.) A strict `LIBPINS[(lid, unit)]` lookup raises `KeyError`
-on every one of those, and on a genuine multi-unit part with shared supply pins in unit 0 it
-drops them silently — worse than the flat lookup it replaced. So: pins for unit *u* =
-`NAME_0_*` **∪** `NAME_u_*`, and the same for body style (0 is common to 1 and 2). Then raise
-if the pin is in neither, rather than searching the other units. Add unit number to the enumerated parameter space in [`GUARDS.md`](GUARDS.md) as a **required**
-dimension.
-
-**Resolve `extends` before embedding.** **12 249 of the 22 784 top-level symbols in the stock
-10.0.5 libraries (53.8 %, 223 libraries) are `(extends "PARENT")`** — one line to re-measure,
-so re-measure rather than quoting this:
-
-```
-cd .../SharedSupport/symbols
-grep -h -c $'^\t(symbol "'    *.kicad_sym | paste -sd+ - | bc     # 22784
-grep -h -c $'^\t\t(extends '  *.kicad_sym | paste -sd+ - | bc     # 12249
-```
-
-These carry no pins and no graphics of their
-own — `Amplifier_Operational:LM358` is literally `(symbol "LM358" (extends "LM2904") …)`. A
-parser that reads only the named entry gets **zero pins for over half the library**, and
-copying that bare entry into the `.kicad_sch` is exactly the one-line `lib_symbols` defect in
-the table above: `kicad-cli` either segfaults (exit 139) or writes a 0-component netlist at
-exit 0. Flatten the parent's pins and graphics into the emitted entry — which is what the GUI
-writes — and assert the emitted symbol has ≥ 1 pin.
-
-**The order of those two operations is not a style choice, and getting it wrong is invisible
-on most boards.** KiCad mirrors *after* rotating. Mirror-first and rotate-first agree at 0°
-and 180° — an axis mirror commutes with a half-turn — and disagree at 90° and 270°, where
-they exchange **pin 1 and pin 2 of every two-pin part**. Clean ERC, clean netlist, swapped
-part. Calibrate `pn()` by placing one part at 90° **with** `(mirror y)`, exporting the
-netlist, and checking which pin reached which net — never by confirming that the board you
-already have comes out right; an earlier version of this snippet had the order backwards and
-still scored 164/164 on a real board. See [`GUARDS.md`](GUARDS.md) for why unexercised cells
-make a perfect score on one design incomplete evidence.
-
-**Parse balanced blocks per item; never pair two fields with one regex.** A reviewer checking a
-resistor pack's element mapping wrote `\(at ([-\d.]+) ([-\d.]+).*?\(number "(\d+)"` with
-`DOTALL` and got coordinates that belonged to a *property's* `(at …)` paired with a later
-*pin's* `(number …)` — two self-consistent, entirely fictional pin positions, which then
-"proved" a correct filter was shorted. The same regex run over the instance and the library
-definition disagreed, which was the only reason it was caught. Walk parens to extract each
-`(pin …)` block, then read `(at …)` and `(number …)` from *inside that block*. This is the
-mismatched-pairing cousin of "bounded searches lie": the search returned data, and the data
-was invented.
-
-### Assert what you can, and know what the assert misses
+Keep wiring helpers fail-closed:
 
 ```python
 def wire(x1, y1, x2, y2):
-    # `raise`, not `assert`: python -O deletes asserts, and these two are the only
-    # thing standing between a typo and a silently dangling wire.
     for v in (x1, y1, x2, y2):
         if not ongrid(v):
-            raise ValueError(f"off-grid endpoint {(x1,y1,x2,y2)}")   # 1.27 mm grid
+            raise ValueError(f"off-grid endpoint {(x1, y1, x2, y2)}")
     if not (x1 == x2 or y1 == y2):
-        raise ValueError(f"diagonal wire {(x1,y1,x2,y2)}")
+        raise ValueError(f"diagonal wire {(x1, y1, x2, y2)}")
 ```
 
-A grid assert alone does **not** catch non-orthogonal wires — two diagonals shipped past it
-and had to be found by eye. Add the orthogonality assert. Labels, junctions and no-connects
-are not covered by either; check them separately.
+Check labels, junctions, no-connects, and power-symbol attachment separately; the wire helper cannot
+observe them.
 
-### Power-symbol orientation — derive it, don't trust call sites
+### Compact file-format traps
 
-Stock power symbols draw their graphic *upward* from the connection point — `-15V` and
-`PWR_FLAG` included, because the polarity is in the glyph shape, not its direction — except
-for the **`GND*` and `Earth*` families**, which draw downward. That is **12 of the 101**
-symbols in `power.kicad_sym`: `GND`, `GND1`, `GND2`, `GND3`, `GNDA`, `GNDD`, `GNDPWR`,
-`GNDREF`, `GNDS`, `Earth`, `Earth_Clean`, `Earth_Protective`. So a symbol at the bottom of a
-downward stub, or a `GND` at the top of an upward stub, is drawn back over its own wire. It is
-purely graphical, so **ERC never sees it**, and it is easy to get right in one place and wrong
-in another.
-
-**Derive `graphic_down` from the symbol's own geometry, not from its name**, and do not
-special-case `GND` alone: an earlier version of this rule said "every symbol except `GND`",
-which draws `GNDA` — the obvious choice on the split-ground analog boards this skill is aimed
-at — straight over its own wire, and the audit below inherits the same wrong premise and
-passes it. Name-sniffing for "ground" fails in the other direction too: `VSS` and `VEE` sound
-like grounds and draw **upward**.
-
-Audit it instead of eyeballing:
-
-```python
-def check_rail_orientation():   # graphic must point AWAY from the attached wire
-    if not _RAILS or not _SEGS:          # empty input is UNVERIFIED, never a pass
-        raise ValueError(f"UNVERIFIED: {len(_RAILS)} rails, {len(_SEGS)} segments")
-    bad, matched = [], 0
-    for libid, x, y, graphic_down, gbox in _RAILS:
-        hits = 0
-        for (ax, ay, bx, by) in _SEGS:
-            for (px, py), (qx, qy) in (((ax,ay),(bx,by)), ((bx,by),(ax,ay))):
-                if (px, py) != (x, y):
-                    continue             # this segment does not start on the rail
-                hits += 1
-                if px == qx:                                  # vertical
-                    if (qy > py) == graphic_down:
-                        bad.append(f"{libid} at ({x},{y}) drawn over its own wire")
-                # horizontal attachment is legal and was previously SKIPPED, which
-                # made "no matching segment" read as PASS
-        if hits == 0:
-            bad.append(f"{libid} at ({x},{y}) has NO wire on it -- dangling")
-        else:
-            matched += 1
-    # ...and the glyph must not be drawn across some OTHER net's wire either.
-    for libid, x, y, graphic_down, gbox in _RAILS:
-        # gbox is the symbol's OWN graphic bbox -- min/max over the library
-        # entry's polyline/rectangle/circle primitives, excluding property text
-        # -- NOT a hardcoded 1.27 x 2.54.  Measured on power.kicad_sym (101
-        # symbols, KiCad 10.0.5, 2026-08-09): SIX glyphs exceed that height --
-        # Earth_Protective (5.080), +VDC (4.318), Earth_Clean (3.810), AC and
-        # VAC (3.807 each), -VDC (3.175).  An earlier revision of this comment
-        # said "exactly four" and omitted AC and VAC; it had been computed
-        # without the polyline (xy ...) points, which are most of the geometry.
-        # Earth_Clean is also the WIDTH outlier at x -2.540..+2.540, twice the
-        # box.  GNDPWR is SMALLER (h 2.032) but is the one symbol whose glyph is
-        # not x-symmetric about the pin (x -1.270..+1.016), so take x0/x1 from
-        # the bbox's real min/max rather than from a width centred on the
-        # connection point.  Recompute rather than trusting these six: the
-        # enumeration is what moves, the rule (use the real bbox) is what holds.
-        if gbox.w <= 0 or gbox.h <= 0:      # the (0,0,0,0) BBox failure, again
-            raise ValueError(f"UNVERIFIED: degenerate glyph box for {libid}")
-        x0, x1, h = x + gbox.x0, x + gbox.x1, gbox.h
-        y0, y1 = (y, y + h) if graphic_down else (y - h, y)
-        for (ax, ay, bx, by) in _SEGS:
-            if ax == bx and x0 < ax < x1 and min(ay,by) < y1 and max(ay,by) > y0:
-                bad.append(f"{libid} at ({x},{y}) glyph crosses vertical wire")
-            elif ay == by and y0 < ay < y1 and min(ax,bx) < x1 and max(ax,bx) > x0:
-                bad.append(f"{libid} at ({x},{y}) glyph crosses horizontal wire")
-    print(f"{len(_RAILS)} rails, {matched} with an attached wire, "
-          f"{len(_SEGS)} segments considered")     # count beside the verdict
-    if bad:
-        raise ValueError("\n  ".join(sorted(set(bad))))
-```
-
-The second loop matters: the first version only checked a symbol's *own* wire and passed a
-`GND` whose triangle was drawn straight across an unrelated signal running underneath. When
-you add a check *after* seeing a defect, reproduce the defect and watch the new check fire —
-otherwise you have only asserted that the fixed version is fine.
-
-**Property text renders only at 0° or 90°, whatever the symbol's rotation.** Deriving a
-power symbol's label angle as `(360 - ang) % 360` yields **180** for a 180°-rotated
-symbol, and KiCad then prints the net name **upside down**. Every rotated rail on one
-sheet was affected, including a whole `PWR_FLAG` block, and neither ERC nor the netlist
-can see it — it is purely visual. Use `90 if ang in (90, 270) else 0`.
-
-### Schematic annotation is not board annotation
-
-A label on the schematic helps whoever reads the schematic. It does **nothing** for whoever
-solders the board. Connector pinouts, polarity, danger markings and voltage callouts belong on
-`F.Silkscreen`, added from the layout script — derive their position from the real **pad
-centres** so they follow the footprint if it moves or rotates:
-
-```python
-fp  = board.FindFootprintByReference(ref)
-pad = next(p for p in fp.Pads() if p.GetNumber() == num)
-px, py = pcbnew.ToMM(pad.GetPosition().x), pcbnew.ToMM(pad.GetPosition().y)
-```
-
-Silk needs a side choice, not a fixed offset: near a board edge or a neighbouring part, text
-running the default direction trips `silk_edge_clearance` or `silk_overlap`. Set the side per
-connector and let DRC confirm.
-
-**Respect fab minimums, which DRC does not check by default.** JLCPCB's minimum silkscreen
-stroke is 6 mil (0.153 mm) and PCBWay's is 0.15 mm; below that the fab drops the text or ships
-it broken. A default of `thickness = height × 0.15` gives 0.12 mm at 0.8 mm text — under both.
-Use `max(height × 0.15, 0.15)` and ≥1.0 mm height. Also state the **stackup** explicitly: a
-board with no `(stackup …)` block gets the fab's house build, and every dielectric-dependent
-number you computed (trace-to-plane stray, return-path coupling) silently assumes one.
-
-
-## Datasheet discipline
-
-Build a requirement ledger while reading each datasheet. Record every mandatory or explicitly
-recommended supply, reference, bypass, protection, sequencing and exposed-pad requirement,
-then map it to concrete refdeses and nets. Check the ledger against the exported netlist; a
-pair of rail-to-ground capacitors is not a substitute for a specifically required direct
-rail-to-rail capacitor. Do not declare the design complete with an unmapped requirement.
-
-Before release, replace descriptive BOM placeholders with exact, orderable manufacturer part
-numbers including package and performance grade. Verify the selected ordering code against the
-same datasheet used for the design. A string such as `2x1k-0.05%-ratio` is a requirement, not
-an MPN, and does not prevent procurement from substituting a part that breaks the error budget.
-
-**The datasheet cannot tell you whether a part is still made, and "orderable" is a lifecycle
-question, not a document question.** A datasheet lists every ordering code the part ever had;
-discontinued ones stay on the page. TI PDN 20240530001.3 (2024-05-31) discontinued the *tube*
-part numbers across the whole ISO776x family — *"TI will no longer support the tube part
-number. The recommended replacement product is an exact replacement device shipped in large
-tape and reel."* `ISO7762DW` is Obsolete; `ISO7762DWR` is Active. Same die, same package, same
-footprint, **one letter apart**, and SLLSER1H lists both as perfectly valid devices. Checking
-the ordering code against the datasheet — which is what the paragraph above asks for — cannot
-catch this. Check **Part Status** (Active / NRND / Obsolete) and real stock at a distributor.
-
-**Never derive one MPN by copying a suffix from another, including from the design in front of
-you.** A part number proposed for a new position was built by lifting the packaging suffix off
-the incumbent part already in the schematic. Both were the obsolete tube variant: the
-incumbent string *was itself the stale one*, so the copy looked like consistency and was a
-second instance of the same bug. An existing string in the repo is evidence of what was
-ordered once, never evidence of what is orderable now.
-
-**And the converse: purchase history is evidence of a purchase, not of stock on hand.**
-"Do I already have this part?" is not the question order history answers, and the gap is
-silent in three places. *History cannot know what was consumed* — parts bought three years
-ago went onto three years of boards. *Substring-matching a BOM value against distributor
-description strings false-PASSes* — a `\b1K\b` predicate matched `"RES 5.1K OHM 1% 1/10W
-0603"` and reported a 1 kΩ 0603 in stock that did not exist; use the parametric fields, per
-the query rule below, never the human-readable string.
-
-*And "not shipped" is usually just missing data.* 7 lines across a 14-order history read
-`QuantityShipped: 0`, which looks like cancellations and is not: all 7 sit in the four
-oldest orders (2022-09 … 2023-05), where **every** line reads 0 while the order status is
-`Shipped`, `QuantityReserved == QuantityOrdered`, and a real `InvoiceId`, UPS ship method
-and nonzero total are present — a retention cliff in `ItemShipments`, all-or-nothing per
-order and perfectly age-correlated, not four invoiced orders that never arrived. The naive
-remedy — "aggregate `QuantityShipped` instead" — is worse than the disease: it reports four
-paid orders as undelivered. This is the mirror image of the anti-monotone failure and just
-as wrong: absence of a shipment *record* is not absence of a *shipment*. When
-`ItemShipments` is empty on an old order the honest verdict is `unverified`, not zero — and
-"found in history" stays unverified until someone looks in the drawer.
-
-**A value is not a part until value × voltage × package has been checked together.** Each of
-the three is individually reasonable and the combination does not exist. `1u/250V` in an 0805
-was caught in review; **`100n/250V` in an 0805 sat two rows below it in the same BOM and
-survived**, because the fix was applied to the instance rather than the class.
-
-Do **not** memorise where the frontier is — this section originally claimed "at 250 V an 0805
-tops out in the tens of nF, and the smallest 100 nF/250 V X7R is a 1206", and that is simply
-false: Holy Stone `C0805X104K251T` is a stocked 0.1 µF ±10 % **250 V X7R in 0805**, and Samsung
-shipped an 0805 250 V 100 nF X7T in 2025. Ceramic energy density moves every year, and quoting
-a limit from memory here is the exact defect *Never quote a spec from memory* below forbids.
-**The rule is the method, not the number**: run a distributor parametric query on
-(capacitance, voltage, dielectric, package) together and take the answer from what is actually
-in stock. One example done properly — `CGA5L3X7R2E104K160AE` is a 100 nF/250 V X7R where TDK's
-size code `CGA5` is 3216 metric, i.e. 1206 (`CGA4` = 0805, `CGA6` = 1210); a
-non-soft-termination sibling `C3216X7R2E104K160AA` is the same size. Take
-the size code from the vendor's own dimension table rather than reading the digits as an EIA
-code, which is how this was first written down here as a 1210. Then derate: a 250 V X7R at
-110 V of bias keeps roughly a third of
-its nominal value, so put the effective capacitance next to the nominal one rather than
-letting a decoupling calculation quietly use the label.
-
-Worse than missing it outright: a later review *did* examine that capacitor and confirmed its
-**creepage** — leaving a record of attention with the question never asked. When you fix one
-instance of a defect class, sweep the BOM for siblings **by predicate** (here: every part
-whose value carries a voltage suffix, checked against its package) and state what the sweep
-covered. A fix that lands on one row and a sweep that lands on the class cost about the same.
-
-**Put the BOM in the generator and enforce it in both directions** — a placed part with no BOM
-row fails the build, and a BOM row with no placed part fails it too. Emit `MPN`,
-`Manufacturer` and a compact `Spec` as symbol properties so the requirement travels on the
-schematic rather than in a design note beside it. Without this, "R2/R3 are 0.1 %" is prose
-while the schematic says `4k22` and will accept any 5 % thick-film part with the right
-footprint — and if a firmware safety limit is *derived* from that 0.1 %, the limit silently
-stops bounding anything. (Real case: a DAC code cap protecting an 85 V absolute-maximum ADC
-input was computed from a 5 % worst-case gain that 0.1 % parts satisfy at 3.92 % and 1 %
-parts blow through at 6.35 %.) Verifying ~30 MPNs is cheap enough to have no excuse: DigiKey
-v4 takes **two-legged OAuth** (`grant_type=client_credentials` → bearer token → POST
-`products/v4/search/keyword`), which is ~40 lines of `urllib` with no browser, no callback
-port and no token store, and it returns the canonical part number, stock and the parametrics.
-Several "obvious" part numbers will be wrong or dead; guessing is how `OPA455AIDDA` (does not
-exist; it is `OPA455IDDA`) reaches a purchase order.
-
-Build a **corner ledger** for every quantity that establishes bias, gain, safety margin or
-component stress. Combine supply tolerance, passive tolerance, device min/max specifications,
-and ageing terms where material; then prove every result stays inside the
-datasheet's characterized operating range. Typical-value arithmetic is useful for nominal
-performance, never for demonstrating compliance. In particular, do not infer that a pin named
-`SENSE`, `REF` or `FB` is high impedance — use its specified current when calculating copper
-drop, bias current and drift.
-
-When temperature affects dissipation, stress, leakage, drift, matching or calibration residual,
-extend the ledger with [`THERMALS.md`](THERMALS.md)'s hot/cold, gradient and transient cases.
-
-**Never quote a spec from memory.** Download the PDF and read the electrical-characteristics
-table. Every one of these was a real error caught by doing so:
-
-- **A table's UNIT column is shared down the rows — take the unit from YOUR row.** Under
-  `pdftotext -layout` a multi-row parameter block puts the unit on the *parameter's* row, and
-  that row can sit above, below or between the value lines it governs. Infineon's `IDSS` and
-  `IGSS` rows both render as `- 10 100`; the `µA` belongs to `IDSS` one line up, the `nA` to
-  `IGSS`. Reading `100 nA` for a **100 µA** leakage — wrong by 1000× — sized two resistors to
-  bound an all-off `V_GS` to **400 V instead of 0.4 V**, i.e. to bound nothing, and the design
-  note explaining that they made a gate clamp unnecessary was exactly backwards. It survived a
-  full guard suite, because every guard consumed the same constant: **a guard fed a constant
-  cannot check the constant.** Adjacent parameters with similar names and identical digits —
-  `IDSS`/`IGSS`, `ICBO`/`ICEO`, `IIL`/`IIH` — are the trap, since the unit is the only thing
-  separating them and it is the column the eye skips. Extract **value, unit and test condition
-  as one tuple** and put all three beside the constant: `IDSS_MAX = 100e-9` says nothing,
-  `# 100 uA at VDS=80V, VGS=0V, Tj=125C` makes the mismatch visible on the next read. Caught
-  only by an independent reader with the datasheet, which is the defence available when every
-  guard sits downstream of the error.
-- **Noise gain ≠ signal gain.** An op-amp's input-referred noise is multiplied by
-  `1 + Rf/Rin`, not by the inverting gain `Rf/Rin`. Using 10 instead of 11 made a whole noise
-  budget 10 % optimistic.
-- **rms vs p-p.** Pick one per table and label it. Mixing them understated a term by 6.8× —
-  and harmlessly for the part chosen, materially for the part rejected, so the comparison that
-  justified the decision was not the one computed.
-- **Land pattern vs stencil.** The same number appears on both pages meaning different things.
-  On a TI PowerPAD the *land* page gives metal and solder-mask opening; the *stencil* page
-  gives a paste aperture. Read the "EXAMPLE BOARD LAYOUT" page, not "EXAMPLE STENCIL DESIGN".
-- **A stock footprint that matches by vendor and body size can still be the wrong land.**
-  KiCad ships `Oscillator_SMD_ECS_2520MV-xxx-xx-4Pin_2.5x2.0mm`. An ECS-2033 is the same
-  vendor, the same 4-pad package, the same 2.5 × 2.0 mm body — and the wrong land:
-
-  | | ECS-2033 datasheet | KiCad `ECS_2520MV` |
-  |---|---|---|
-  | pad size | 1.10 × 0.90 | 0.80 × 0.90 |
-  | pad centres | (±0.90, ±0.70) | (±0.725, ±0.925) |
-  | pin 1, top view | bottom-left | top-left |
-
-  The stock land is the same family drawn at **90°** with pads 0.30 mm narrower, giving a
-  **negative 0.125 mm toe fillet** — the terminal hangs off the end of its own pad. That is
-  not conservative, it is unsolderable, and it passes DRC and every netlist check silently,
-  because a footprint's *identity* is never checked against the part it is assigned to.
-
-  So: **matching by name, vendor and body size is a hypothesis, not a verification.** Compare
-  **pad size, pad centres and the pin-1 corner** against the datasheet's Suggested Land
-  Pattern before accepting any stock footprint for a part it is not named after. When you must
-  generate the correct land, make the stock one the **calibration case** — the generator
-  should reproduce the stock geometry from the stock part's numbers, so you know it is
-  building lands correctly and not just building *a* land.
-- **Datasheets contradict themselves.** One part listed abs max as both 150 V and 160 V in
-  different sections. Quote the conservative one and say why.
-- **Recommended operating ≠ absolute maximum.** And an absolute maximum is not a design target.
-- **The datasheet outranks the vendor's own SPICE model.** Trust order: datasheet *table* >
-  datasheet *chart* > vendor `.lib`. A model is a *derivative* of the datasheet, usually
-  auto-fitted, so it cannot hold more information — only lose or distort it. Validate a model
-  against the table/chart at every load-bearing operating point; temperature-model validation
-  and a measured failure case are in [`THERMALS.md`](THERMALS.md).
-- **Stock KiCad footprints are not safety-checked.** A stock exposed-pad footprint left
-  0.200 mm between a −15 V pad and a +110 V pin. Always measure pad-to-pad clearance for HV
-  parts; TI land drawings often carry a note explicitly permitting a narrower pad for creepage.
-- **Exposed pads are often electrically connected to a rail**, not ground — and if the symbol has no pin
-  for it, the netlist cannot enforce it and DRC will not complain. Add an `EP` pin.
-- **Diode-clamped pins need series current limiting** — think about power sequencing, e.g. a
-  logic rail up before an HV rail.
-- **Logic-level compatibility**: a 5 V pull-up into a 3.3 V-only GPIO destroys it.
-
-### Getting the PDF: vendor WAFs, and the part substitution they cause
-
-Several vendor sites (Analog Devices and ST among them) sit behind **Akamai Bot Manager**. The
-signature is distinctive: the TLS handshake completes normally, then `curl` **hangs** on
-HTTP/1.1 and gets `INTERNAL_ERROR` on HTTP/2, while a browser gets a 403 whose body carries an
-`errors.edgesuite.net` reference. Handshake success rules out certs, network and auth — the
-WAF is dropping you on fingerprint.
-
-**Akamai 403s on the `HeadlessChrome` UA token alone. Overriding the token is the entire
-fix** — climb the escalation ladder from the cheap end and stop at the first rung that
-returns 200. Measured 2026-08-11 against `www.analog.com` (ADP7118, 2042809 B) and
-`www.st.com` (L78, 3251121 B), all browser rungs using `channel="chrome"` plus the
-same-origin-nav + in-page-`fetch()` recipe in [`SETUP.md`](SETUP.md) §3a:
-
-| rung | ADI | ST |
-|---|---|---|
-| 0. plain `curl` | dropped | dropped |
-| 1. `curl -A '<Chrome UA>'` | dropped | dropped |
-| 2. headless, default flags | 403 | homepage won't even load (`ERR_HTTP2_PROTOCOL_ERROR`) |
-| **3. headless + `user_agent=` override** | **200** | **200** |
-| 4. headed, ephemeral profile | 200 | — |
-| 5. headed, persistent dedicated profile | 200 | — |
-
-Two consequences worth internalising:
-
-- **Headless is fine.** Rung 3 returns the byte-identical file that §3a documents obtaining
-  headed-with-a-profile. Rungs 4 and 5 buy nothing here, and they cost a display — they break
-  over SSH and in CI. Prefer rung 3 and escalate only on an actual failure.
-- **`navigator.webdriver` is a red herring.** It is `true` by default (not `false`, as this
-  file previously claimed) and `--disable-blink-features=AutomationControlled` does flip it to
-  `false` — but that flag *alone*, with the UA left untouched, still 403s, while a UA override
-  *alone*, with `webdriver` still `true`, gets 200. Akamai is not reading it. Don't spend
-  effort on stealth patches before fixing the UA.
-
-Rung 1 failing while rung 3 succeeds is the useful shape: a Chrome UA on `curl` is not enough,
-because the TLS/HTTP2 fingerprint is wrong too. You need a real browser *and* a real UA.
-
-**First: identify the WAF, because the rung that works differs per vendor.** One `curl -I`
-tells you. Measured 2026-08-11 across ~30 vendor/distributor hosts:
-
-| cheapest rung that works | hosts | signature of the block |
-|---|---|---|
-| **`curl` + realistic UA** | Infineon (`CloudFront`/AWS WAF), ROHM | `202` + `x-amzn-waf-action` / plain `403` |
-| **`curl` + UA + `Sec-Fetch-Mode: navigate`** | Diodes, DigiKey, SnapEDA, componentsearchengine, TME, Bourns (all `cloudflare` + `cf-ray`) | `403` |
-| **any browser** (default headless is enough) | Nexperia | `200` titled *"Challenge Validation"* — a JS challenge no `curl` header set can satisfy |
-| **browser + non-`HeadlessChrome` UA** | ADI, ST (`AkamaiGHost`) | connection dropped after TLS; `403` w/ `errors.edgesuite.net` |
-| **UA override + a once-human-warmed profile** | Mouser (`AkamaiGHost` + DataDome) | `200` titled *"Access to this page has been denied"* |
-
-`server:` identifies the vendor's WAF but **does not predict the rung** — Mouser and ADI are
-both `AkamaiGHost`, yet ADI yields to any browser with a corrected UA while Mouser needs a
-one-time human CAPTCHA solve on top.
-
-**Mouser stacks two independent walls, and each needs its own fix.** Measured 2026-08-11:
-
-| | default UA | UA override |
-|---|---|---|
-| cold profile | dropped | `403` deny page |
-| warmed profile | dropped (`ERR_HTTP2_PROTOCOL_ERROR`) | **`200`, 270 kB real content, 4/4** |
-
-Wall 1 is the Akamai UA-token drop; wall 2 is an interactive CAPTCHA that the *automation
-itself provokes* — a human browsing Mouser normally never sees it. Neither fix substitutes for
-the other, and **no fully unattended rung exists**: rungs 2/3a/4/5 with a cold profile all
-fail, including a headed persistent one.
-
-The escape is a **one-time human warmup**, then unlimited unattended reuse:
-
-1. Launch headed with a *dedicated* persistent profile (never the live one — it is usually
-   locked by a running Chrome anyway, and it would expose every logged-in session).
-2. A human solves the CAPTCHA once, in that window.
-3. The clearance persists as **cookies**, so it is portable — the profile then works
-   **headless**, in a fresh process, indefinitely. Keep it somewhere durable rather than
-   `/tmp`, and work from a copy so a bad run cannot burn the solve.
-
-Note that a solved profile does **not** make `_abck` "valid": that cookie read as
-`~-1~`/not-validated throughout, including while Mouser served real content. It is not a
-usable verdict signal — check the title.
-
-Mouser's `/datasheet/*.pdf` returns real headers (`200 application/pdf`,
-`content-length: 1308247`) but reading the response body yields **536 bytes of viewer HTML** —
-the PDF-viewer trap below. Two routes do work from the warmed profile, both verified
-byte-identical (md5 `76311bfe…`, 1308247 B, valid 16-page datasheet, MPN present):
-`context.request.get()` with the profile's cookies, and a real `expect_download()` after
-patching `always_open_pdf_externally` into the profile prefs. Prefer `request.get()` — see
-[`SETUP.md`](SETUP.md) §3a detail 4, which also records that its "`request.get()` always
-403s" claim holds only for fingerprint-based walls like ADI's, not cookie-based ones like
-this. Failing all of it, the Mouser Search API needs no browser at all.
-
-**⚠ Every WAF here signals refusal with a 2xx in at least one configuration.** Three distinct
-false-success shapes, all of which pass `code < 400`:
-
-| shape | host | length | caught by |
-|---|---|---|---|
-| `202` + **zero-byte** body | Infineon | 0 B | length check, or `x-amzn-waf-action` header |
-| `200` + full HTML deny page | Mouser | 18681 B | **title only** |
-| `200` + JS-challenge page | Nexperia | 1911 B | **title only** |
-
-Two of the three survive a nonzero-length check, so gate on **content**: `%PDF` magic for a
-PDF, and the `<title>` for HTML. Do not keyword-sweep the body — `www.bourns.com` scores 16
-hits for "captcha" on its *legitimate* homepage, from an embedded Telerik `RadCaptcha` contact
-form. A body keyword grep would have wrongly condemned a working host.
-
-**AWS WAF (Infineon) keys on the UA token alone — no browser needed.** UA-only `curl` → 200
-(5/5), and a valid 11-page 1074169 B datasheet from `/dgdl/*.pdf`; `Sec-Fetch-Mode: navigate`
-with curl's own UA → still 202; a `HeadlessChrome` UA → still 202 (3/3). So it shares Akamai's
-token sensitivity but not Akamai's fingerprint requirement. Note that Infineon's **asset path
-is behind the same wall** — `/dgdl/*.pdf` 202s on bare `curl` — so the §3 asset-host shortcut
-is vendor-specific, not a general escape.
-
-**Cloudflare's discriminator is the opposite of Akamai's, and it is cheaper to satisfy.**
-Measured on `www.diodes.com` (403 to bare `curl`, 5/5 reproducible):
-
-| attempt | result |
+| trap | required action |
 |---|---|
-| bare `curl` | 403 |
-| `curl -A '<Chrome UA>'` | 403 |
-| `curl -A '<Chrome UA>'` + `Accept` + `Accept-Language` + `Accept-Encoding` | 403 |
-| `Sec-Fetch-*` headers, no UA | 403 |
-| `sec-ch-ua` client hints, no UA | 403 |
-| **`curl -A '<Chrome UA>' -H 'Sec-Fetch-Mode: navigate'`** | **200** (5/5) |
-| `curl` default UA + `Sec-Fetch-Mode: navigate` | 403 |
+| raw newlines in quoted strings | escape as `\n` |
+| schematic and symbol Y axes differ | transform from library coordinates; do not copy offsets by eye |
+| symbol variants have different pin lengths | resolve pin positions from the embedded library symbol |
+| multi-unit parts | retain unit identity and include common unit 0 |
+| multi-element symbols | derive each element's pin grouping; do not assume consecutive pin numbers (for example, a resistor-pack element may use pins 1 and 4) |
+| inherited symbols | flatten or otherwise resolve `extends` before embedding |
+| connector library IDs | resolve an installed suffixed symbol name; do not synthesize a bare `Conn_02xNN` name and assume it exists |
+| labels | place exactly on a wire endpoint or segment |
+| NC package pins | represent them intentionally and verify symbol-to-footprint pin mapping |
+| repeated pad numbers | union every pad carrying that number when deriving land geometry |
+| embedded `lib_symbols` names | use the full `lib_id` and require a nonzero component count after export |
+| passive connector as a power source | use the project's ERC convention, commonly a `PWR_FLAG`, and verify the resulting net |
 
-So Cloudflare wants **coherence**: a UA claiming to be Chrome must also send the
-fetch-metadata a real Chrome sends. Neither half alone suffices. That two-header `curl` also
-returned 200 on DigiKey, SnapEDA and componentsearchengine, and unblocked TME (to a 302) —
-**no browser needed at any of them**. Conversely a *default headless* browser, `HeadlessChrome`
-token and all, sails through Cloudflare — the exact rung that Akamai rejects. Do not carry the
-Akamai fix to a Cloudflare host or vice versa; check `server:` first.
+Treat these as failure classes, not as permission to hardcode another library release's geometry.
 
-**And check the asset path before any of this** (§3 in [`SETUP.md`](SETUP.md)): `www.diodes.com`
-403s on its homepage while `www.diodes.com/assets/Datasheets/*.pdf` returns **200 to a bare
-`curl` with no UA and no headers at all** — verified byte-identical (md5 `19c4010e…`, 602814 B,
-8 pages) to the library copy of `DMTH83M2SPSWQ`. A Cloudflare-fronted host can leave its
-document tree wide open.
+## Verify in layers
 
-This is a gradient, not a binary, and the ladder is per-WAF. Record the WAF, the rung and the
-exact URL with any reachability claim.
-
-If you do need a **headed** browser, use a throwaway profile that forces PDFs to download
-instead of opening in the built-in viewer — never the user's live profile:
+Use a ladder because no single KiCad command establishes design correctness:
 
 ```sh
-P=/tmp/dl-profile; D=/tmp/dl; rm -rf $P $D; mkdir -p $P/Default $D
-printf '%s' '{"download":{"default_directory":"'$D'","prompt_for_download":false},
-  "plugins":{"always_open_pdf_externally":true}}' > $P/Default/Preferences
-open -na 'Google Chrome' --args --user-data-dir=$P --no-first-run --new-window "<pdf-url>"
+K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
+"$K" sch export pdf --black-and-white --exclude-drawing-sheet -o out.pdf x.kicad_sch
+"$K" sch erc --severity-all --exit-code-violations -o erc.rpt x.kicad_sch
+"$K" sch export netlist --format kicadsexpr -o netlist.net x.kicad_sch
+"$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
-Wait for the `.crdownload` to disappear, then check `file -b --mime-type` and `pdfinfo` —
-Chrome's viewer shell and vendor stub pages both masquerade as a download. Do **not** use CDP
-`Network.getResponseBody` on a PDF tab; it returns the viewer's HTML, not the document.
+Apply the rungs in order:
 
-Also check whether the project stores **distributor API credentials** (DigiKey v4 and similar
-serve datasheets and bypass the WAF entirely). One agent grepped only `~/.claude`, `~/.config`
-and the environment, reported "no distributor API key configured", and never looked inside the
-repo it was working in — where three rotating API keys were sitting.
+1. **Parse.** Require each command to produce the expected output.
+2. **ERC.** Resolve the effective severity and pin maps before calling zero violations clean.
+3. **Netlist.** Require a plausible component count, parse every net, and compare connectivity with
+   design intent.
+4. **Render.** View the exported schematic or board. Check overlaps, orientation, labels, notes,
+   connector readability, and isolation-barrier interpretation.
+5. **Domain guards.** Run the project-specific checks described in [`GUARDS.md`](GUARDS.md).
+6. **Board and release checks.** Apply [`RELEASE.md`](RELEASE.md), including parity, effective DRC
+   severity, fabrication exports, and artefact binding.
 
-**A part substituted because you could not read its datasheet is a design change made for
-tooling reasons, and it must be labelled as one.** Blocked on two ADI fixed-output LDOs, an
-agent switched to *adjustable* TI parts — correctly refusing to quote specs from memory, but
-the swap added eight divider resistors and moved a rail from an exact −2.500 V to −2.446 V.
-That is a real change to the board, justified by nothing electrical. Exhaust the access routes
-above first; if you still must substitute, say plainly in the design doc that the reason was
-access, not engineering, so it can be revisited.
+Do not omit `--exit-code-violations`: ERC and DRC can report violations while exiting zero. Do not
+hide its status behind a pipeline; capture the command status before filtering output or enable
+`pipefail`. Judge the report contents as well as the process status.
 
-### Reading the PDF: five failures that each cost a rework
+Treat a missing or empty severity map as `unverified`, not as proof that nothing is ignored. Diff
+`.kicad_pro` before and after generators and restore unintended changes before running verification.
 
-- **Package and land drawings live at the END, after the application notes.** An agent read
-  pages 1–6 of an 18-page datasheet, found no land pattern, and reported the footprint
-  "unresolvable — the drawing has merged multi-pin pads and is marked not-to-scale". The
-  recommended land pattern was on page **16**, fully dimensioned, with twelve *individual*
-  pads. It had also misread three separate same-net pads as one merged pad. **Before concluding
-  a datasheet lacks something, `pdftotext` the whole file and grep it** — "LAND PATTERN",
-  "PACKAGE INFORMATION", "RECOMMENDED". A bounded read produced a confident false negative and
-  blocked the board.
-- **"DRAWING IS NOT TO SCALE" does not mean the vectors are worthless.** Extract the page's
-  geometry (`pdftocairo -svg`) and check whether a view is *internally* to scale by testing a
-  known callout against it — one bottom view came out at 19.837 pt/mm, confirmed by the body
-  outline to better than 0.5 %. Then assign callouts to features by matching feature-to-feature
-  distances against the callout values. Use the picture **only** to decide which callout points
-  at which feature; take every *number* from the callout text. This turns an unreadable drawing
-  into a checkable one.
-- **Vendors merge same-net lands and mark the split with a notch.** One MPS LGA merges each
-  same-net pin pair into a single 0.90 mm land with a 0.30 × 0.125 mm notch. Model it as two
-  pads that *overlap slightly* (0.45 + 0.02) so their union is bit-for-bit the recommended
-  land and no gerber hairline appears between them, with each half containing its own pin's
-  nominal centre. Cross-check the pairing against the pin-function table **without using
-  either to derive the other** — if geometry and netlist agree independently, the mapping is
-  right; if they disagree, stop rather than renumbering.
-- **The figure may be a RASTER, and then `pdftotext` returns nothing — which reads exactly
-  like "the datasheet does not specify it".** A small-vendor oscillator datasheet (ECS
-  2025/2033) has its package drawing *and* its Suggested Land Pattern as embedded images with
-  no text layer at all, so `pdftotext` yielded the parameter tables and silently dropped every
-  dimension. The first pass concluded the land pattern "could not be read out of the
-  datasheet" and shipped a footprint chosen by vendor-and-body-size instead. It was the wrong
-  land (see *A stock footprint that matches by vendor and body size can still be the wrong
-  land*, **above**, under *Never quote a spec from memory*).
-  `pdftocairo -svg` also gives you nothing here — there are no vectors to extract.
+Parse exported netlists independently of KiCad's pretty-printing. Accept arbitrary whitespace,
+count the input `(net` blocks, require the parsed count to match, require nodes, and test an older
+committed export plus a fresh export when supporting multiple KiCad versions. A zero-component or
+zero-net export is a failed verification input, never a clean design.
 
-  **Render and read it**: `pdfimages -png` (or `pdftoppm -r 300`) the page, then *look*. The
-  callouts are printed in the image and are perfectly legible at 300 dpi. Then hold the line
-  the previous bullet draws, because it is the whole difference between evidence and a guess:
-  a **dimension callout printed in the figure** is a datasheet number and may be used; a
-  length **scaled off the picture** is a model and must be labelled as one wherever it lands.
-  In the same drawing the pad dimensions were callouts (used, and they overturned the
-  footprint) while two unlabelled mechanical terminals had no callout anywhere — those were
-  scaled, recorded as "≈", and every downstream tolerance was widened by more than the
-  scaling error could be.
-- **"The datasheet does not specify X" needs the same evidence as "it specifies X" — and the
-  row is often filed under its TEST METHOD, not under the parameter you are grepping for.**
-  The bullet above is the raster route to a false negative; this is the one that happens when
-  the text extracts perfectly.
+Use KiCad's own text and graphic extents when available, then render. Do not turn font measurements
+from one project or release into universal constants. Include labels, symbol properties, power
+symbols, and drawing-sheet objects explicitly when a visual guard depends on them; they are
+different object classes. Put guard implementations and their calibrations in
+[`GUARDS.md`](GUARDS.md), not in this core file.
 
-  Cost: comparing an X7R against a C0G capacitor, `grep -i "insulation resistance"` over both
-  datasheets was read as showing only a room-temperature row, and that absence was written
-  into a design doc as a load-bearing claim — *"Murata publishes only the room-temperature IR,
-  so there is no datasheet basis for saying C0G holds IR better."* A review caught it. The
-  aged limits were in the same specification table all along, on the following pages, as
-  numbered rows headed **"15 Damp heat, steady state"** and **"16 Endurance"**.
+Treat verification summaries as cached output. Regenerate reports before release and bind them to
+the artefact digest they describe.
 
-  The grep failed **three different ways at once**, which is why the absence looked solid:
-  it returned 9 hits in one file and 7 in the other, so it did not look empty; the aged rows
-  name the quantity **`IR`** and **`I.R.`**, not the spelled-out phrase; and in the other
-  datasheet the extracted text splits `Insulation` and `Resistance` onto separate lines, so
-  even the initial row did not match. Grepping the abbreviation and reading the table would
-  each have caught it independently.
+**Run the outer rungs whenever you change what the inner ones cover.** Domain guards test what
+someone thought to test; DRC tests what KiCad knows. A board that passed every project audit — all
+of them green, with a calibrated mutation suite behind them — carried a dangling via and a stub of
+dead copper that rung 6 found immediately. The guards were not wrong; the defect was outside the
+question they asked.
 
-  Two lessons, and the second is the load-bearing one:
+The trap is that the expensive rung looks least affordable exactly when it matters most: after a
+refactor, a build flag, or any change to a guard's scope, when the cheap checks have quietly stopped
+covering what they used to. Budget the full run at that point rather than deferring it, and do not
+report a board as verified on inner-rung evidence alone.
 
-  * **Search the table vocabulary, not the parameter name.** Vendors file environmental limits
-    under `Damp heat`, `Endurance`, `Humidity`, `Life`, `High Temperature Resistance`,
-    `Temperature Cycling`, `Robustness`, or a bare `Specifications and Test Methods` grid with
-    numbered rows. Grep those too, and page through the specification table rather than
-    trusting one keyword. Same discipline as the bounded-search rule in [`GUARDS.md`](GUARDS.md): if a
-    search reports absence, verify the search could have seen the thing.
-  * **An absence claim in a document is a claim, and it will be quoted.** Prose that says the
-    vendor "does not specify" something reads as a fact the next reader will act on. Either
-    cite the pages you actually checked, or write "not found in <file>, not verified against
-    the full sheet" — never promote a failed grep to a property of the part.
+Run any regenerating verification against a **copy**. An entry point that rebuilds before checking
+will overwrite the artefact it is verifying, including artefacts that are not yet committed.
 
-  The finding, worth carrying because it kills a strong intuition: **X7R and C0G specify the
-  SAME insulation resistance, initial and aged.** Samsung `CL10B104JB8NNNC` (X7R) and Murata
-  `GRM3195C1H104JA05D` (C0G) both give 500 MΩ×µF / 500 Ω·F initial, 50 Ω·F after 1000 h
-  endurance and 25 Ω·F after 500 h damp heat — identical numbers under near-identical methods
-  (1 MΩ×µF ≡ 1 Ω·F; the two vendors just use different units, which is itself enough to make
-  the pair look incomparable at a glance). At 100 nF that is 5 GΩ / 500 MΩ / 250 MΩ. "C0G
-  leaks less" is exactly the remembered fact *Never quote a spec from memory* exists to stop.
+## Ground component decisions in current evidence
 
+Run [`SETUP.md`](SETUP.md) before relying on a datasheet or current sourcing information. Then:
 
-## Guards, validators and audits
+- Build a requirement ledger for every mandatory or explicitly recommended supply, bypass,
+  reference, protection, sequencing, and exposed-pad requirement. Map each item to refdeses and
+  nets in the emitted design.
+- Extract value, unit, test conditions, and temperature corner as one tuple. Do not copy digits
+  without the unit column or infer a pin's impedance from its name.
+- Use typical values for nominal estimates only. Combine min/max device limits, supply tolerance,
+  passive tolerance, temperature, and ageing where they establish compliance or stress.
+- Distinguish recommended operation, characterized operation, and absolute maximum.
+- Validate models against datasheet tables and charts at every load-bearing operating point.
+- Verify exact orderable MPN, package, performance grade, lifecycle status, and stock as separate
+  questions. Follow [`RELEASE.md`](RELEASE.md) for BOM and sourcing evidence.
+- Query value, voltage rating, dielectric, package, and other coupled constraints together. Sweep
+  the BOM by predicate after fixing one instance of a defect class.
+- Compare every selected land pattern with the datasheet's pad size, pad centres, and pin-1 corner.
+  Follow [`FOOTPRINTS.md`](FOOTPRINTS.md); matching vendor and body size is only a hypothesis.
+- Inspect the whole PDF before claiming information is absent. Render raster drawings and use only
+  printed callouts as datasheet values; label dimensions scaled from a picture as models.
+- Record the source and page/table beside each load-bearing constant.
 
-Read [`GUARDS.md`](GUARDS.md) before writing or reviewing generator checks. It owns the
-ledger/model/artifact classification, subject-specific two-direction calibration, fail-closed
-coverage rules, semantic zone-fill finalization and matched-copper gate pattern. Keep those
-contracts out of project-specific prose: encode them in the generator or audit harness and bind
-their reports to the emitted artefact.
+If the needed evidence remains inaccessible, stop and request the document. Do not substitute a
+part or quote a specification from memory merely to keep moving.
 
+## Review and hand off
 
-## Reviewing someone else's numbers
+Recompute important arithmetic independently, remeasure geometry from the emitted files, and
+separate confirmation of a defect from confirmation of the reported number.
 
-Recompute, don't read. Re-derive the arithmetic independently, re-run the statistics from the
-raw data, and re-measure geometry from the files. Reviews in this domain are frequently right
-about the *defect* and wrong about the *number* — one correctly identified an unsafe footprint
-but quoted a dimension that conflated a mask width with a metal width. Confirm the finding and
-the figure separately.
+After changing a value, topology, net name, interface, or safety limit, search every live
+representation: generator source, schematic annotations, board markings, BOM, assembly and
+integration documents, firmware limits, and current verification reports. Preserve dated reviews
+as historical records; mark findings resolved or superseded instead of rewriting the original
+observation.
+
+Report what was verified, what remains `unverified`, which tool and datasheet revisions were used,
+and which source artefact owns future edits.

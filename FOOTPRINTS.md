@@ -5,7 +5,30 @@ layers of a pad are independent and DRC checks almost none of this. Layout judge
 in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 [`THERMALS.md`](THERMALS.md) for exposed heat-transfer lands, thermal vias and their fab process.
 
-## No vias in pads — and DRC will not tell you
+## Contents
+
+- [Verify the land pattern, not the name](#verify-the-land-pattern-not-the-name)
+- [Keep ordinary vias out of pads](#keep-ordinary-vias-out-of-pads)
+- [Treat copper, mask, and paste independently](#treat-copper-mask-and-paste-independently)
+- [Test package substitutions on a copy](#test-package-substitutions-on-a-copy)
+- [Enumerate placement candidates](#enumerate-placement-candidates)
+
+## Verify the land pattern, not the name
+
+Treat a stock footprint matching the vendor, pin count, and body dimensions as a candidate only.
+Compare its copper pad size, pad centres, orientation, pin-1 corner, mask, and paste against the
+selected part's recommended land pattern. Record the datasheet page and package code used.
+
+**Example failure shape — same family and body, different land.** Parts sharing a vendor, pin count,
+body size, and package family can still use different pad centres or pin-1 orientation. The example
+changes the action: compare the installed footprint with the exact selected part's current drawing
+instead of accepting a plausible library name.
+
+When creating a custom footprint, calibrate the generator against a known land pattern before
+using it for the new one. Require the emitted pad inventory and unioned geometry to match the
+datasheet, including repeated pad numbers and notched or merged same-net lands.
+
+## Keep ordinary vias out of pads
 
 KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
 is simply "connected" — which is how a 0.6 mm via can sit inside an 0805 land
@@ -17,10 +40,8 @@ same-net:
 
 ```python
 bad, pairs = [], 0
-# Derive the layer set -- do NOT hardcode (F_Cu, In1_Cu, In2_Cu, B_Cu).  On a
-# 6-layer board that literal skips In3/In4, the count still comes out non-zero,
-# and the guard reports coverage it did not have.  See SKILL.md, "every layer
-# literal is now a liability".
+# Derive the layer set. A hardcoded tuple can skip added inner layers while the
+# guard still reports nonzero coverage.
 layers = [l for l in board.GetEnabledLayers().CuStack()]
 for v in vias:                           # build these explicitly, do not assume
     for ref, p in pads:
@@ -47,28 +68,18 @@ When a via genuinely has nowhere to go — two chip lands 0.22 mm apart, a SOIC 
 0.5 mm from its decoupler — step it *off the axis* rather than squeezing it
 between: run a short stub of track and put the via where there is room.
 
-## Modifying a footprint: copper, mask and paste are three independent layers
+## Treat copper, mask, and paste independently
 
-If you narrow a pad's **copper** for creepage, `F.Mask` and `F.Paste` do **not** follow.
-This nearly shipped: an exposed pad was cut 2.95 → 2.00 mm and its mask 2.71 → 1.80 mm for
-HV clearance, while the four paste apertures stayed at their original size — printing paste
-**2.49 mm wide**, 0.245 mm *outside* the copper and onto bare solder mask, right in the
-0.675 mm channel between −15 V and +110 V. Creepage measured on copper said 0.675 mm; the
-real post-reflow figure was **0.430 mm**. Which column condemns it depends on coating: this is
-paste on assembled parts, so it is the **assembly** case (A5–A7), where 0.430 mm clears A7
-(0.4 mm, coated) and fails A6 (0.8 mm, uncoated) — i.e. it is a defect on an uncoated board and
-marginal-at-best on a coated one. The bare-board copper-to-copper figure in the same channel is
-the 0.675 mm, and *that* is the one to rule against B1–B4.
+If you narrow a pad's **copper** for creepage, `F.Mask` and `F.Paste` do **not** follow. A paste
+aperture can remain wider than the new land and deposit conductive material into the spacing the
+copper edit was intended to create. Recompute the assembled geometry from copper, mask, paste, and
+component terminations rather than reporting the copper-only gap.
 
-**Which column applies is not obvious, and getting it wrong is worth 0.2 mm here.** A5–A7 are
-the *assembly* columns — component leads and their terminations, i.e. the pad-to-pad case
-above once parts are on. B1–B4 are the *bare-board* conductor columns — track to track, track
-to land. They disagree by enough to flip a verdict: 0.670 mm passes A7 and fails A6, while
-0.675 mm passes B2 — three numbers within 5 µm of each other with three different answers.
-State the column, the voltage band and the coating status every time, or the number means
-nothing. And note this is IPC-2221**C** (Dec 2023), which supersedes B; the B-era values
-quoted historically in this file were not re-verified against C's Table 6-1, so re-read it
-before leaning on a marginal figure.
+Select the compliance rule from the current binding standard. Record its revision, table, column,
+voltage band, actual working/fault voltage, coating state, and whether it applies to bare-board
+conductors or an assembled termination. Do not reuse historical IPC-2221B numbers as IPC-2221C
+verdicts; no numeric IPC pass/fail claim in this reference is authoritative without that complete
+citation.
 
 **None of this covers an isolation barrier.** IPC-2221 is a PCB design standard and does not
 address reinforced/functional isolation. If the board has a barrier — mains, or any
@@ -89,42 +100,28 @@ When vias intentionally share an exposed land for heat transfer, use the paste, 
 construction rules in [`THERMALS.md`](THERMALS.md); an ordinary same-net via in a pad remains a
 manufacturing defect under the net-blind check above.
 
-## Substituting a larger package: make the change, don't reason about it
+## Test package substitutions on a copy
 
-Parts grow for real reasons — 0805 → 1210 for a voltage rating, 0805 → 2512 for fault power.
-"Does it still fit" is answered by **doing it on a copy of the board and running DRC**, not by
-measuring the neighbours you thought of.
-
-A review that reasoned about the space around a capacitor concluded an 1812 would drop in
-"without moving C8, J1 or the +110 V rail", citing ≥3 mm of clear board **north and east**. It
-was wrong: the binding neighbours were **west** (an 0805 at 2.5 mm centre-to-centre, where the
-new part needed 3.25 mm) and **south-east** (a connector courtyard). Dropping it in produced
-seven violations and the corner had to be re-laid out. The failure mode is checking the
-directions that have room — and it is the same shape as an empty-scan false pass, one level up.
+Parts grow for real reasons, such as voltage rating or fault power. Answer "does it fit" by changing
+the footprint on a scratch copy and running DRC, not by measuring only the neighbours or directions
+that first look tight.
 
 ```sh
+K="${KICAD_CLI:-kicad-cli}"             # set KICAD_CLI when it is not on PATH
 cp board.kicad_pcb /tmp/t.kicad_pcb    # then swap the footprint via pcbnew,
                                        # keeping position, rotation and pad nets
-$K pcb drc --format json --severity-all --exit-code-violations \
+"$K" pcb drc --format json --severity-all --exit-code-violations \
     -o /tmp/drc.json /tmp/t.kicad_pcb
 ```
 
-Thirty seconds, and it settles courtyard, clearance and silkscreen at once. Re-run any
-independent geometric audit on the copy too: a bigger package usually **improves** creepage
-(a 1210's terminations are ~1.5 mm apart against an 0805's 0.9 mm), so the substitution can
-drop the part out of a package-exception list entirely. That is worth knowing before you argue
-for it, and worth recording after — an exception that no longer needs to exist should be
-deleted, not left standing as a precedent for the next part.
+Re-run independent geometry and thermal audits on the copy too. A larger package can improve
+terminal spacing while worsening courtyard, placement, or loop geometry. Remove any package
+exception that the new measured geometry no longer needs.
 
-### When placement refuses, enumerate — do not nudge and retry
+## Enumerate placement candidates
 
-Adding one 0603 to a full board took four refusals, and each one named a *different*
-constraint: 0.670 mm into a connector's courtyard; then the only lane wide enough for that
-connector's hazard warning; then 1.550 × 1.970 mm into an isolator's courtyard; then a
-header's pin-label column, where the label could no longer be placed. Nudging after each would
-have kept finding the next one at random.
-
-Enumerate instead. Grid the region and reject a candidate that collides with **any** of:
+When placement is crowded, enumerate candidates instead of nudging after each newly discovered
+constraint. Grid the region and reject a candidate that collides with **any** of:
 
 1. every footprint courtyard (`GetCourtyard(F_CrtYd).BBox()` — and assert it is non-degenerate,
    per *An empty geometry result reads exactly like a clean one*, in
@@ -132,12 +129,10 @@ Enumerate instead. Grid the region and reject a candidate that collides with **a
 2. **every existing `F.Silkscreen` item's bounding box** — see below;
 3. any lane a generator reserves for text it has not placed yet, such as a connector's
    per-pin label column at `pad_x − offset`;
-4. a real margin, not zero. A 0.3 mm margin turned "fits" into "does not" on two candidates
-   that were clearing a neighbour by 0.01 mm.
+4. a requirement-derived margin rather than zero clearance.
 
-The output is the useful thing: on that board the entire primary side had **nine** free
-positions for one 0603, all at the same spot. That is a fact worth knowing before arguing
-about where the part should go, and it converts "find somewhere" into "there is one place".
+Report the number and regions of legal candidates. That converts "find somewhere" into measurable
+placement evidence and makes an empty search fail visibly.
 
 **Silkscreen is territory.** This is the non-obvious one. A placement can be geometrically
 legal, route cleanly, pass DRC — and still be wrong because it took the only lane on that side
@@ -145,9 +140,6 @@ of the board wide enough for a hazard warning. Silk has no courtyard and DRC wil
 it; only a generator that *refuses when a `Silk` property fails to place* will catch it, which
 is an argument for having that check before you need it.
 
-When the part genuinely cannot go where it belongs, say so with the number that makes it
-acceptable rather than moving it quietly. A series damping resistor 18.5 mm from its connector
-instead of beside it is fine at a 10 ns edge — FR4 propagates at ~6.7 ps/mm, so that is ~250 ps
-round trip, ~2.5 % of the edge, and the resistor still damps the cable, which is the reflection
-that matters. Write the derivation down; the next reader will otherwise see only that it is in
-the wrong place.
+When a part genuinely cannot go where the heuristic prefers, record the quantitative condition that
+makes the exception acceptable. For signal-integrity placement, derive propagation delay and the
+relevant edge-time fraction rather than declaring a distance harmless by inspection.

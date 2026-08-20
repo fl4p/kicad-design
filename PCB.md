@@ -1,9 +1,9 @@
 # PCB layout and footprints (KiCad)
 
 Companion to `SKILL.md`. **Read this file when the task involves the board** —
-`.kicad_pcb`, `.kicad_mod`, routing/autorouting, `pcbnew` scripting, DRC, zones,
-footprints, land patterns, stackup, creepage, surface leakage, or **fab output and release**
-("is this ready to order?"). Schematic-only work does not need it.
+`.kicad_pcb` layout, routing/autorouting, zones, stackup, creepage, surface leakage, or
+board-side placement judgement. Route footprint, scripting, verification, release, thermal, and
+variant work to the concern-specific companions below. Schematic-only work does not need this file.
 
 Everything in `SKILL.md` still applies here: preserve the project's declared
 source authority, climb the whole verification ladder, and write guards that
@@ -19,6 +19,17 @@ pays only for what it needs:
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or a slow generator |
 | [`RELEASE.md`](RELEASE.md) | verifying a board, or answering "is this ready to fab?" |
 | [`THERMALS.md`](THERMALS.md) | dissipation, heat paths, thermal pads/vias, gradients, or temperature validation |
+| [`VARIANTS.md`](VARIANTS.md) | native or generated assembly/board variants |
+
+## Contents
+
+- [Scope external autorouting](#scoped-external-autorouting-default-only-after-the-project-opts-in)
+- [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
+- [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
+- [Declare the stackup](#the-stackup-is-part-of-the-design-not-a-fab-preference)
+- [Guard symmetry and matching](#symmetry-and-matching-are-invisible-to-drc)
+- [Measure surface-leakage paths](#surface-leakage-measure-the-path-not-the-gap)
+- [Audit isolated-domain clearance](#isolated-designs-the-binding-clearance-is-zone-to-zone-and-drc-is-not-asked)
 
 ## Scoped external autorouting: default only after the project opts in
 
@@ -40,6 +51,94 @@ then locks every existing route only in the scratch export board and proves that
 DSN represents it as fixed copper; scratch lock bits never enter the manifest or
 final board. This order gives critical structures first claim on space while
 still using the router as an early floor-planning instrument.
+
+### Pin the router's configuration, not just its binary
+
+A route manifest that records the router's SHA-256, its JRE and a compatibility cell still does not
+make the routes reproducible. Measured on one board with the pinned jar and one unchanged DSN:
+**62 track-width errors with the fanout stage enabled, 0 with it disabled.** Same binary, same
+input, materially different copper. Whoever re-runs the seed gets whatever their local router
+config happens to say.
+
+Record the routing settings that change geometry in the manifest alongside the binary digest — at
+minimum the fanout, neckdown, pass-count, thread and clearance-source values — and have the
+verifier compare them, so a differently-configured re-run is a refusal rather than a silent
+divergence.
+
+### Disable fanout, or expect stubs narrower than the class width
+
+On Freerouting **2.3.0**, with the configuration below, the **fanout stage sized pad escape stubs
+independently of the net class**: a class declaring 0.2 mm got 0.15 mm stubs — below the board minimum, so every one is a
+DRC error. They are easy to misread: they sit next to vias, a few per net, scattered across many
+nets, which looks like congestion-driven narrowing rather than one stage applying its own policy.
+
+- The setting is `router.fanout.enabled` — settable **either** in `freerouting.json`
+  (`FanoutSettings`, `@SerializedName("enabled")`) **or** on the command line as
+  `--router.fanout.enabled=false`. Both were observed working on 2.3.0.
+- **Neckdown is a different thing, and on this board it was not the cause.**
+  `router.automatic_neckdown` and `router.neck_width_um` are real settings; disabling both changed
+  nothing, and only fanout did. Do not diagnose this from a filename in a repo or from the
+  plausibility of the word — and do not generalise this attribution to another board without
+  re-measuring, because both stages can undersize copper.
+- The router's own log names the stage: `Fanout pass #1 ... N SMD pins fanouted, +M extra vias`.
+  Read it before changing settings.
+
+**Read the router's OWN log file, not your console redirect.** Freerouting confirms each accepted
+override at DEBUG level — `Applied CLI router setting: router.fanout.enabled = false` — in the file
+named by `--user_data_path`, which a `> log 2>&1` redirect does not contain. An investigation that
+reads only the redirect sees silence and concludes the flag was ignored; that mistake cost a false
+"the tool silently drops unknown settings" claim here. Confirm a setting took effect from the
+`Applied CLI router setting` line AND from the output itself (SES wire widths, stage lines) — never
+from the exit code.
+
+### A router's DRC-clean result is not a design-conformant result
+
+Run the project's own audits over any external router's output before believing it. DRC does not
+know your barriers, your keepouts' intent, or any requirement that lives in the generator rather
+than in the board.
+
+Measured on one 4-layer isolated board, whole-board scout: an external router returned **0 DRC
+violations and 0 unconnected**, routed every net including four gate escapes a second router could
+not complete — and the project audit refused it on its **first** check, with **35 items of copper
+inside the 4 mm galvanic isolation barrier**, host-side `+5VH` and isolated-side `GND_OUT` in the
+same gap. KiCad scored that board clean because nothing had asked it about the barrier (see
+*Isolated designs*, below).
+
+The converse also holds, so neither layer subsumes the other: on the same project a **dangling via
+on bare laminate passed all 11 audits** and was caught only by DRC. Report which layer produced a
+verdict; "clean" without naming the checker is not a claim.
+
+Read a router's failure honestly, too. A router that leaves connections unrouted may be refusing
+what it cannot do legally, while one that reports success may have routed the same connections
+through a constraint it was never told about. Unrouted is a better failure than silently
+non-conformant.
+
+### Check the constraint exists as board geometry before blaming the router
+
+A rule area constrains only what its flags say. Measured on the same board: **16 rule areas, every
+one fill-only** — `noFill=True`, `noTrack=False`, `noVia=False` — and 20 of them reached the
+exported DSN. They stop zone fill under the FET bodies and permit tracks and vias everywhere. The
+routing constraints that mattered (layer restriction, bounded escape stubs, entry-band exclusion,
+barrier) existed **only as Python in the generator**.
+
+So before concluding a router "ignored" or "cannot express" a constraint, enumerate what the board
+actually carries and what the export format transmits. A generated board whose rules live only in
+generator code cannot hand them to any external tool — that is a property of the design, not of the
+router. If external routing is intended, the generator must **emit** routable rule areas
+(track/via keepouts, layer restrictions, guide corridors) as first-class output and audit that they
+are present.
+
+### Diff the project file after any external router runs
+
+A router may rewrite `.kicad_pro`. One measured case relaxed
+`rules.min_hole_clearance` 0.25 → 0.175 mm and `net_class[Default].clearance` 0.2 → 0.175 mm, and
+downgraded eight DRC severities to warning or ignore — on a run whose own reconciliation pass
+reported nothing to route. It printed a loud banner saying so, which is more than most would.
+
+**Never grade a router's output with the project file that router wrote.** Restore the original
+project, or point the checker at it, then DRC. Otherwise the result is graded against rules the
+tool lowered to fit its own copper, and it will read clean. Treat a relaxed fab floor as a release
+blocker requiring an explicit waiver, never as a routing outcome.
 
 Keep at least these structures critical:
 
@@ -284,6 +383,32 @@ not release evidence.
 See [`scripts/README.md`](scripts/README.md) for the command contract and
 [`drafts/PCB-AUTOROUTING.md`](drafts/PCB-AUTOROUTING.md) for the research evidence
 and limitations behind this policy.
+
+## Place board annotations from board geometry
+
+Schematic text does not help the assembler looking at the PCB. Put connector pinouts, polarity,
+hazard markings, voltage callouts, and revision identifiers on the appropriate board layer and
+derive their anchors from the placed footprint's real pad centres so they follow moves and
+rotation:
+
+```python
+footprint = board.FindFootprintByReference(reference)
+pad = next(p for p in footprint.Pads() if p.GetNumber() == pad_number)
+position = pad.GetPosition()
+```
+
+Choose the text side and orientation from available board geometry rather than applying one fixed
+offset to every connector. Check footprint courtyards, edges, nearby silkscreen, reserved label
+lanes, and readable orientation; then run DRC and render both board sides.
+
+KiCad DRC does not establish a fabricator's minimum silkscreen stroke or text height. Read the
+current selected fabricator's published capability, record its source/date, and guard every emitted
+text object against those limits. Do not carry an undated numeric minimum from another fab or
+process into a new project.
+
+Treat silkscreen as reserved layout territory. A legal component placement can still consume the
+only lane wide enough for a hazard or connector label, so make required annotation placement a
+fail-closed generator step rather than a final cosmetic pass.
 
 ## Decoupling is a current loop, not a placement radius
 

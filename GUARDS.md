@@ -4,6 +4,19 @@ Read this reference when writing or reviewing a generated KiCad schematic or boa
 domain-specific validator, or a calibration harness. KiCad's ERC/DRC and the verification
 ladder in [`SKILL.md`](SKILL.md) still apply; this file covers the checks the generator owns.
 
+## Contents
+
+- [Classify every check by what it can observe](#classify-every-check-by-what-it-can-observe)
+- [Make the subject chain reach reality](#make-the-subject-chain-reach-reality)
+- [Calibrate detection and acceptance](#calibrate-detection-and-acceptance)
+- [Zone fills need semantic finalization](#zone-fills-need-semantic-finalization)
+- [Matched copper needs shape and quantity gates](#matched-copper-needs-shape-and-quantity-gates)
+- [Guard visual geometry by object class](#guard-visual-geometry-by-object-class)
+- [Make a diagnostic probe replicate production](#make-a-diagnostic-probe-replicate-production)
+- [Establish a threshold's provenance and floor](#establish-a-thresholds-provenance-and-floor)
+- [Reporting and review hygiene](#reporting-and-review-hygiene)
+- [Review checklist](#review-checklist)
+
 ## Classify every check by what it can observe
 
 Do not put arithmetic, construction-model checks and emitted-artifact checks in one anonymous
@@ -184,6 +197,87 @@ Land Gate A before loosening an existing area gate. Until Gate B has a derived l
 existing fail-closed limit or require an explicit recorded waiver; do not silently tune a
 threshold to the current board.
 
+## Guard visual geometry by object class
+
+Treat visual checks as artifact guards. Use KiCad's own text and graphic extents where available,
+then render the result; do not promote measurements from one font, board, or KiCad release into
+universal constants.
+
+Enumerate every object class the visual claim depends on:
+
+- free text and symbol properties;
+- local, global and hierarchical labels;
+- power symbols and their library graphics;
+- wires, junctions and no-connect marks;
+- board silkscreen and fabrication text;
+- drawing-sheet objects when the export includes them.
+
+Require a nonzero count for each expected class. A guard that iterates only a generator's free-text
+list cannot establish that net labels do not collide; labels are separate objects with rotation and
+justification rules of their own.
+
+Prefer one label per connected node. Wiring two pins into one node and labelling the shared segment
+once removes the collision structurally; moving two duplicate labels merely relocates it.
+
+For power symbols, derive the glyph bounding box and direction from the resolved library symbol.
+Check both that a wire attaches at the connection point and that the glyph points away from its own
+wire without crossing another net. Do not infer direction from names such as `GND`, `VSS`, or `VEE`.
+Reject degenerate geometry and dangling symbols as `UNVERIFIED` or failure rather than skipping
+them.
+
+Normalize symbol-property text to a readable 0° or 90° orientation. For orthogonal symbol angles,
+use 90° for 90°/270° symbols and 0° for 0°/180° symbols; do not compute property text as
+`(360 - symbol_angle) % 360`, which produces upside-down 180° text. Calibrate the rule with rendered
+0°/90°/180°/270° cases on every supported KiCad release because ERC and the netlist cannot observe
+text orientation.
+
+Calibrate each visual guard with the omitted object class or orientation that motivated it, then
+apply a legal rotation or placement that must remain accepted. Keep the final rendered inspection
+in the verification ladder because a geometric model cannot prove overall readability.
+
+## Make a diagnostic probe replicate production
+
+When investigating an instability, the probe must perform the steps production performs, in
+production's order, and no others. An extra step inside the loop does not merely add noise: it can
+synthesise a qualitatively different behaviour that then reads as a property of the tool.
+
+Measured case. A loop of *reload, fill, save, canonicalize* was reported as proof that the zone
+filler had no fixed point — a period-2 cycle, one matched-copper delta alternating between
+0.000 mm² and 0.190 mm² forever. Canonicalization re-sorts board items and the filler's boolean
+operations walk them in item order, so each pass re-perturbed what the previous pass settled. The
+same board with that one step removed converges after a single pass and never moves again.
+Production canonicalizes once, before the fill.
+
+- A/B the probe against itself with each added step removed before attributing a behaviour to the
+  tool.
+- State which steps the probe performs, next to the result.
+- A finding that a property is *unreachable* is a strong claim: it justifies downgrading a gate to
+  a report, so it needs the same adversarial treatment as a defect report.
+- Re-examine any gate that was weakened on the strength of an unreachability claim once the claim
+  is retracted. Confirm the property is reachable in the production sequence, not merely in a
+  simplified probe.
+
+## Establish a threshold's provenance and floor
+
+A limit is not interpretable until you know what produced it, and it cannot gate anything it cannot
+resolve.
+
+- **Read the limit's provenance before treating a failure as a defect.** A constant whose own
+  comment derives it from measured segmentation noise times headroom is a *detection floor*, not a
+  physical budget. Reading it as a budget makes every downstream question unanswerable: the failing
+  value cannot be judged, and raising the limit is indistinguishable from muting it.
+- **A threshold below the tool's own reproducibility reports tool noise.** Measure the spread the
+  generator itself produces for the quantity — across save/reload, build order, and tool version —
+  and require the limit to sit above it. One board carried a 0.05 mm² limit on a quantity that moved
+  0.215 mm² across a save/reload, so the verdict was a function of which pass wrote the file.
+- **One constant must not serve two checks with different physical claims.** A shared area tolerance
+  gated both a four-terminal-resistance entry condition and a thermal congruence condition. Neither
+  could be derived from its own requirement until they were separated, and a limit derived for one
+  would have silently rescoped the other.
+- When a limit is derived from an allocation, compute it in code from the allocation and the
+  measured inputs, and print the allocation, the derived limit, the observed value and the margin
+  together, so a reader can audit the chain without opening the source.
+
 ## Reporting and review hygiene
 
 - Emit stable failure IDs, tier, subject count, observed value, limit, margin and units. Keep the
@@ -196,6 +290,14 @@ threshold to the current board.
   is possible; a single-line grep misses phrases split across Markdown or generated HTML lines.
 - If a search reports absence, prove its parser or pattern could have matched the relevant object
   class and formatting. A bounded or line-oriented search can return convincing partial data.
+- **Derive counts in the report, not only in the assertion.** A wrong assertion fails and gets
+  fixed; a wrong description passes forever. One file carried the same hardcoded subject count three
+  times: the two that asserted fired loudly on a variant with fewer subjects, and the third — a
+  summary line reading "3 sense taps" while listing two — survived every run. After deriving a
+  hardcoded count, grep the narration for the same literal.
+- **Confirm a report file postdates the run that should have produced it.** Check its mtime or an
+  embedded run identifier before quoting it; a stale report from a previous run reads exactly like a
+  fresh pass.
 - Preserve dated reviews as historical records. Mark findings resolved or superseded and bind
   current reports to the artefact digest they describe.
 
@@ -212,3 +314,7 @@ threshold to the current board.
 - [ ] Zone-dependent guards run only after unconditional final fill and in-memory semantic-settle proof.
 - [ ] Matched copper uses independent artifact-shape and unmasked-quantity gates when required.
 - [ ] Reports use correct units and distinguish absolute, differential, semantic and byte evidence.
+- [ ] Every threshold names its provenance and sits above the generator's measured reproducibility.
+- [ ] No constant gates two checks that make different physical claims.
+- [ ] Subject counts in report strings are derived, not literal.
+- [ ] Instability findings name the probe's steps and were A/B'd against a production-order probe.

@@ -6,6 +6,13 @@ patterns in [`FOOTPRINTS.md`](FOOTPRINTS.md); release checks in
 [`RELEASE.md`](RELEASE.md). Read [`GUARDS.md`](GUARDS.md) when the script emits or
 calibrates domain checks, and for the semantic zone-fill finalization contract.
 
+## Contents
+
+- [Probe the installed pcbnew API](#pcb--pcbnew-notes)
+- [Make layout generation reproducible](#making-a-pcbnew-layout-reproducible--there-are-two-causes-not-one)
+- [Treat geometry helpers as guards](#geometry-helpers-are-guards-and-fail-the-same-way)
+- [Profile slow generators by outcome](#a-slow-generator-profile-by-outcome-and-measure-reuse-before-you-cache)
+
 ## PCB / `pcbnew` notes
 
 Run layout scripts with KiCad's **bundled** Python — `pcbnew` is not importable from a normal
@@ -68,8 +75,8 @@ half-export leaves a library that resolves for most parts and fails for one.
 
 A stamp is only as good as what it was probed with. The first pass at this table stamped row 3
 "unchanged on 10.0.5" having probed a single `SHAPE` subclass, and a review found the row was
-wrong for every *other* subclass — the same shape as "a record of attention with the question
-never asked" in `SKILL.md`. Re-probe on any version change, name the type you probed, and use
+wrong for every *other* subclass. Re-probe on any version change, name the exact type and method
+you probed, and use
 the script below rather than a fresh ad-hoc one:
 
 ```python
@@ -160,8 +167,8 @@ edit corrupted the board" rather than "the binding invalidated my handles".
 `board.GetConnectivity().GetConnectedPads(pad)` returned an empty list for *every* pad on a
 partly-routed board, including pads whose nets were fully routed. Read as data that would
 have meant "the board has no connectivity at all"; read correctly it means the call needs
-setup the SWIG binding does not do. This is the `0/24` shape from `SKILL.md` in `pcbnew`
-form. Fall back to something that is definitely computed: `kicad-cli pcb drc` writes the
+setup the SWIG binding does not do. Treat it as the empty-result failure described in
+[`GUARDS.md`](GUARDS.md). Fall back to something that is definitely computed: `kicad-cli pcb drc` writes the
 ratsnest as `[unconnected_items]` **pairs**, and diffing that list before and after a change
 tells you exactly which connections closed.
 
@@ -213,32 +220,28 @@ pours.
 `island_removal_mode` on a current-path plane had reverted from `NEVER` to `ALWAYS`, and with
 it went **37 mm² from one inner plane and not its mirror** — In1 856.21 mm² against In2
 825.65, a 30.56 mm² imbalance where the two had previously been bit-identical. No layout
-changed. The mechanism is the one under *A via that lands outside its pour*, one level up: a
+changed. The mechanism is the one under *A via that lands outside its pour* below: a
 foreign-net via cuts a corner off both planes, then on one plane the stitching row is that
 plane's own net and re-anchors the orphan, while on the other it is a keepout — so one plane
 keeps the block and the other deletes it. DRC is silent, every geometric audit passes, and the
 decision to disable island removal was recorded in prose with nothing enforcing it.
 
-Two consequences worth carrying:
+Carry these checks:
 
 - **Put zone settings in the audit, not just zone geometry.** Fill settings, pad connection
   mode and island removal are all load-bearing and all revert invisibly — a `.kicad_pro`
   rewrite, a GUI round-trip, or a zone copied from elsewhere.
-
-For planes that spread heat, exposed-pad connection mode, island retention and mirrored
-stitching are thermal design choices rather than generic `pcbnew` mechanics. Apply
-[`THERMALS.md`](THERMALS.md) before setting them or waiving `isolated_copper`/
-`starved_thermal` findings.
-
 - **A track endpoint sitting on top of a zone is not connected to it** if they
   are on different layers. It needs a via. DRC reports this as `track_dangling`
   plus an unconnected item; both point at the same missing via.
-- **A via that lands outside its pour is silently unconnected.** Re-placing an LDO
-  block 3.5 mm moved its `+5V` pins past the edge of the L3 pour; the plane vias
-  then dropped onto bare laminate. Nothing in the placement code knew. After any
-  re-place, assert every plane via actually falls inside a filled area of the zone
-  it is supposed to reach — or add a zone that covers the strays and assert the
-  fill count.
+- **A via that lands outside its pour is silently unconnected.** After any placement change,
+  assert every plane via falls inside a filled area of the zone it is supposed to reach; otherwise
+  move the via or extend the intended zone and assert the resulting fill inventory.
+
+For planes that spread heat, exposed-pad connection mode, island retention and mirrored stitching
+are thermal design choices rather than generic `pcbnew` mechanics. Apply
+[`THERMALS.md`](THERMALS.md) before setting them or waiving `isolated_copper` or
+`starved_thermal` findings.
 
 ## Making a `pcbnew` layout reproducible — there are two causes, not one
 
@@ -292,6 +295,29 @@ bucket a return value or key a cache inside someone else's binary, and the lever
 staging and parallel runs instead. Evidence below is one 4-layer, 169-connection board whose
 `--full` went from never finishing a second round in 44 minutes to 2 min 58 s, byte-identical
 `.kicad_pcb` throughout. Treat the numbers as a worked example, not as thresholds.
+
+**Ship the instrumentation resident, and write it in before you need it.** The question "why did
+this take so long?" must be answerable from an ordinary run. If the answer requires a second,
+instrumented run, then at the moment the question is asked nobody has the data, the expensive run
+has already been paid for once, and the usual outcome is a guess presented as a cause. A generator
+you own should therefore print, on every run:
+
+- **wall time per coarse phase** — placement, routing, zone fill, canonicalisation, save; and
+- **search or retry counts bucketed by OUTCOME**, with mean and share of total.
+
+Both belong in the returned stats as well as in stdout, so a report consumer can compare runs
+without re-instrumenting. Cost is a `perf_counter` pair per call — nanoseconds against operations
+that run for tenths of a second — so there is no measurement case for making it optional, and an
+opt-in flag guarantees it is off exactly when it is wanted.
+
+Keep the phases **coarse and aligned with the decisions they inform**: a breakdown finer than the
+choices a reader could act on is noise. And when you wrap an entry point in a timer, check the
+callers first — a recursive or retried call double-counts, and a bucket that silently sums a
+sub-search into its parent will misattribute the very asymmetry you are hunting.
+
+Report timings as measurements, never as impressions. "Roughly ten minutes" recalled from waiting
+on a job is not a measurement, and stating it as one invites a diagnosis of a phase that was never
+the cost.
 
 **Slice the profile by outcome or phase, not only by function.** A function-level sampler put the
 spatial index at about half the run, which reads as "make the index faster" — and rewriting it,
