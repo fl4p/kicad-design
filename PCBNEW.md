@@ -306,9 +306,16 @@ you own should therefore print, on every run:
 - **search or retry counts bucketed by OUTCOME**, with mean and share of total.
 
 Both belong in the returned stats as well as in stdout, so a report consumer can compare runs
-without re-instrumenting. Cost is a `perf_counter` pair per call — nanoseconds against operations
-that run for tenths of a second — so there is no measurement case for making it optional, and an
-opt-in flag guarantees it is off exactly when it is wanted.
+without re-instrumenting. Default it **on**: a `perf_counter` pair costs ~54 ns, so a few hundred
+coarse-boundary timers are tens of microseconds against operations running for tenths of a second,
+and an opt-in flag guarantees instrumentation is off exactly when it is wanted.
+
+Default-on is not the same as always-on, and three cases justify a deliberate opt-out: a timer
+inside a function called millions of times, where the per-call cost stops being negligible; a
+deadline-driven or concurrent algorithm that timing itself perturbs; and **byte-reproducible
+output**, where wall times printed into a canonical artefact destroy reproducibility unless they
+are explicitly excluded from it. Keep timings out of the canonical artefact by construction, and
+provide the opt-out rather than arguing nobody needs it.
 
 Keep the phases **coarse and aligned with the decisions they inform**: a breakdown finer than the
 choices a reader could act on is noise. And when you wrap an entry point in a timer, check the

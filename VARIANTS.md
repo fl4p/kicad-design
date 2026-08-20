@@ -119,7 +119,12 @@ actually covers before assuming either outcome.
 
 - Where the pin is per-file and the bundle is explicit, put the variant's view of a pinned value in
   a separate module beside the pinned file: the pinned file keeps its reviewed bytes, and only
-  non-manifest code reads the derived view.
+  non-manifest code reads the derived view. This preserves the *incumbent's* guarantee only if the
+  new module is provably unreachable from the incumbent path — assert that, do not assume it — and
+  it extends no attestation to the variant: the behaviour now sits outside the attested set, so a
+  variant that relies on the pinned path still needs its own input bundle and promotion. Moving
+  code out of a manifest keeps the incumbent honest; it never gives the variant coverage it has
+  not earned.
 - Where the bundle is derived by pattern, accept that the variant requires re-promotion and plan
   for it, rather than shipping a workaround that looks like it preserved the manifest.
 - Enumerate what the manifest pins before editing anything. An input bundle normally covers the
@@ -139,6 +144,12 @@ verifying. When the purpose is to *audit an existing* artefact, redirect its boa
 to scratch, or copy the artefact first. (When the entry point's documented contract IS
 generate-then-verify — a release build — overwriting is the intent; the rule below about output
 paths still applies.)
+
+Copy the whole **verification context**, not just the board: the same-stem project file, any
+`.kicad_dru`, the schematic, library tables and the manifest. A lone `.kicad_pcb` in a scratch
+directory loses the rules being graded — the checker then measures against defaults, or against
+whichever project happens to sit beside it, and returns a number that reads like a verdict.
+Either copy the context or use a checker demonstrably incapable of mutating its input.
 
 - Variant-key every **output** path, not only the inputs. A report path left at the incumbent
   default lets the variant overwrite the incumbent's verification evidence with its own verdict —

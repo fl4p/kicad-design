@@ -101,9 +101,11 @@ from the exit code.
 
 ### A router's DRC-clean result is not a design-conformant result
 
-Run the project's own audits over any external router's output before believing it. DRC does not
-know your barriers, your keepouts' intent, or any requirement that lives in the generator rather
-than in the board.
+Run the project's own audits over any external router's output before believing it. DRC enforces
+what has been *serialized* into rules it can read; it cannot know a barrier that exists only as
+design intent, or any requirement that lives in the generator rather than in the board. A barrier
+encoded as native keepout or custom-rule geometry **is** enforceable by DRC — the gap is
+serialization, not capability.
 
 Measured on one 4-layer isolated board, whole-board scout: an external router returned **0 DRC
 violations and 0 unconnected**, routed every net including four gate escapes a second router could
@@ -116,27 +118,44 @@ The converse also holds, so neither layer subsumes the other: on the same projec
 on bare laminate passed all 11 audits** and was caught only by DRC. Report which layer produced a
 verdict; "clean" without naming the checker is not a claim.
 
-Read a router's failure honestly, too. A router that leaves connections unrouted may be refusing
-what it cannot do legally, while one that reports success may have routed the same connections
-through a constraint it was never told about. Unrouted is a better failure than silently
-non-conformant.
+Read a router's failure honestly, too — but do not moralise it. A **reported** unrouted connection
+is easier to reject than a silent violation, because it arrives labelled; that is a statement about
+visibility, not about safety. Both are release blockers, and an open gate-drive, interlock,
+shutdown, sense or return connection can be *more* hazardous than some constraint violations if the
+downstream process does not fail closed. Do not infer motive either: a failed search is not
+evidence that the router declined something as illegal, particularly when the constraint was never
+given to it.
 
 ### Check that each constraint reaches an input the router consumes
 
-A rule area constrains only what its flags say. Measured on the same board: **16 rule areas, every
-one fill-only** — `noFill=True`, `noTrack=False`, `noVia=False` — and 20 of them reached the
-exported DSN. They stop zone fill under the FET bodies and permit tracks and vias everywhere. The
-routing constraints that mattered (layer restriction, bounded escape stubs, entry-band exclusion,
-barrier) existed **only as Python in the generator**.
+The boundary that matters is not "board geometry" — it is **whether the constraint was serialized
+into an input the chosen router actually consumes.** A constraint never serialized into any
+consumed interface is invisible to the external tool; that is a property of the design, not of the
+router.
 
-So before concluding a router "ignored" or "cannot express" a constraint, enumerate what the board
-actually carries and what reaches the exact input the chosen router consumes. A generated board
-whose rules live only in generator code cannot hand them to an external tool. If external routing
-is intended, emit the applicable keepouts, custom rules, or router configuration from the project's
-authoritative constraint model. Then produce and inspect the exact DSN, router configuration, or
-other consumed input and check its boundaries, layers, flags, and precedence. Calibrate that path
-with a known-bad route that the consumed constraint rejects and a legal route that remains accepted;
-a board serialization or reload alone does not prove enforcement by the external router.
+Know what each carrier can hold. DSN is router *input* and can carry exported netclass widths and
+clearances plus native keepouts. SES is returned routing, not a constraint authority. A `.kicad_dru`
+expresses far richer KiCad rules but reaches an external router only if that router parses it.
+Netclasses cannot encode a regional barrier at all. A generator may also emit router-specific
+configuration directly, which is sometimes the only carrier that fits.
+
+A rule area constrains only what its flags say. Measured on one board: **16 rule areas, every one
+fill-only** — `noFill=True`, `noTrack=False`, `noVia=False`. They stop zone fill under the FET
+bodies and permit tracks and vias everywhere. Its exported DSN carried 20 `(keepout` records, all
+on one layer; the two counts are not the same population and were not traced to each other. The
+routing constraints that mattered (layer restriction, bounded escape stubs, entry-band exclusion,
+isolation barrier) existed **only as Python in the generator**.
+
+If external routing is intended, do **not** hand-author the rule areas alongside the generator's
+own constraint logic: two independently written expressions of one constraint will drift, and the
+drift is invisible until a board ships. Keep **one authoritative constraint model** and derive from
+it (a) the emitted board keepouts, custom rules or router configuration, and (b) the audit's
+expectations. Verify after serialization and reload that the emitted carrier still says what the
+model says, then produce and inspect the exact DSN, router configuration, or other input the chosen
+router consumes. Check boundaries, layers, flags and precedence there, not merely that some rule
+area exists in KiCad. Calibrate the consumed-input path with a known-bad route that the constraint
+rejects and a legal route that remains accepted; a board reload alone does not prove enforcement by
+the external router.
 
 ### Diff the project file after any external router runs
 
@@ -145,10 +164,14 @@ A router may rewrite `.kicad_pro`. One measured case relaxed
 downgraded eight DRC severities to warning or ignore — on a run whose own reconciliation pass
 reported nothing to route. It printed a loud banner saying so, which is more than most would.
 
-**Never grade a router's output with the project file that router wrote.** Restore the original
-project, or point the checker at it, then DRC. Otherwise the result is graded against rules the
-tool lowered to fit its own copper, and it will read clean. Treat a relaxed fab floor as a release
-blocker requiring an explicit waiver, never as a routing outcome.
+**Never grade a router's output against an unreviewed rewrite of your rules.** Grade first against
+the original authority, which is what exposes the change at all. A transformation may legitimately
+need a local rule or project migration to represent its copper honestly, so a candidate project can
+become a correct oracle — but only after an independent diff review approves it, and then it is
+graded as a second, named result rather than silently replacing the first. Treat a relaxed fab
+floor as a release blocker requiring an explicit waiver, never as a routing outcome. Note also that
+lowered rules do not *guarantee* a clean read; they only remove the grounds on which the result
+would have been refused.
 
 Keep at least these structures critical:
 
