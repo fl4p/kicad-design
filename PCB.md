@@ -62,24 +62,39 @@ and the route is critical. For thermal cases, apply [`THERMALS.md`](THERMALS.md)
 For generated boards, “manual” means deliberately authoring the route in generator
 source—not editing the generated `.kicad_pcb`.
 
-**Which backend, and it is a size question before it is anything else.** An owned
-pattern router — enumerate candidate polylines per connection, take the first that
-clears — stays the right tool for a *small* board: it is inspectable, its failures
-name a connection you can reason about, and every constraint lives in your own
-generator where a region policy or a barrier rule is a function you can read. It
-does not scale, and the reason is structural rather than a tuning problem: on a
-169-connection board **96 % of its runtime went into calls that FAIL**, because a
-candidate enumeration that succeeds stops at the first clear path while one that
-fails must exhaust every family. Congestion turns successes into failures, so cost
-climbs precisely where the board gets hard.
+**Which backend: judge by difficulty, and judge it from behaviour.** An owned pattern
+router — enumerate candidate polylines per connection, take the first that clears —
+is the right tool while its failures stay *diagnosable*: every constraint is a
+function in your own generator, and an unrouted net names one connection you can
+reason about. Reach for Freerouting when that stops being true.
 
-So: **pattern router for small boards; Freerouting for complex ones, and as initial
-guidance on any board.** The second half of that is the part worth keeping — an
-external router's first pass is useful as *evidence about the placement* even when
-none of its geometry is promoted. Where it struggles, the floor plan is telling you
-something the connection list alone does not, and that reading costs nothing and
-commits nothing. Promotion is a separate decision, governed by the scope and
-manifest machinery below.
+Resist "small board / big board". Difficulty is density, layer count, placement
+quality and how constrained the critical nets are — a large sparse board can be
+easy and a small tightly-packed one impossible — so connection count is a poor
+proxy and this file deliberately gives no threshold on it.
+
+A pattern router's cost profile tells you **where the time goes, not how it grows**.
+Measured on one 4-layer, 169-connection board: 96 % of routing runtime went into
+calls that FAILED (411 failing calls / 128.3 s against 138 successes / 4.9 s),
+because a successful enumeration stops at the first clear polyline while a failing
+one usually — not always — exhausts every family. That makes failures the thing to
+optimise and the thing to watch. It does **not** by itself establish superlinear
+growth: a bounded candidate family with a stable failure fraction produces the same
+96 % at any size, and one pathological family or a few congestion hotspots would
+produce it too.
+
+So the switch signal is behavioural, and you can observe it without a threshold:
+the unrouted list stops being individually diagnosable; the failure set grows
+between rip-up rounds instead of shrinking; or you catch yourself widening
+candidate families instead of fixing placement. Any of those means the enumeration
+has stopped being the right instrument.
+
+**Run Freerouting as initial guidance on any board**, including one the pattern
+router will finish. Its first pass is evidence about the *placement* even when none
+of its geometry is promoted: where it struggles, the floor plan is saying something
+the connection list does not. Discarded scout geometry commits nothing — though
+running and reading it is not free, and promotion is a separate decision governed
+by the scope and manifest machinery below.
 
 For a generated board with mature placement and rules, use Freerouting as the
 default **candidate backend for the project's declared routine scope** when all
