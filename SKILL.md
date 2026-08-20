@@ -24,8 +24,10 @@ Read only the companions required by the task:
 | [`THERMALS.md`](THERMALS.md) | heat, dissipation, temperature, gradients, thermal pads/vias, or temperature-dependent accuracy matter |
 | [`VARIANTS.md`](VARIANTS.md) | one generator must emit multiple boards without changing a qualified incumbent |
 
-Use the helpers in [`scripts/`](scripts/README.md) instead of reimplementing netlist parsing,
-library geometry, reproducibility, ERC/DRC invocation, or autoroute promotion.
+Prefer the helpers in [`scripts/`](scripts/README.md) when they fit the project's existing
+toolchain instead of reimplementing netlist parsing, library geometry, reproducibility, or
+ERC/DRC invocation. Use the autoroute helpers only after the project opts into the external-routing
+workflow in [`PCB.md`](PCB.md).
 
 Run the datasheet preflight only when the task needs datasheet or sourcing evidence. Do not delay a
 purely graphical edit or a local file-format diagnosis with unrelated network and distributor
@@ -178,17 +180,28 @@ K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not
 "$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
-Apply the rungs in order:
+Select the rungs that cover the changed surface and the claim being made, then run the selected
+rungs from inner to outer. Do not turn a focused edit or diagnosis into a release build merely
+because an outer rung exists:
 
-1. **Parse.** Require each command to produce the expected output.
-2. **ERC.** Resolve the effective severity and pin maps before calling zero violations clean.
-3. **Netlist.** Require a plausible component count, parse every net, and compare connectivity with
-   design intent.
-4. **Render.** View the exported schematic or board. Check overlaps, orientation, labels, notes,
-   connector readability, and isolation-barrier interpretation.
-5. **Domain guards.** Run the project-specific checks described in [`GUARDS.md`](GUARDS.md).
-6. **Board and release checks.** Apply [`RELEASE.md`](RELEASE.md), including parity, effective DRC
-   severity, fabrication exports, and artefact binding.
+1. **Parse.** Always parse each modified KiCad artefact and require each invoked command to produce
+   the expected output.
+2. **ERC.** Run after schematic electrical, symbol-pin, power, or rule-severity changes. Resolve the
+   effective severity and pin maps before calling zero violations clean.
+3. **Netlist.** Run after structural schematic or connectivity changes. Require a plausible
+   component count, parse every net, and compare connectivity with design intent.
+4. **Render.** Run when geometry, text, symbols, footprints, zones, or other visible output changes.
+   Check the visual properties relevant to the edit.
+5. **Domain guards.** Run the project-specific checks whose subjects or assumptions changed, as
+   described in [`GUARDS.md`](GUARDS.md).
+6. **Board checks.** Run DRC after any change to board geometry, connectivity, effective
+   rules/severities, or stackup that can affect its result. Examples include tracks, vias, copper
+   and non-copper graphics, text, footprints or pads, zones, outlines, cutouts, slots, keepouts and
+   rule areas. Include parity when board-to-schematic agreement can change.
+7. **Release checks.** Apply [`RELEASE.md`](RELEASE.md), including fabrication exports and artefact
+   binding, only when establishing or re-establishing release readiness. A change to a bound input
+   makes earlier release evidence stale; mark it stale, but do not regenerate release outputs unless
+   the task requires current release evidence.
 
 Do not omit `--exit-code-violations`: ERC and DRC can report violations while exiting zero. Do not
 hide its status behind a pipeline; capture the command status before filtering output or enable
@@ -211,16 +224,18 @@ different object classes. Put guard implementations and their calibrations in
 Treat verification summaries as cached output. Regenerate reports before release and bind them to
 the artefact digest they describe.
 
-**Run the outer rungs whenever you change what the inner ones cover.** Domain guards test what
-someone thought to test; DRC tests what KiCad knows. A board that passed every project audit — all
-of them green, with a calibrated mutation suite behind them — carried a dangling via and a stub of
-dead copper that rung 6 found immediately. The guards were not wrong; the defect was outside the
-question they asked.
+**Run an outer rung whenever its inputs or claimed result may have changed and the task relies on a
+current result from that rung.** Otherwise mark the previous result stale rather than silently
+treating it as current or rebuilding it without need. Domain guards test what someone thought to
+test; DRC tests what KiCad knows. A board that passed every project audit — all of them green, with
+a calibrated mutation suite behind them — carried a dangling via and a stub of dead copper that
+board DRC found immediately. The guards were not wrong; the defect was outside the question they
+asked.
 
-The trap is that the expensive rung looks least affordable exactly when it matters most: after a
-refactor, a build flag, or any change to a guard's scope, when the cheap checks have quietly stopped
-covering what they used to. Budget the full run at that point rather than deferring it, and do not
-report a board as verified on inner-rung evidence alone.
+After a refactor, build flag, or change to a guard's scope, explicitly reassess which checks still
+cover the resulting artefact and rerun every affected rung. Budget the full release workflow only
+when making a release claim; otherwise report the narrower verification scope instead of calling
+the complete board verified.
 
 Run any regenerating verification against a **copy**. An entry point that rebuilds before checking
 will overwrite the artefact it is verifying, including artefacts that are not yet committed.

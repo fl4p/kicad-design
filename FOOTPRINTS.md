@@ -8,7 +8,7 @@ in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 ## Contents
 
 - [Verify the land pattern, not the name](#verify-the-land-pattern-not-the-name)
-- [Keep ordinary vias out of pads](#keep-ordinary-vias-out-of-pads)
+- [Classify via-in-pad by process](#classify-via-in-pad-by-process)
 - [Treat copper, mask, and paste independently](#treat-copper-mask-and-paste-independently)
 - [Test package substitutions on a copy](#test-package-substitutions-on-a-copy)
 - [Enumerate placement candidates](#enumerate-placement-candidates)
@@ -28,18 +28,26 @@ When creating a custom footprint, calibrate the generator against a known land p
 using it for the new one. Require the emitted pad inventory and unioned geometry to match the
 datasheet, including repeated pad numbers and notched or merged same-net lands.
 
-## Keep ordinary vias out of pads
+## Classify via-in-pad by process
 
-KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it
-is simply "connected" — which is how a 0.6 mm via can sit inside an 0805 land
-through a full adversarial review. At reflow the via barrel wicks solder out of
-the joint; the result is a starved joint that looks fine under a microscope.
+KiCad's DRC does **not** flag a via sitting inside a pad. If they share a net it is simply
+"connected." Whether that construction is acceptable depends on the via type and finish, pad and
+paste geometry, assembly method, board side, and the fabricator's and assembler's qualified
+process. An untreated open through-via in a reflowed solderable land can wick solder and starve the
+joint. A filled and capped via-in-pad, a qualified microvia, or another construction explicitly
+qualified by the fabricator and assembler may be intentional. Qualification must identify the via
+dimensions and finish, board side, paste aperture, and assembly method; tenting alone is not
+acceptance evidence.
 
-Write the check yourself — and make it **net-blind**, because the real cases are
-same-net:
+Establish the project's via-in-pad policy before writing a guard. When the declared process forbids
+overlap or requires a keepaway, make the check **net-blind** because the relevant cases are normally
+same-net. Derive the forbidden margin from that process; do not turn the 0.2 mm margin from one
+board into a universal value. Scope reviewed exceptions to the exact via, pad, construction, and
+assembly condition that justify them:
 
 ```python
-bad, pairs = [], 0
+violations, exceptions, pairs, policy_hits = [], [], 0, 0
+forbidden_margin = pcbnew.FromMM(project_via_pad_margin_mm)
 # Derive the layer set. A hardcoded tuple can skip added inner layers while the
 # guard still reports nonzero coverage.
 layers = [l for l in board.GetEnabledLayers().CuStack()]
@@ -49,24 +57,30 @@ for v in vias:                           # build these explicitly, do not assume
         if not shared:
             continue
         pairs += 1                       # count PAIRS, not (via, pad, layer) triples
-        if any(v.GetEffectiveShape(l).Collide(p.GetEffectiveShape(l),
-                                              pcbnew.FromMM(0.2)) for l in shared):
-            bad.append(...)              # no net comparison anywhere
+        policy_hit = any(v.GetEffectiveShape(l).Collide(p.GetEffectiveShape(l),
+                                                        forbidden_margin) for l in shared)
+        if not policy_hit:
+            continue
+        policy_hits += 1
+        record = ...                     # geometry, policy, construction and margin
+        if reviewed_via_in_pad_exception(v, ref, p, shared):
+            exceptions.append(record)
+        else:
+            violations.append(record)    # no net comparison anywhere
 # not `assert` -- python -O deletes it, and this is the only guard in the snippet
 if not pairs:
     raise RuntimeError("UNVERIFIED: no via/pad pairs examined at all")
-print(f"{pairs} via/pad pairs over {len(layers)} copper layers, {len(bad)} hits")
+print(f"{pairs} pairs over {len(layers)} copper layers: {policy_hits} policy hits, "
+      f"{len(violations)} violations, {len(exceptions)} reviewed exceptions")
 ```
 
-Expect such a scan to find more than was reported: one instance typically comes
-with several others (supply and ground vias inside SOIC lands are common) plus a
-tail of near-misses in the 0.03–0.19 mm range. **A user reporting one instance of
-a class of defect is reporting the class** — scan for all of it, and say what the
-scan found.
+When one construction violates the declared process, scan the entire board for the same class and
+report both violations and reviewed exceptions. A user reporting one instance may be reporting a
+repeated process mismatch rather than an isolated coordinate.
 
-When a via genuinely has nowhere to go — two chip lands 0.22 mm apart, a SOIC pin
-0.5 mm from its decoupler — step it *off the axis* rather than squeezing it
-between: run a short stub of track and put the via where there is room.
+When the process forbids via-in-pad and a via has nowhere to go, step it off the axis rather than
+squeezing it between lands: run a short stub of track and put the via where the required clearance
+and routing geometry allow it.
 
 ## Treat copper, mask, and paste independently
 
@@ -97,8 +111,9 @@ for layer, name in ((pcbnew.F_Cu,"copper"), (pcbnew.F_Mask,"mask"), (pcbnew.F_Pa
 ```
 
 When vias intentionally share an exposed land for heat transfer, use the paste, barrel and fab
-construction rules in [`THERMALS.md`](THERMALS.md); an ordinary same-net via in a pad remains a
-manufacturing defect under the net-blind check above.
+construction rules in [`THERMALS.md`](THERMALS.md). For other via-in-pad uses, record the qualified
+construction and assembly process and make the net-blind guard enforce that project policy rather
+than a universal prohibition.
 
 ## Test package substitutions on a copy
 

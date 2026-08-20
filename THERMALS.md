@@ -153,13 +153,13 @@ Treat the exposed land and all same-number pads as a union. An exposed pad and i
 lands often share one pad number; taking only the first or largest pad can omit split or notched
 geometry.
 
-Do not print paste over an open via barrel. Solder can wick away from the exposed land. Shape
-paste apertures around the barrels or specify the exact via protection/fill/cap construction in
-the fab notes, using IPC-4761 terminology when applicable. Plugging, filling and capping are not
-interchangeable; verify fabricator and assembler compatibility with the footprint and paste
-process. A via-in-pad exception must be explicit; the general rule in
-[`FOOTPRINTS.md`](FOOTPRINTS.md) remains net-blind because ordinary same-net vias in pads are
-manufacturing defects.
+Do not print paste over an untreated open via barrel unless the assembly process explicitly
+qualifies that construction; solder can wick away from the exposed land. Shape paste apertures
+around the barrels or specify the exact via protection/fill/cap construction in the fab notes,
+using IPC-4761 terminology when applicable. Plugging, filling and capping are not interchangeable;
+verify fabricator and assembler compatibility with the footprint and paste process. Make every
+via-in-pad construction explicit and apply the process-aware, net-blind classification in
+[`FOOTPRINTS.md`](FOOTPRINTS.md).
 
 Audit zone settings as well as filled geometry. Fill mode, pad connection and island removal can
 change through a GUI or project rewrite without moving the outline. Turning island removal off

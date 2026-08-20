@@ -6,8 +6,8 @@ board-side placement judgement. Route footprint, scripting, verification, releas
 variant work to the concern-specific companions below. Schematic-only work does not need this file.
 
 Everything in `SKILL.md` still applies here: preserve the project's declared
-source authority, climb the whole verification ladder, and write guards that
-fail when they cannot evaluate their input.
+source authority, select the verification rungs that cover the change and the claim, and write
+guards that fail when they cannot evaluate their input.
 
 **This file is the board-layout core.** Concern-specific companions carry the rest, so a task
 pays only for what it needs:
@@ -23,7 +23,7 @@ pays only for what it needs:
 
 ## Contents
 
-- [Scope external autorouting](#scoped-external-autorouting-default-only-after-the-project-opts-in)
+- [Scope external autorouting](#scoped-external-autorouting-opt-in-when-native-routing-stalls)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
 - [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
 - [Declare the stackup](#the-stackup-is-part-of-the-design-not-a-fab-preference)
@@ -31,7 +31,7 @@ pays only for what it needs:
 - [Measure surface-leakage paths](#surface-leakage-measure-the-path-not-the-gap)
 - [Audit isolated-domain clearance](#isolated-designs-the-binding-clearance-is-zone-to-zone-and-drc-is-not-asked)
 
-## Scoped external autorouting: default only after the project opts in
+## Scoped external autorouting: opt in when native routing stalls
 
 Choose routing ownership before choosing a backend:
 
@@ -40,6 +40,14 @@ Choose routing ownership before choosing a backend:
 | **Exploratory** | Probe placement, congestion, possible corridors, via pressure, and whether the current floor plan is plausibly routable | Disposable report only. Never promote it, and do not transplant its coordinates into generator source as if they were reviewed routes |
 | **Critical** | Implement geometry whose shape carries an electrical, thermal, safety, or fabrication requirement | Generator-owned on generated boards; manually authored only on explicitly hand-maintained boards. Route and audit it before making the promotable seed |
 | **Routine** | Complete explicitly allowlisted low-risk connectivity around the finished critical skeleton | Freerouting may propose it; only verified canonical manifest geometry becomes a generator input |
+
+External autorouting is optional. Start with the project's established native, manual, interactive,
+or generator-owned routing path. Consider an exploratory Freerouting run when routing is in scope
+and the native path consumes disproportionate time, repeated rip-up iterations stop reducing the
+unrouted set, or individual failures are no longer diagnosable. A board with more than roughly 50
+routing-relevant nets is a useful prompt to consider it, not a threshold: remaining connection
+count, density, layer count, placement and constraint complexity matter more than net count. Do not
+invoke Freerouting solely because the board crosses that heuristic.
 
 An exploratory route may include critical nets only as a congestion probe. Use
 its existence, corridor choices, via hotspots, and failures to revise placement
@@ -113,7 +121,7 @@ what it cannot do legally, while one that reports success may have routed the sa
 through a constraint it was never told about. Unrouted is a better failure than silently
 non-conformant.
 
-### Check the constraint exists as board geometry before blaming the router
+### Check that each constraint reaches an input the router consumes
 
 A rule area constrains only what its flags say. Measured on the same board: **16 rule areas, every
 one fill-only** — `noFill=True`, `noTrack=False`, `noVia=False` — and 20 of them reached the
@@ -122,11 +130,13 @@ routing constraints that mattered (layer restriction, bounded escape stubs, entr
 barrier) existed **only as Python in the generator**.
 
 So before concluding a router "ignored" or "cannot express" a constraint, enumerate what the board
-actually carries and what the export format transmits. A generated board whose rules live only in
-generator code cannot hand them to any external tool — that is a property of the design, not of the
-router. If external routing is intended, the generator must **emit** routable rule areas
-(track/via keepouts, layer restrictions, guide corridors) as first-class output and audit that they
-are present.
+actually carries and what reaches the exact input the chosen router consumes. A generated board
+whose rules live only in generator code cannot hand them to an external tool. If external routing
+is intended, emit the applicable keepouts, custom rules, or router configuration from the project's
+authoritative constraint model. Then produce and inspect the exact DSN, router configuration, or
+other consumed input and check its boundaries, layers, flags, and precedence. Calibrate that path
+with a known-bad route that the consumed constraint rejects and a legal route that remains accepted;
+a board serialization or reload alone does not prove enforcement by the external router.
 
 ### Diff the project file after any external router runs
 
@@ -188,16 +198,16 @@ between rip-up rounds instead of shrinking; or you catch yourself widening
 candidate families instead of fixing placement. Any of those means the enumeration
 has stopped being the right instrument.
 
-**Run Freerouting as initial guidance on any board**, including one the pattern
-router will finish. Its first pass is evidence about the *placement* even when none
-of its geometry is promoted: where it struggles, the floor plan is saying something
-the connection list does not. Discarded scout geometry commits nothing — though
-running and reading it is not free, and promotion is a separate decision governed
-by the scope and manifest machinery below.
+When the native path is slow or is not converging, consider an exploratory Freerouting run as
+placement guidance even if the native or pattern router will ultimately finish the board. Its first
+pass can provide evidence about congestion and placement even when none of its geometry is
+promoted. Discarded scout geometry commits nothing, but running and reviewing it still has a cost;
+promotion remains a separate, explicit project decision governed by the scope and manifest
+machinery below.
 
-For a generated board with mature placement and rules, use Freerouting as the
-default **candidate backend for the project's declared routine scope** when all
-of these tracked inputs exist:
+For a generated board whose project has explicitly opted into external routing, Freerouting can be
+the **candidate backend for the project's declared routine scope** when placement and rules are
+mature and all of these tracked inputs exist:
 
 - `autoroute.json` with an exact backend, net-class allowlist, layer allowlist,
   styles, limits, seed baseline, reviewed selected-scope/audit policy, and
@@ -217,7 +227,7 @@ defines and audits a different boundary. Freerouting does not place footprints;
 a poor resistor/capacitor grid is a placement problem and must be fixed before
 routing.
 
-For a project that does not yet have `autoroute.json`, use the v2 scaffold. It
+For an opted-in project that does not yet have `autoroute.json`, use the v2 scaffold. It
 supports generated projects through a small language-neutral adapter, existing
 hand-maintained KiCad projects through an immutable board snapshot, and a
 standalone `.kicad_pcb` through explicit board-only authority. The last mode
