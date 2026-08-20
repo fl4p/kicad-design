@@ -1,14 +1,15 @@
 # Datasheet and sourcing preflight
 
-Read this reference before any task that depends on a datasheet, current lifecycle status, stock,
-or distributor data. Skip it for work that can be completed entirely from authoritative local
-files, such as a graphical edit or file-format diagnosis.
+Read this reference before any task that depends on component selection, a datasheet, current
+lifecycle status, stock, inventory, or distributor data. Skip it for work that can be completed
+entirely from authoritative local files, such as a graphical edit or file-format diagnosis.
 
 ## Contents
 
 - [Run the preflight](#run-the-preflight)
+- [Check owned inventory](#check-owned-inventory)
 - [Use a source ladder](#use-a-source-ladder)
-- [Handle distributor APIs safely](#handle-distributor-apis-safely)
+- [Handle inventory and distributor APIs safely](#handle-inventory-and-distributor-apis-safely)
 - [Escalate through web defenses](#escalate-through-web-defenses)
 - [Validate every downloaded PDF](#validate-every-downloaded-pdf)
 - [Read the complete document](#read-the-complete-document)
@@ -18,11 +19,14 @@ files, such as a graphical edit or file-format diagnosis.
 
 Establish what can be read before selecting or substituting a part:
 
-1. Search the project's datasheet cache and other declared local sources.
-2. Identify the exact vendor or distributor document URL; do not guess numeric asset IDs.
-3. Check whether required distributor credentials are present without printing their values.
-4. Confirm that a real browser can launch when a vendor may require one.
-5. Confirm that PDF inspection tools are available.
+1. Identify any user-declared inventory source and whether an already-authorized read-only
+   interface is available.
+2. Search the project's datasheet cache and other declared local sources.
+3. Identify the exact vendor or distributor document URL; do not guess numeric asset IDs.
+4. Check whether required inventory or distributor credentials are present without printing their
+   values.
+5. Confirm that a real browser can launch when a vendor may require one.
+6. Confirm that PDF inspection tools are available.
 
 Example checks:
 
@@ -30,7 +34,7 @@ Example checks:
 rg -i --files datasheets 2>/dev/null | rg -i '<part-family>'
 
 # Print matching variable NAMES only. Keep the match anchored so values cannot leak.
-env | sed -nE 's/^([A-Za-z0-9_]*(DIGIKEY|MOUSER|ELEMENT14|FARNELL)[A-Za-z0-9_]*)=.*/\1=<set>/Ip'
+env | sed -nE 's/^([A-Za-z0-9_]*(INVENTREE|DIGIKEY|MOUSER|ELEMENT14|FARNELL)[A-Za-z0-9_]*)=.*/\1=<set>/Ip'
 
 python3 -c "from playwright.sync_api import sync_playwright
 p=sync_playwright().start(); b=p.chromium.launch(channel='chrome'); print('chrome channel ok'); b.close(); p.stop()"
@@ -50,9 +54,52 @@ Treat reachability as a property of the exact URL, current IP, date, and client.
 page request does not prove that the document host works, and a failed home page does not prove the
 asset host is blocked.
 
+## Check owned inventory
+
+Run this check only for component selection, substitution, or procurement validation. Do not add
+inventory or account work to a graphical edit, fixed-part review, or local file-format diagnosis.
+Before broad-market candidate search:
+
+1. If the user has not declared an inventory source, ask whether one exists and which
+   already-authorized read-only interface may be used. Do not infer that no declaration means an
+   empty inventory.
+2. Before treating a result as an empty inventory, verify that the query was unfiltered, fully
+   paginated, and permission-scoped to the relevant inventory. Otherwise record
+   `empty-source-untrusted` and ask whether another already-authorized source is available.
+3. If a valid query reports that the inventory itself contains no parts, ask whether it is
+   intentionally empty, stale, or uninitialized and whether to proceed without an inventory
+   preference. Record `user-confirmed-empty` only for an intentionally empty source; record
+   `empty-source-untrusted` for a stale or uninitialized source.
+4. If a declared source is inaccessible, do not start authentication or request credentials. Ask
+   whether another already-authorized source is available and record the resulting status.
+5. If a non-empty inventory contains no candidate that satisfies all constraints, record
+   `checked-no-qualified-match` and continue to market search without another inventory prompt.
+
+Ask once per task and reuse the answer unless the user says the inventory changed. Re-query before
+final selection or release when elapsed time could make recorded quantities unreliable. Distinguish
+these evidence types rather than treating them as interchangeable fallback rungs:
+
+- A user-declared system of record such as InvenTree establishes **recorded** on-hand,
+  reserved/allocated, and available-to-project quantities only as of the query timestamp. Require
+  an exact manufacturer, MPN, and package mapping; an internal alias or family name is not enough.
+- Query already-authorized order history when the user declares it as a parts source, but use it
+  only for candidate discovery. It proves that an item was once ordered, not receipt, ownership,
+  remaining quantity, condition, or current availability. If the history itself contains no items,
+  ask whether another inventory source exists rather than inferring that current inventory is
+  empty. Before preferring a historical candidate, use current inventory evidence or ask the user
+  to confirm possession, condition, and available-to-project quantity.
+- A distributor catalogue establishes current market availability and lifecycle claims; the
+  vendor datasheet establishes technical suitability.
+
+Inventory access failure is non-blocking after the required user clarification, but missing
+load-bearing electrical, mechanical, safety, exact-MPN, lifecycle, or datasheet evidence retains
+this skill's fail-closed behavior. Follow [`RELEASE.md`](RELEASE.md) for the inventory decision
+record.
+
 ## Use a source ladder
 
-Escalate from the cheapest authoritative source:
+This ladder obtains authoritative documents and catalogue facts; it does not replace the separate
+inventory evidence types above. Escalate from the cheapest authoritative source:
 
 1. **Project cache.** Prefer a locally stored, provenance-recorded PDF when its revision covers the
    selected ordering code.
@@ -74,10 +121,12 @@ with `Operation not permitted`, especially under `~/Documents`, `~/Desktop`, or 
 Report that as a permissions result and ask the user to copy the file or grant access; do not
 substitute a library item because its directory was unreadable.
 
-## Handle distributor APIs safely
+## Handle inventory and distributor APIs safely
 
-Keep credentials in environment variables, private configuration, or gitignored files. Never put
-keys in a repository, prompt, log, design document, or published artefact.
+Use only already-authorized read-only access for inventory and order-history checks. Keep
+credentials in environment variables, private configuration, or gitignored files. Never put keys,
+tokens, authorization headers, raw account responses, sensitive stock locations, or private
+instance URLs in a repository, prompt, log, design document, or published artefact.
 
 Validate each credential with one real product query and inspect the response body:
 
@@ -93,8 +142,10 @@ Validate each credential with one real product query and inspect the response bo
   inventory.
 
 Use the simplest supported product-search flow. Do not access account-scoped order or list APIs
-merely to obtain a datasheet; those flows may rotate shared refresh tokens or require user
-authorization unrelated to the design task.
+merely to obtain a datasheet or when the user has not declared order history as a parts source;
+those flows may rotate shared refresh tokens or require authorization unrelated to the design task.
+When the user declares order history, query it only through already-authorized read-only access and
+retain its result as historical-purchase evidence rather than current inventory.
 
 ## Escalate through web defenses
 

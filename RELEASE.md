@@ -123,6 +123,26 @@ For every procured line, verify these as separate facts:
 - current stock or an explicitly accepted lead time;
 - datasheet revision supporting the design constants.
 
+For each line selected, substituted, or procurement-validated during the task, preserve the
+inventory decision record made under [`SETUP.md`](SETUP.md). Record:
+
+- the logical source label and query timestamp with timezone, without credentials, sensitive
+  locations, private endpoints, or raw account responses;
+- one lookup outcome: `checked-qualified`, `checked-no-qualified-match`,
+  `user-confirmed-no-source`, `user-confirmed-empty`, `empty-source-untrusted`, or
+  `inaccessible-no-authorized-alternative`;
+- exact manufacturer, MPN, and package mapping for any inventory candidate;
+- quantity required, recorded on-hand, reserved/allocated, and available-to-project;
+- one quantity-evidence state: `recorded-available`, `recorded-insufficient`,
+  `purchase-history-only`, or `unknown`;
+- the selection outcome and the engineering or procurement rationale. If a fully qualifying,
+  sufficiently available owned part was not selected, state the applicable tradeoff such as
+  condition, lifecycle margin, performance margin, assembly risk, or cost.
+
+Release review must verify that inventory preference was applied only after complete engineering,
+package, lifecycle, condition, and quantity qualification. Inventory status and purchase history
+must not fill gaps in those facts.
+
 Do not derive one ordering code by copying another part's packaging suffix. Do not treat a
 datasheet ordering table as proof that a code remains active, and do not treat purchase history as
 proof that stock remains available. When one component fails a coupled constraint such as value ×

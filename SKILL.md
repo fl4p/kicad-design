@@ -15,7 +15,7 @@ Read only the companions required by the task:
 
 | file | read it when |
 |---|---|
-| [`SETUP.md`](SETUP.md) | the task requires a datasheet, current part status, stock, or distributor data |
+| [`SETUP.md`](SETUP.md) | the task selects or substitutes a component, validates procurement, or requires a datasheet, current part status, inventory, stock, or distributor data |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or autorouting |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |
@@ -29,9 +29,10 @@ toolchain instead of reimplementing netlist parsing, library geometry, reproduci
 ERC/DRC invocation. Use the autoroute helpers only after the project opts into the external-routing
 workflow in [`PCB.md`](PCB.md).
 
-Run the datasheet preflight only when the task needs datasheet or sourcing evidence. Do not delay a
-purely graphical edit or a local file-format diagnosis with unrelated network and distributor
-checks.
+Run the datasheet and sourcing preflight only when the task selects or substitutes a component,
+validates procurement, or needs datasheet or sourcing evidence. Do not delay a purely graphical
+edit, fixed-part review, or local file-format diagnosis with unrelated inventory, network, or
+distributor checks.
 
 ## Preserve the declared source authority
 
@@ -242,7 +243,26 @@ will overwrite the artefact it is verifying, including artefacts that are not ye
 
 ## Ground component decisions in current evidence
 
-Run [`SETUP.md`](SETUP.md) before relying on a datasheet or current sourcing information. Then:
+Run [`SETUP.md`](SETUP.md) before relying on a datasheet or current sourcing information.
+Before broad-market search in a component-selection, substitution, or procurement-validation task:
+
+- Derive the mandatory electrical, mechanical, thermal, environmental, safety, compliance,
+  assembly, lifecycle, package, and quantity constraints before evaluating candidates.
+- Check user-owned inventory through a user-declared, already-authorized read-only source and query
+  any similarly authorized order history the user declares for candidate discovery. If no source
+  has been declared, ask the user whether an inventory exists and how it can be queried. If a valid
+  inventory query reports that the inventory itself is empty, ask whether the source is
+  intentionally empty, stale, or uninitialized before proceeding. Ask once per task and reuse the
+  answer; a non-empty inventory with no qualifying match is not an empty inventory.
+- Never initiate authentication or ask for credentials merely to complete the check. If the
+  declared source is inaccessible, ask whether another already-authorized source is available,
+  record the outcome, and continue only after the user answers.
+- Prefer an owned part only when its exact manufacturer, MPN, and package match and it satisfies
+  every mandatory constraint with suitable condition and sufficient available-to-project quantity.
+  Record the lookup outcome and selection rationale when the decision is made; inventory preference
+  never compensates for missing engineering or lifecycle evidence.
+
+Then:
 
 - Build a requirement ledger for every mandatory or explicitly recommended supply, bypass,
   reference, protection, sequencing, and exposed-pad requirement. Map each item to refdeses and
