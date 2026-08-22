@@ -1,8 +1,9 @@
 # Datasheet and sourcing preflight
 
-Read this reference before any task that depends on component selection, a datasheet, current
-lifecycle status, stock, inventory, or distributor data. Skip it for work that can be completed
-entirely from authoritative local files, such as a graphical edit or file-format diagnosis.
+Read this reference before any task that depends on component selection; circuitry, placement, or
+layout around a critical component as defined in `SKILL.md`; a datasheet, reference design or
+evaluation board; current lifecycle status; or stock, inventory, or distributor data. Skip it only
+for purely graphical edits or file-format diagnoses that do not depend on device evidence.
 
 ## Contents
 
@@ -13,18 +14,21 @@ entirely from authoritative local files, such as a graphical edit or file-format
 - [Escalate through web defenses](#escalate-through-web-defenses)
 - [Validate every downloaded PDF](#validate-every-downloaded-pdf)
 - [Read the complete document](#read-the-complete-document)
+- [Study reference implementations](#study-reference-implementations)
 - [Fail closed](#fail-closed)
 
 ## Run the preflight
 
-Establish what can be read before selecting or substituting a part:
+Establish what can be read before selecting or substituting a part or finalizing circuitry,
+placement, or layout around a critical component:
 
 1. Identify any user-declared inventory source and whether an already-authorized read-only
-   interface is available.
+   interface is available when procurement is in scope.
 2. Search the project's datasheet cache and other declared local sources.
-3. Identify the exact vendor or distributor document URL; do not guess numeric asset IDs.
+3. Identify the exact vendor product page and document URLs for the datasheet and relevant
+   reference-design or evaluation-board collateral; do not guess numeric asset IDs.
 4. Check whether required inventory or distributor credentials are present without printing their
-   values.
+   values when procurement is in scope.
 5. Confirm that a real browser can launch when a vendor may require one.
 6. Confirm that PDF inspection tools are available.
 
@@ -101,16 +105,17 @@ record.
 This ladder obtains authoritative documents and catalogue facts; it does not replace the separate
 inventory evidence types above. Escalate from the cheapest authoritative source:
 
-1. **Project cache.** Prefer a locally stored, provenance-recorded PDF when its revision covers the
-   selected ordering code.
-2. **Official vendor document URL.** Follow the vendor's document link or a distributor-provided
-   URL rather than inventing a path.
+1. **Project cache.** Prefer locally stored, provenance-recorded documents when their revisions
+   cover the selected ordering code and board revision.
+2. **Official vendor product page and document URLs.** Follow the vendor's datasheet, application
+   note, reference-design, and evaluation-board links rather than inventing paths. Retrieve the
+   user guide, schematic, BOM, layout, and design files when available.
 3. **Distributor product API.** Use it to resolve exact MPNs, lifecycle, stock, and official
    datasheet links. Take electrical specifications from the PDF, not the catalogue row.
 4. **Vendor asset host.** Try the exact media/CDN host serving the document; web defenses are often
    deployed per hostname.
 5. **Real browser.** Use it when a direct HTTP client is rejected or receives a challenge.
-6. **User-provided document.** Ask for the PDF when the available routes cannot establish the
+6. **User-provided document.** Ask for the document when the available routes cannot establish the
    needed evidence.
 
 Record the exact URL and route used. Label a mirror or footprint vendored from an existing board as
@@ -254,6 +259,35 @@ do not renumber until the independent sources agree.
 
 An absence claim needs evidence. Cite the pages and vocabulary checked, or say “not found in this
 search; full-sheet absence not established.”
+
+## Study reference implementations
+
+Apply the critical-component test in `SKILL.md`; the device need not already be labelled critical.
+Then:
+
+1. Inspect the current datasheet's typical-application circuit and the vendor product page's design
+   resources for the exact device or applicable family.
+2. Select and inspect the official application notes, reference designs, and evaluation-board user
+   guides, schematics, BOMs, layouts, or design files that are relevant and comparable to the
+   project's used functions and operating conditions. Verify the device variant, silicon revision,
+   board revision, and operating conditions before treating them as comparable. Record what was
+   examined and the basis for excluding superficially related collateral.
+3. Compare the proposed design with those implementations across the applicable supply, support,
+   control, configuration, protection, thermal, grounding, return-path, and layout-sensitive pins
+   and paths. For a complex device, this does not require reviewing unused functional I/O or every
+   reference platform in the product family.
+4. Record intentional differences that affect a project requirement and why the project's
+   operating conditions, interfaces, cost, assembly, compliance, or performance targets justify
+   them. An unexplained omission is not an intentional simplification.
+5. Check current errata and document revisions before copying a pattern. Evaluation boards may be
+   feature-rich lab platforms, target different conditions, use obsolete parts, or omit
+   production protection and compliance measures.
+
+Treat reference implementations as strong design evidence, not normative requirements. The current
+datasheet and errata establish device constraints; the project's requirements establish fitness.
+If no relevant vendor implementation is available, record the product page, search terms, and
+routes checked and mark the comparison `unverified`. Missing implementation collateral is blocking
+only when it leaves a load-bearing design claim unsupported.
 
 ## Fail closed
 

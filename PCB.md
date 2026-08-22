@@ -14,6 +14,7 @@ pays only for what it needs:
 
 | file | read it when |
 |---|---|
+| [`SETUP.md`](SETUP.md) | the task designs or reviews circuitry, placement, or layout around a component that meets `SKILL.md`'s device-evidence criticality test |
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing board audits, geometry checks or calibration harnesses |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a package |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or a slow generator |

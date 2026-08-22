@@ -15,7 +15,7 @@ Read only the companions required by the task:
 
 | file | read it when |
 |---|---|
-| [`SETUP.md`](SETUP.md) | the task selects or substitutes a component, validates procurement, or requires a datasheet, current part status, inventory, stock, or distributor data |
+| [`SETUP.md`](SETUP.md) | the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires a datasheet, reference design, eval-board documentation, current part status, inventory, stock, or distributor data |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or autorouting |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |
@@ -29,10 +29,17 @@ toolchain instead of reimplementing netlist parsing, library geometry, reproduci
 ERC/DRC invocation. Use the autoroute helpers only after the project opts into the external-routing
 workflow in [`PCB.md`](PCB.md).
 
-Run the datasheet and sourcing preflight only when the task selects or substitutes a component,
-validates procurement, or needs datasheet or sourcing evidence. Do not delay a purely graphical
-edit, fixed-part review, or local file-format diagnosis with unrelated inventory, network, or
-distributor checks.
+Run the device-evidence and sourcing preflight when the task selects or substitutes a component;
+designs or reviews circuitry, placement, or layout around a critical component; validates
+procurement; or needs datasheet, reference-circuit, or sourcing evidence. For this preflight, a
+component is critical when its support circuit, location, orientation, thermal path, return path, or
+routing materially controls an electrical, thermal, safety, mechanical, assembly, EMC, or
+routability requirement. Apply the same test during board floorplanning; the component need not be
+pre-labelled critical.
+
+Do not delay a purely graphical edit or local file-format diagnosis with unrelated inventory,
+network, or distributor checks. A fixed-part circuit or placement review needs device evidence, but
+not inventory or distributor checks unless procurement is in scope.
 
 ## Preserve the declared source authority
 
@@ -267,6 +274,12 @@ Then:
 - Build a requirement ledger for every mandatory or explicitly recommended supply, bypass,
   reference, protection, sequencing, and exposed-pad requirement. Map each item to refdeses and
   nets in the emitted design.
+- For each critical component, inspect the vendor's typical-application circuits and the relevant,
+  comparable official reference designs or evaluation-board schematic, BOM, layout, and user
+  guide. Compare the applicable support circuitry and control or layout-sensitive pins and paths
+  with the proposed design, and record intentional deviations that affect a project requirement.
+  Treat these implementations as evidence, not requirements; the current datasheet, errata, and
+  the project's actual operating conditions remain authoritative.
 - Extract value, unit, test conditions, and temperature corner as one tuple. Do not copy digits
   without the unit column or infer a pin's impedance from its name.
 - Use typical values for nominal estimates only. Combine min/max device limits, supply tolerance,
