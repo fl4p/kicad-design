@@ -16,7 +16,8 @@ Start with:
 git status --short
 git log --oneline -5
 git diff --check
-git diff -- SKILL.md SETUP.md RELEASE.md FOOTPRINTS.md PCB.md GUARDS.md scripts/ drafts/REVIEW-BRIEF.md
+git diff -- README.md SKILL.md SETUP.md SCHEMATIC.md PCB.md PCBNEW.md FOOTPRINTS.md \
+  GUARDS.md THERMALS.md RELEASE.md scripts/ drafts/REVIEW-BRIEF.md
 python3 -m pytest -q scripts/test_*.py
 K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
 KP=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
@@ -31,50 +32,42 @@ bare command.
 Read the changed file and every companion it relies on. Check cross-references in both directions;
 a correct rule in one file does not repair a contradictory example elsewhere.
 
-## Verified baseline at 2026-08-20
+## Reviewed change set at 2026-08-23
 
 Re-run these probes before the review:
 
-- Git HEAD was `6ef7e99 docs: prefer qualified inventory parts`.
-- The five most recent commits were:
-  - `6ef7e99 docs: prefer qualified inventory parts`
-  - `0521815 docs: plan region-scoped KRT rules`
-  - `14e7f2d docs: tighten routing and variant guidance`
-  - `79c8260 docs: make KiCad checks project-aware`
-  - `4f78b36 docs: refocus kicad design skill`
+- The independent review covered `5ce9fd2 docs: tighten KiCad design review gates` and
+  `90aac2d docs: require functional geometry evidence for PCB release`.
+- Audit every commit after `90aac2d` as the corrective delta; do not assume the corrections are
+  valid merely because they respond to a finding.
 - `kicad-cli --version` and `pcbnew.GetBuildVersion()` both reported 10.0.5.
-- Four `scripts/test_*.py` files collected 65 tests.
-- The core documents were 301 lines in `SKILL.md`, 623 in `PCB.md`, 267 in `SETUP.md`, and
-  320 in `GUARDS.md` before the current working-tree edits.
+- Recount `scripts/test_*.py` and collected tests rather than relying on a recorded total.
 
 Do not copy these values into findings without re-running the commands.
 
-## First priority: audit the current diff
+## First priority: audit the corrective delta
 
-The current inventory-guidance work extends `6ef7e99`. Check that it does all of the following
-without broadening unrelated tasks:
+Reproduce the false-PASS probes and check that the corrective delta does all of the following
+without weakening neighboring workflows:
 
-1. Evidence class follows the record's provenance rather than the application that stores it.
-   Imported order-history quantities must not become physical-stock claims merely because they are
-   represented as InvenTree stock items.
-2. Exact-MPN and family absence checks cover every fully paginated identity-bearing search surface
-   that the interface exposes, preserve unavailable or failed surfaces, and label the conclusion
-   exhaustive or scoped within the declared source. An alias-only search must not establish
-   absence.
-3. Inventory candidates are classified as exact replacements, requirement-preserving value or
-   package changes, topology-changing alternatives, or unsuitable.
-4. Power conversion, voltage regulation, voltage supervision, series load switching, gate drive,
-   and isolation remain distinct circuit roles and requirement sets. A multifunction part may
-   satisfy several verified roles, but a part that changes the power architecture must not be
-   called a drop-in substitute.
-5. Inventory preference remains subordinate to electrical, mechanical, thermal, safety,
-   lifecycle, condition, and available-to-project requirements.
-6. The workflow still avoids credentials, authentication, and account-scoped access that the user
-   did not authorize.
+1. Parity-enabled DRC fails closed without same-stem project/schematic context, independently parses
+   a fresh annotated netlist, rejects parity-load diagnostics and requires footprint-error evidence.
+2. DRC, artifact guards and exports consume one finalized zone snapshot; refill or stale-zone
+   handling cannot silently create different accepted candidates.
+3. A canonical release manifest binds project/rule files, hierarchy, resolved libraries, generator,
+   variants, route/domain inputs, tool versions, waivers and outputs—not only root schematic/board.
+4. Manufacturability, functional validation, revision finality and order authorization remain four
+   independent states; an experimental waiver cannot convert `UNVERIFIED` into functional `PASS`.
+5. Board, external construction-model and physical thermal evidence have explicit carriers and
+   authorities; unrepresented paths remain `UNVERIFIED`.
+6. Schematic calibration covers every supported family/dispatch/polarity/package branch.
+7. Intentional board-only footprint-hosted `Edge.Cuts` remain legal under explicit mechanical
+   authority while unowned proxies fail.
+8. Provisional pre-gate PCB work is limited to outline/mechanical studies independent of unresolved
+   connectivity.
 
-Look for neighboring claims introduced with the fix. In particular, test whether the new wording
-works for inventory systems whose schemas expose equivalent information under different record
-names.
+Look for neighboring claims introduced with the fix, especially board-only workflows, global
+library resolution, project-variable overrides and external construction models.
 
 ## Second priority: false-PASS behavior
 
@@ -142,8 +135,7 @@ Confirm these, but do not report them as new unless the current text understates
 
 Do not re-report these without new evidence:
 
-- The repository now has four test files and 65 collected tests; the old “no test suite” statement
-  is no longer current.
+- The repository has a collected test suite; the old “no test suite” statement is no longer current.
 - `check_rail_orientation` is no longer present in the current skill or helper code.
 - The PDF exact-MPN example uses `rg --fixed-strings` rather than a regex MPN search.
 - The browser preflight and persistent-context example both currently use headless Chrome.

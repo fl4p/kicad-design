@@ -206,10 +206,12 @@ threshold to the current board.
 
 Keep enclosure-controlled outlines, slots, cutouts, apertures and component datums under one
 mechanical authority, then check the saved and reparsed board rather than the generator constants
-that requested them. Inventory the expected board-native primitive classes, require each contour to
-be closed, and measure count, dimensions and position relative to named datums. A helper footprint
-with no schematic counterpart is not an acceptable final representation of a board-level routed
-slot or cutout.
+that requested them. Inventory every permitted `Edge.Cuts` primitive carrier, require each contour
+to be closed, and measure count, dimensions and position relative to named datums. An intentional
+board-only footprint may host a reusable local routed-slot or cutout contour when the footprint is
+the declared mechanical authority, is marked not-in-schematic, is protected from annotation/update
+replacement, and the emitted contour is audited. Reject unowned or unverified helper-footprint
+proxies, not board-only mechanical footprints as a class.
 
 Calibrate each mechanical guard by removing one feature, shifting one beyond its tolerance and
 adding an unexpected feature; require stable failure IDs that identify the feature and datum. Also
@@ -227,6 +229,11 @@ leaving the dominant path uninterrupted, or adding a material or copper bypass. 
 must emit its own stable failure ID even though the mechanical guard remains green. This mutation
 must be derived independently from the physical requirement; copying the generator's own labels or
 coordinates into the audit repeats one assumption rather than testing it.
+
+Keep a carrier/authority ledger for domain paths. A board artifact guard can observe saved board
+objects and board-represented material; connector, shield, fastener, enclosure or other assembly
+paths require their own release-bound construction authority or physical evidence. If a carrier is
+absent from the observed subject, report it `UNVERIFIED` rather than treating it as absent in reality.
 
 ## Guard visual geometry by object class
 

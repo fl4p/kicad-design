@@ -3,8 +3,8 @@
 
 Project-agnostic. Nothing here knows about any particular board.
 
-The two false PASSes this exists to close
------------------------------------------
+False PASSes this exists to close
+---------------------------------
 1.  **``--exit-code-violations`` is not optional.** Without it,
     ``kicad-cli sch erc`` and ``pcb drc`` write every violation into the report
     and then **exit 0**. Measured: a board carrying 175 DRC violations exits 0
@@ -24,6 +24,12 @@ The two false PASSes this exists to close
     So :func:`severity_report` is **tri-state**. A missing or empty map is
     ``UNVERIFIED``, never clean.
 
+3.  **A requested parity check may not run.** KiCad 10 can print that it
+    failed to fetch the schematic netlist, still write an all-zero DRC report,
+    and exit zero. Parity therefore requires a same-stem project/schematic,
+    an independently exported and parsed annotated netlist, no parity-failure
+    diagnostic, and the report's footprint-error summary.
+
 Do not lead with "diff against defaults": the rules most likely to bite are
 themselves stock defaults, so a diff reports no difference and the check that
 was supposed to catch them fires never.
@@ -42,6 +48,7 @@ import sys
 from pathlib import Path
 
 from _util import read_utf8 as _read_utf8
+from kicad_netlist import NetlistError, parse_netlist
 
 __all__ = [
     "VerifyError",
@@ -156,6 +163,10 @@ def find_kicad_cli(explicit=None):
 _COUNT_DRC = re.compile(r"\*\*\s*Found\s+(\d+)\s+(.+?)\s*\*\*", re.I)
 _COUNT_ERC = re.compile(
     r"ERC messages:\s*(\d+)\s+Errors\s+(\d+)\s+Warnings\s+(\d+)", re.I)
+_PARITY_FAILURE = re.compile(
+    r"failed to fetch schematic netlist|schematic parity tests require",
+    re.I,
+)
 
 
 def _counts_from_report(path, kind=None):
@@ -297,23 +308,84 @@ def run_erc(schematic, report="erc.rpt", cli=None):
     return rc, counts
 
 
+def _verify_parity_context(board, cli):
+    """Require and independently parse the schematic context used by parity.
+
+    KiCad can return a clean DRC report and exit zero after failing to load the
+    schematic netlist for parity.  Prove that the same-stem project context
+    exists and that a fresh, nonempty annotated netlist can be exported before
+    asking DRC for the parity comparison.
+    """
+    board = Path(board)
+    project = board.with_suffix(".kicad_pro")
+    schematic = board.with_suffix(".kicad_sch")
+    missing = [p.name for p in (project, schematic) if not p.is_file()]
+    if missing:
+        raise VerifyError(
+            "schematic parity for %s requires same-stem project context; "
+            "missing: %s. Use parity=False only for an explicitly authorized "
+            "board-only workflow" % (board, ", ".join(missing)))
+
+    with tempfile.TemporaryDirectory(prefix="kicad-parity-") as raw:
+        exported = Path(raw) / "parity.net"
+        rc, out, err = _run([
+            cli, "sch", "export", "netlist", "--format", "kicadsexpr",
+            "-o", str(exported), str(schematic),
+        ])
+        if rc != 0:
+            raise VerifyError(
+                "could not export the fresh schematic netlist required for "
+                "parity (rc=%d): %s" % (rc, (err or out)[:400]))
+        if not exported.is_file():
+            raise VerifyError(
+                "schematic netlist export returned success but did not write "
+                "%s" % exported)
+        try:
+            netlist = parse_netlist(exported, min_components=1)
+        except NetlistError as exc:
+            raise VerifyError(
+                "fresh schematic netlist for parity is empty, unannotated, "
+                "or unparseable: %s" % exc) from exc
+        unannotated = sorted(ref for ref in netlist.components if "?" in ref)
+        if unannotated:
+            raise VerifyError(
+                "fresh schematic netlist for parity is not fully annotated; "
+                "unresolved references: %s"
+                % ", ".join(unannotated[:12]))
+
+
 def run_drc(board, report="drc.rpt", parity=True, cli=None):
-    """DRC with --severity-all [--schematic-parity] --exit-code-violations.
+    """DRC with zone refill, violation status, and fail-closed parity.
 
     `parity` defaults True: footprint/symbol field mismatches are invisible
     without it, and they are how a schematic-only edit silently leaves the
-    board contradicting the schematic.
+    board contradicting the schematic.  True requires same-stem `.kicad_pro`
+    and `.kicad_sch` files plus a fresh parseable annotated netlist.  Pass
+    False only for an explicitly authorized board-only workflow.
     """
+    board = Path(board)
+    if not board.exists():
+        raise VerifyError("board %s does not exist" % board)
     cli = find_kicad_cli(cli)
-    cmd = [cli, "pcb", "drc", "--severity-all", "--exit-code-violations",
-           "-o", str(report)]
+    if parity:
+        _verify_parity_context(board, cli)
+    cmd = [cli, "pcb", "drc", "--severity-all", "--refill-zones",
+           "--exit-code-violations", "-o", str(report)]
     if parity:
         cmd.append("--schematic-parity")
     cmd.append(str(board))
-    if not Path(board).exists():
-        raise VerifyError("board %s does not exist" % board)
-    rc, _out, err = _run_producing(cmd, report)
+    rc, out, err = _run_producing(cmd, report)
+    diagnostics = ((out or "") + "\n" + (err or "") + "\n" +
+                   _read_utf8(report, VerifyError))
+    if parity and _PARITY_FAILURE.search(diagnostics):
+        raise VerifyError(
+            "KiCad did not execute schematic parity even though DRC produced "
+            "a report: %s" % diagnostics.strip()[:400])
     counts = _counts_from_report(report, kind="drc")
+    if parity and "footprint errors" not in counts:
+        raise VerifyError(
+            "%s is missing the 'footprint errors' summary required to prove "
+            "that schematic parity ran" % report)
     if rc not in (0, 5):
         raise VerifyError("kicad-cli pcb drc failed (rc=%d): %s" % (rc, err[:400]))
     return rc, counts

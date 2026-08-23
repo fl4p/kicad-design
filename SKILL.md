@@ -194,7 +194,8 @@ K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not
 "$K" sch export pdf --black-and-white --exclude-drawing-sheet -o out.pdf x.kicad_sch
 "$K" sch erc --severity-all --exit-code-violations -o erc.rpt x.kicad_sch
 "$K" sch export netlist --format kicadsexpr -o netlist.net x.kicad_sch
-"$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
+"$K" pcb drc --severity-all --refill-zones --schematic-parity \
+     --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
 Select the rungs that cover the changed surface and the claim being made, then run the selected

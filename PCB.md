@@ -39,8 +39,10 @@ pays only for what it needs:
 Before creating the floorplan, require the schematic-capture completion gate in
 [`SCHEMATIC.md`](SCHEMATIC.md) to pass. Do not start or delegate PCB placement from a connectivity-
 only schematic, generic-symbol draft, stale netlist, or schematic whose rendered semantic review is
-still open. If the user explicitly requests a parallel mechanical or placement study, label it
-provisional and do not promote it to the implementation board until the gate passes.
+still open. If the user explicitly requests a parallel outline or mechanical study that does not
+depend on unresolved connectivity, label it provisional, keep it separate, and do not promote it to
+the implementation board until the gate passes. Critical-footprint placement starts only after the
+gate.
 
 Before committing a new or materially changed critical floorplan, create a review artifact that
 shows the proposed critical footprints. Use either an image or a provisional `.kicad_pcb`. An
@@ -104,10 +106,12 @@ drilled-hole and side-specific geometry:
   evidence of bad placement. Diagnose the cause rather than adding unsafe jumpers or lowering
   completion criteria.
 
-Represent board-level routed slots and cutouts with board-native geometry such as closed
-`Edge.Cuts` contours, not standalone helper footprints with no schematic counterpart. Keep their
-outline, count and datums under one mechanical authority, then remeasure those properties from the
-saved board; generator constants alone do not prove the enclosure interface that will be fabricated.
+Represent board-level routed slots and cutouts as closed `Edge.Cuts` contours under a declared
+mechanical authority. Direct board drawings are valid; an intentional board-only footprint is also
+valid when it owns a reusable local contour, is marked not-in-schematic, is protected from
+annotation/update replacement, and its emitted contour is audited. Reject only unowned or
+unverified helper-footprint proxies. Remeasure outline, count and datums from the saved board;
+generator or footprint constants alone do not prove the interface that will be fabricated.
 
 Classify the requested outcome before routing:
 

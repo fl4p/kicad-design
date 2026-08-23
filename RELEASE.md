@@ -8,7 +8,7 @@ when temperature or heat flow is load-bearing.
 
 - [Run board verification](#run-board-verification)
 - [Resolve effective rule maps](#resolve-effective-rule-maps)
-- [Separate manufacturable, fit for purpose and final](#separate-manufacturable-fit-for-purpose-and-final)
+- [Keep four release states independent](#keep-four-release-states-independent)
 - [Export and measure fabrication data](#export-and-measure-fabrication-data)
 - [Verify BOM and sourcing evidence](#verify-bom-and-sourcing-evidence)
 - [Bind outputs to their source artefact](#bind-outputs-to-their-source-artefact)
@@ -19,7 +19,8 @@ Treat a green DRC as “no active rule reported a violation,” not as proof tha
 
 ```sh
 K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
-"$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
+"$K" pcb drc --severity-all --refill-zones --schematic-parity \
+     --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
 Grade from an isolated same-stem project bundle: the candidate `.kicad_pcb` and authoritative
@@ -30,8 +31,20 @@ board and schematic. To grade a differently named candidate, copy it under the a
 inside that scratch bundle. Do not run DRC on `candidate.kicad_pcb` beside `board.kicad_pro` and
 assume KiCad applied the intended rule and parity authority.
 
+Create one finalized release candidate in that scratch bundle. Run the project's pinned zone
+finalizer and in-memory semantic-settle gate, save once, and bind the resulting board digest and
+per-zone geometry snapshot. Run DRC, artifact guards, Gerber/drill export and measurements from
+that exact saved board. If a consumer refills zones, prove its per-zone filled geometry equals the
+bound snapshot; a second independently accepted fill is a different candidate, not corroboration.
+Any detected refill difference invalidates the reports and exports and returns the release to the
+finalization step.
+
 - Keep `--exit-code-violations`; without it DRC can write violations and exit zero.
-- Keep `--schematic-parity`; it checks that the board still agrees with the schematic.
+- Keep `--schematic-parity`; it checks that the board still agrees with the schematic. Require a
+  fresh independently parsed annotated netlist and the DRC report's footprint-error summary; KiCad
+  can otherwise print that parity could not run while returning a clean DRC report.
+- Keep `--refill-zones`, and compare the resulting fill with the candidate's bound semantic
+  snapshot. Do not silently allow DRC and fabrication export to consume different fills.
 - Capture the command status before piping output, and judge the report contents as well.
 - Re-run the layout generator after every schematic change that can alter values, fields,
   footprints, or connectivity.
@@ -57,17 +70,24 @@ Do not rely only on a diff against defaults: a load-bearing rule may already def
 Enumerate first, then use the diff to expose project-specific changes. Restore unintended project
 file mutations before generating the reports bound to the release.
 
-## Separate manufacturable, fit for purpose and final
+## Keep four release states independent
 
-Answer three questions independently:
+Report four independent states; never collapse them into one “ready” verdict:
 
-- **Manufacturable:** can the fab build the board from the supplied geometry, stackup, drill, and
-  other outputs?
-- **Fit for purpose:** do the emitted electrical, thermal, mechanical, fluidic, safety and EMC
-  structures satisfy the load-bearing design requirements, or carry an explicit prototype waiver
-  naming the unverified quantity and acceptance experiment?
-- **Final and approved to order:** is this the exact revision the user wants fabricated, including
-  silkscreen, hazard markings, revision identifiers, accepted waivers and all pending board changes?
+- **Manufacturability — `PASS`, `FAIL`, or `UNVERIFIED`:** can the fab build the supplied geometry,
+  stackup, drill and other outputs?
+- **Functional validation — `PASS`, `FAIL`, or `UNVERIFIED`:** do the emitted electrical, thermal,
+  mechanical, fluidic, safety and EMC structures satisfy every load-bearing design requirement?
+- **Revision finality — `FINAL` or `DRAFT`:** is this the intended revision, including silkscreen,
+  hazard markings, identifiers, accepted waivers and all requested board changes?
+- **Order authorization — `AUTHORIZED` or `NOT AUTHORIZED`:** has the user or delegated release
+  authority approved ordering this exact bound candidate for its stated purpose and quantity?
+
+A waiver never changes `UNVERIFIED` or `FAIL` into functional `PASS`. It may authorize a deliberately
+scoped experiment while functional validation remains `UNVERIFIED`, provided the waiver names the
+unknown quantity, measurement, decision criterion, quantity/revision limit and accepting authority.
+Describe that result as an authorized experimental order, not as fit for purpose, design-released,
+or functionally validated.
 
 Classify BOM, assembly, integration, and documentation findings separately. A board can be
 manufacturable while still blocked from ordering, and a sourcing problem does not necessarily make
@@ -85,7 +105,7 @@ Run the actual exports:
 
 ```sh
 K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
-"$K" pcb export gerbers --output fab  x.kicad_pcb
+"$K" pcb export gerbers --check-zones --output fab x.kicad_pcb
 "$K" pcb export drill   --output fab/ x.kicad_pcb
 "$K" sch export bom --output fab/bom.csv --group-by 'Value,Footprint,MPN' \
      --fields 'Reference,Value,Footprint,MPN,Manufacturer,${QUANTITY}' x.kicad_sch
@@ -174,11 +194,25 @@ voltage × dielectric × package, sweep the complete BOM by that predicate.
 
 ## Bind outputs to their source artefact
 
-Record a cryptographic digest of the exact source schematic and board alongside fabrication and
-assembly outputs. Commit or otherwise archive them together. Regenerate after any source change or
-GUI serialization step; ordering-only churn can alter bytes without changing connectivity, so a
-verbal revision label cannot prove which source produced the released copper.
+Create one canonical, path-sorted release-input manifest and hash the manifest itself. Give every
+input an immutable identity or cryptographic digest. Include at least:
 
-Record the KiCad version, active rule maps, generator revision, and export commands with the
-release. Treat reports and fabrication files as cached outputs that expire when any bound input
-changes.
+- the finalized board, root and hierarchical schematic sheets, `.kicad_pro`, `.kicad_dru`, project
+  variables and all CLI `-D` values;
+- library tables and the exact project/global symbol, footprint and 3D-model files actually
+  resolved, using archived immutable copies when a global nickname could later resolve elsewhere;
+- generator source/revision and generated-input data, selected variants, route manifest and
+  applicator identity;
+- stackup/construction data plus any domain model, MCAD/enclosure, connector, shield, fastener or
+  other external input consumed by a load-bearing guard; and
+- pinned KiCad/finalizer/tool versions, commands, configuration and approved waivers.
+
+Record the manifest digest inside or alongside every DRC/ERC report, artifact-guard result,
+fabrication output set, assembly output and order authorization. Commit or otherwise archive the
+manifest, its resolvable inputs and outputs together. A report bound only to the root schematic and
+board is insufficient: changing `.kicad_pro` severity, a hierarchical sheet, a rule file or a
+library can change the verdict or copper while those two digests remain unchanged.
+
+Regenerate after any bound-input change or GUI serialization step. Treat reports and fabrication
+files as cached outputs that expire when the manifest digest changes; a verbal revision label
+cannot prove which inputs produced the released copper.

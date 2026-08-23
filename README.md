@@ -12,8 +12,9 @@ guard detail it does not need:
 
 | File | Read it when |
 |---|---|
-| `SKILL.md` | always — shared practice plus schematic capture |
+| `SKILL.md` | always — shared workflow, source authority and verification ladder |
 | `SETUP.md` | before **any** task that will read a datasheet, schematic-only included — can this machine actually fetch and validate them? Run it at the start, not when you hit the wall. |
+| `SCHEMATIC.md` | capturing, generating, editing, reviewing or declaring completion of a schematic, and before PCB implementation |
 | `GUARDS.md` | writing or reviewing generator checks, audits, validators or calibration harnesses |
 | `PCB.md` | the task touches board layout, zones, stackup, creepage or autorouting |
 | `PCBNEW.md` | scripting `pcbnew`, reproducibility or generator performance |

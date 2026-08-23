@@ -84,8 +84,12 @@ before trusting generated connectivity.
 
 ### Run checks with `kicad_verify.py`
 
-Use `run_erc()` and `run_drc()` so `--exit-code-violations`, report freshness, and required report
-labels remain load-bearing. Treat exit zero as command completion, then judge the structured report.
+Use `run_erc()` and `run_drc()` so `--exit-code-violations`, report freshness, zone refill and
+required report labels remain load-bearing. Parity-enabled `run_drc()` requires same-stem
+`.kicad_pcb`, `.kicad_pro` and `.kicad_sch` files, independently exports and parses a fresh annotated
+netlist, rejects KiCad parity-load diagnostics, and requires the footprint-error report summary.
+Pass `parity=False` only for an explicitly authorized board-only workflow and preserve that waiver
+in the release record. Treat exit zero as command completion, then judge the structured report.
 
 Resolve ignored checks from two sources:
 

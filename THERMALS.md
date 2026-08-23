@@ -151,18 +151,31 @@ path, allowed bridges and required temperature or thermal-resistance result. The
 topologically between the source and target: a slot parallel to the dominant path, or a sensor at
 the source-side root of a nominal tab, does not interrupt that path.
 
-Check the saved and reparsed board across the complete construction. Include filled copper on every
-layer, tracks, pads, vias, laminate bridges, connectors, shields, fasteners and enclosure contacts
-that can bypass the intended neck. Establish that the protected component is on the isolated side,
-then quantify the remaining copper and laminate cross-section, path length and any parallel bypass.
-Slot count, dimensions and coordinates establish only that the cutouts can be fabricated.
+Build a heat-path carrier ledger across the complete construction. For every possible carrier,
+record its authority and evidence: saved-board geometry for copper, pads, tracks, vias, cutouts and
+board-represented laminate paths; a release-bound construction or MCAD model for connector metal,
+shields, fasteners, enclosure contacts and other off-board paths; and separate measurements for the
+finished physical assembly. An artifact guard may claim only what its subject contains. Missing or
+unrepresented construction evidence makes the corresponding path `UNVERIFIED`; it is never evidence
+that the bypass is absent.
 
-Give this functional claim its own artifact guard and stable failure ID. Calibrate it with an
+From the saved and reparsed board, establish that the protected component is on the isolated side
+and quantify the remaining board-represented copper and laminate cross-section, path length and
+parallel bypasses. Combine that result with the separately bound external-carrier evidence before
+claiming the complete path. Slot count, dimensions and coordinates establish only that the cutouts
+can be fabricated.
+
+Give each board, construction-model and physical-validation claim its own correctly tiered guard,
+stable failure ID and provenance. Calibrate the board artifact guard with an
 appearance-preserving known-bad mutation: retain legal, closed slots with the expected count and
 dimensions while moving the target to the source side, rotating or relocating the barrier so it no
 longer crosses the path, or adding an all-layer copper bypass. Also exercise a legal geometry change
 that preserves the derived physical margin. Derive the expected topology and limit from the thermal
 requirement or model, not from the generator constants that produced the current board.
+
+Calibrate every load-bearing construction-model branch with a bypass or carrier change in that
+model, and validate the finished assembly against the stated temperature or thermal-resistance
+criterion. Passing one tier does not fill missing evidence in another.
 
 When the thermal result still requires a physical prototype, state the unverified quantity and the
 experiment that will resolve it. A board may be manufacturable as a thermal experiment, but it is

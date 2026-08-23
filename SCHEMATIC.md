@@ -78,5 +78,9 @@ two-terminal part to one symbol. Representative invariants include:
 - `Q*` uses the correct FET/BJT family and package pin mapping; and
 - custom device symbols carry a recorded datasheet/package map.
 
-Calibrate the guard with a deliberate substitution of a generic two-pin symbol for one resistor and
-one diode. Both mutations must fail before relying on the guard.
+Calibrate every supported reference-family dispatch and fallback branch, including `R`, polarized
+and unpolarized `C`, `L`/ferrite, `F`, each supported `D` family, `Q`, potentiometer, connector,
+power/test-point and custom-device handling. Exercise polarity, unit and package-pin mappings where
+they branch. A deliberate generic-symbol substitution for one resistor and one diode is only the
+minimum example; those two mutations do not qualify the unexercised families or mappings. Unknown
+and ambiguous classes must fail closed, and each legal family needs an accepted calibration case.
