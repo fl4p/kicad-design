@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import kicad_route_candidate as route
 import kicad_route_manifest as manifest
+import kicad_graphics as graphics
 
 
 def segment(net="N", locked=False, start=(0, 0), end=(10, 0), width=200_000):
@@ -413,6 +414,61 @@ class RouteCandidateTests(unittest.TestCase):
 
         self.assertEqual(route._nonrouting_point(Point()), [16_775_000, 65_380_000])
 
+    def test_semantic_snapshot_schema_is_exact_at_worker_boundary(self):
+        nonrouting_items = {
+            "board": {}, "footprints": [], "zones": [], "drawings": []
+        }
+        snapshot = {
+            "schema": route.SNAPSHOT_SCHEMA,
+            "board": {},
+            "netclasses": {},
+            "routing": {},
+            "nonrouting_sha256": route._json_digest(nonrouting_items),
+            "nonrouting_point_quantum_nm": 10,
+            "nonrouting_category_sha256": {
+                key: route._json_digest(value)
+                for key, value in nonrouting_items.items()
+            },
+            "nonrouting_items": nonrouting_items,
+            "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
+        }
+        self.assertIs(
+            route._validate_semantic_snapshot(snapshot, "test"), snapshot
+        )
+        snapshot["nonrouting_point_quantum_nm"] = 100
+        with self.assertRaisesRegex(route.RouteReportError, "point quantum"):
+            route._validate_semantic_snapshot(snapshot, "test")
+        snapshot["nonrouting_point_quantum_nm"] = 10
+        snapshot["board"] = {"forged": True}
+        with self.assertRaisesRegex(route.RouteReportError, "board summary"):
+            route._validate_semantic_snapshot(snapshot, "test")
+        snapshot["board"] = {}
+        snapshot["schema"] = "kicad-route-semantic-snapshot-v1"
+        with self.assertRaisesRegex(route.RouteReportError, "schema"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_boundary_recomputes_digests_and_counts(self):
+        nonrouting_items = {
+            "board": {}, "footprints": [], "zones": [], "drawings": []
+        }
+        snapshot = {
+            "schema": route.SNAPSHOT_SCHEMA,
+            "board": {},
+            "netclasses": {},
+            "routing": {},
+            "nonrouting_sha256": route._json_digest(nonrouting_items),
+            "nonrouting_point_quantum_nm": 10,
+            "nonrouting_category_sha256": {
+                key: route._json_digest(value)
+                for key, value in nonrouting_items.items()
+            },
+            "nonrouting_items": nonrouting_items,
+            "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
+        }
+        snapshot["nonrouting_items"]["footprints"].append({"uuid": "forged"})
+        with self.assertRaisesRegex(route.RouteReportError, "digest"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
     def test_footprint_graphic_mutation_changes_nonrouting_snapshot(self):
         class Point:
             def __init__(self, x, y):
@@ -449,6 +505,12 @@ class RouteCandidateTests(unittest.TestCase):
                 return 50_000
 
             def GetShape(self):
+                return 0
+
+            def GetLineStyle(self):
+                return 0
+
+            def GetFillMode(self):
                 return 0
 
             def IsLocked(self):
@@ -529,6 +591,12 @@ class RouteCandidateTests(unittest.TestCase):
             def GetShape(self):
                 return 0
 
+            def GetLineStyle(self):
+                return 0
+
+            def GetFillMode(self):
+                return 0
+
             def GetWidth(self):
                 return 50_000
 
@@ -567,6 +635,183 @@ class RouteCandidateTests(unittest.TestCase):
         self.assertIn("graphic-uuid", identities)
         self.assertIn("footprint-graphic:", identities["graphic-uuid"])
         self.assertIn('"parent_reference":"MH1"', identities["graphic-uuid"])
+
+    def test_bezier_control_mutation_changes_complete_geometry(self):
+        class Point:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class Bezier:
+            def __init__(self):
+                self.c1 = Point(1_000_000, 2_000_000)
+                self.c2 = Point(3_000_000, 2_000_000)
+
+            def GetShape(self):
+                return 5
+
+            def GetWidth(self):
+                return 50_000
+
+            def GetFillMode(self):
+                return 0
+
+            def GetLayer(self):
+                return 31
+
+            def IsLocked(self):
+                return False
+
+            def GetLineStyle(self):
+                return 0
+
+            def GetStart(self):
+                return Point(0, 0)
+
+            def GetEnd(self):
+                return Point(4_000_000, 0)
+
+            def GetBezierC1(self):
+                return self.c1
+
+            def GetBezierC2(self):
+                return self.c2
+
+        curve = Bezier()
+        convert = lambda p: [p.x, p.y]
+        before = graphics.complete_graphic_geometry(curve, convert)
+        before_identity = manifest._drawing_identity(
+            curve, require_complete=True
+        )
+        curve.c1.y += 500_000
+        after = graphics.complete_graphic_geometry(curve, convert)
+        after_identity = manifest._drawing_identity(
+            curve, require_complete=True
+        )
+        self.assertNotEqual(before, after)
+        self.assertNotEqual(before_identity, after_identity)
+        self.assertEqual(
+            after["shape_geometry"]["control1_nm"], [1_000_000, 2_500_000]
+        )
+
+    def test_polygon_hole_and_text_layout_are_complete_geometry(self):
+        class Point:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class Chain:
+            def __init__(self, points):
+                self.points = points
+
+            def PointCount(self):
+                return len(self.points)
+
+            def CPoint(self, index):
+                return self.points[index]
+
+            def IsClosed(self):
+                return True
+
+        class PolySet:
+            def __init__(self):
+                self.outline = Chain([
+                    Point(0, 0), Point(10, 0), Point(10, 10), Point(0, 10)
+                ])
+                self.hole = Chain([
+                    Point(2, 2), Point(4, 2), Point(4, 4), Point(2, 4)
+                ])
+
+            def OutlineCount(self):
+                return 1
+
+            def COutline(self, _index):
+                return self.outline
+
+            def HoleCount(self, _index):
+                return 1
+
+            def CHole(self, _outline_index, _hole_index):
+                return self.hole
+
+        class Polygon:
+            def __init__(self):
+                self.poly = PolySet()
+
+            def GetShape(self):
+                return 4
+
+            def GetWidth(self):
+                return 50_000
+
+            def GetFillMode(self):
+                return 1
+
+            def GetLineStyle(self):
+                return 0
+
+            def GetPolyShape(self):
+                return self.poly
+
+        class Text:
+            def GetText(self):
+                return "probe"
+
+            def GetPosition(self):
+                return Point(1, 2)
+
+            def GetTextSize(self):
+                return Point(3, 4)
+
+            def GetTextThickness(self):
+                return 5
+
+            def GetTextAngleDegrees(self):
+                return 90.0
+
+            def GetHorizJustify(self):
+                return -1
+
+            def GetVertJustify(self):
+                return 1
+
+            def IsMirrored(self):
+                return True
+
+            def IsBold(self):
+                return True
+
+            def IsItalic(self):
+                return False
+
+            def IsKnockout(self):
+                return True
+
+            def GetFontName(self):
+                return "KiCad Font"
+
+            def GetTextStyleName(self):
+                return "default"
+
+        convert = lambda point: [point.x, point.y]
+        polygon = Polygon()
+        before = graphics.complete_graphic_geometry(polygon, convert)
+        polygon.poly.hole.points[1].x = 5
+        after = graphics.complete_graphic_geometry(polygon, convert)
+        self.assertNotEqual(before, after)
+        text = graphics.complete_graphic_geometry(Text(), convert)["text_geometry"]
+        self.assertEqual(text["horizontal_justify"], -1)
+        self.assertEqual(text["font_name"], "KiCad Font")
+        self.assertTrue(text["mirrored"])
+        self.assertTrue(text["knockout"])
+
+    def test_unknown_graphic_shape_fails_closed(self):
+        class Unknown:
+            def GetShape(self):
+                return 99
+
+        with self.assertRaisesRegex(graphics.GraphicError, "unsupported"):
+            graphics.complete_graphic_geometry(Unknown(), lambda point: point)
 
     def test_project_audit_commands_are_argv_not_shell(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -14,11 +14,18 @@ import json
 from pathlib import Path
 import sys
 
+try:
+    from kicad_graphics import GraphicError, complete_graphic_geometry
+except ImportError:  # imported as scripts.kicad_route_manifest
+    from .kicad_graphics import GraphicError, complete_graphic_geometry
+
 from kicad_autoroute import (
     AutorouteError,
+    COMPATIBILITY_SCHEMA,
     CONFIG_SCHEMA_V2,
     MANIFEST_SCHEMA,
     MANIFEST_SCHEMA_V2,
+    SNAPSHOT_SCHEMA,
     canonical_json_sha256,
     canonical_routes,
     config_path,
@@ -50,7 +57,7 @@ def _point(value) -> list[int]:
     return [int(value.x), int(value.y)]
 
 
-def _drawing_identity(drawing) -> dict:
+def _drawing_identity(drawing, *, require_complete=False) -> dict:
     values = {"kind": type(drawing).__name__, "layer": int(drawing.GetLayer())}
     for name in ("GetStart", "GetEnd", "GetPosition"):
         if hasattr(drawing, name):
@@ -73,6 +80,16 @@ def _drawing_identity(drawing) -> dict:
                 values[key] = converter(getattr(drawing, name)())
             except Exception:
                 pass
+    if require_complete:
+        try:
+            values["complete_geometry"] = complete_graphic_geometry(
+                drawing, _point
+            )
+        except GraphicError as exc:
+            raise AutorouteError(
+                "cannot completely serialize board graphic %s: %s"
+                % (_uuid(drawing), exc)
+            ) from exc
     return values
 
 
@@ -204,7 +221,7 @@ def identity_map(board, pcbnew) -> dict[str, str]:
             )
             out[_uuid(pad)] = identity
         for graphic in fp.GraphicalItems():
-            values = _drawing_identity(graphic)
+            values = _drawing_identity(graphic, require_complete=True)
             values.update({
                 "parent_reference": ref,
                 "parent_uuid": _uuid(fp),
@@ -235,7 +252,7 @@ def identity_map(board, pcbnew) -> dict[str, str]:
             identity, sort_keys=True, separators=(",", ":")
         )
     for drawing in board.GetDrawings():
-        values = _drawing_identity(drawing)
+        values = _drawing_identity(drawing, require_complete=True)
         out[_uuid(drawing)] = "drawing:" + json.dumps(
             values, sort_keys=True, separators=(",", ":")
         )
@@ -373,9 +390,11 @@ def _promote(args) -> int:
     if sha256_path(matrix_path) != promotion["toolchain"]["compatibility_matrix_sha256"]:
         raise AutorouteError("live compatibility matrix differs from the reviewed matrix")
     matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
-    if matrix.get("schema") != "kicad-autoroute-compatibility-v1":
+    if matrix.get("schema") != COMPATIBILITY_SCHEMA:
         raise AutorouteError("live compatibility matrix schema is unsupported")
     wanted_cell = promotion["toolchain"]["compatibility_cell"]
+    if wanted_cell.get("snapshot_schema") != SNAPSHOT_SCHEMA:
+        raise AutorouteError("reviewed compatibility cell snapshot schema is unsupported")
     matches = [
         cell for cell in matrix.get("cells", [])
         if all(cell.get(key) == value for key, value in wanted_cell.items())
@@ -392,6 +411,7 @@ def _promote(args) -> int:
     is_v2 = config.get("schema") == CONFIG_SCHEMA_V2
     manifest = {
         "schema": MANIFEST_SCHEMA_V2 if is_v2 else MANIFEST_SCHEMA,
+        "snapshot_schema": promotion["snapshot_schema"],
         "seed_sha256": promotion["seed_sha256"],
         "applicator": applicator,
         "input_bundle": bundle,

@@ -66,14 +66,21 @@ without weakening neighboring workflows:
    authority while unowned proxies fail.
 8. Provisional pre-gate PCB work is limited to outline/mechanical studies independent of unresolved
    connectivity.
-9. DRC persists its refill on the scratch board and a reparsed per-zone snapshot must equal the
-   finalizer-bound snapshot; zero DRC counts cannot override a mismatch.
+9. DRC persists its refill on the scratch board and a complete reparsed semantic snapshot must equal
+   the provisional finalizer snapshot; zero DRC counts cannot override a mismatch. Bind the
+   authoritative board digest only after the DRC save and comparison.
 10. A canonical output receipt hashes every report and deliverable, and order authorization binds
     the receipt digest rather than only an input manifest.
 11. Direct and footprint-hosted `Edge.Cuts` both reach outline audits and autoroute nonrouting
     snapshots; mutate a footprint contour and require the snapshot digest to change.
 12. Parity compatibility uses a real same-stem annotated negative control; the footprint-error
     summary alone is not claimed as proof that parity executed.
+13. Snapshot v2 dispatch covers complete segment, rectangle, arc, circle, polygon, Bézier and text
+    geometry for direct and footprint-hosted board graphics and fails closed on unsupported classes.
+    Mutate Bézier controls and polygon holes while preserving endpoints and require both snapshot
+    and identity digests to change.
+14. Snapshot schema is validated at every worker boundary and carried through seed/candidate report,
+    compatibility cell and route manifest. Promotion stays disabled until full v2 requalification.
 
 Look for neighboring claims introduced with the fix, especially board-only workflows, global
 library resolution, project-variable overrides and external construction models.
@@ -135,8 +142,8 @@ Confirm these, but do not report them as new unless the current text understates
   be re-verified before use with the installed version.
 - `scripts/README.md` leaves `transform_pin()` unverified until calibrated against KiCad for the
   project's supported transform cells.
-- Autoroute promotion is limited to exact compatibility cells in
-  `kicad-autoroute-compatibility.json`; other environments remain report-only.
+- Autoroute promotion is disabled for all cells pending snapshot-v2 and parity-negative-control
+  requalification. A cell must not be re-enabled with the invalidated pre-v2 evidence.
 - `FOOTPRINTS.md` intentionally supplies no authoritative numeric IPC-2221C verdict. A project must
   provide the binding current standard and complete derivation.
 

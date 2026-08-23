@@ -302,7 +302,7 @@ def _asset_operations(mode: str) -> tuple[list[dict], dict]:
     selected_adapter = "snapshot-adapter" if mode == "board-snapshot" else "generator-adapter"
     specs = {
         "adapter": (ASSETS[selected_adapter], "autoroute_adapter.py", "kicad-autoroute-adapter-v1"),
-        "applicator": (ASSETS["applicator"], "autoroute_apply.py", "kicad-autoroute-applicator-v1"),
+        "applicator": (ASSETS["applicator"], "autoroute_apply.py", "kicad-autoroute-applicator-v2"),
         "audit": (ASSETS["audit"], "autoroute_audit.py", "kicad-autoroute-audit-v1"),
     }
     operations, tools = [], {}

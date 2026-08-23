@@ -31,15 +31,20 @@ board and schematic. To grade a differently named candidate, copy it under the a
 inside that scratch bundle. Do not run DRC on `candidate.kicad_pcb` beside `board.kicad_pro` and
 assume KiCad applied the intended rule and parity authority.
 
-Create one finalized release candidate in that scratch bundle. Run the project's pinned zone
-finalizer and in-memory semantic-settle gate, save once, and bind the resulting board digest and
-per-zone geometry snapshot. Run DRC with `--save-board` so its refill is observable, then reparse the
-saved scratch board and compare every filled zone with the bound snapshot. `run_drc()` can enforce
-this when given `expected_zone_snapshot` and the project's reparsing `zone_snapshotter`. A zero-count
-report is invalid when the snapshot differs or cannot be read. Run artifact guards, Gerber/drill
-export and measurements only from that exact DRC-saved and rechecked board. A second independently
-accepted fill is a different candidate, not corroboration; any difference returns the release to
-finalization.
+Create one provisional release candidate in that scratch bundle. Run the project's pinned zone
+finalizer and in-memory semantic-settle gate, save once, and record a canonical semantic snapshot
+covering every filled zone plus all non-zone board objects. Do not bind the authoritative board
+digest yet. Run DRC with `--save-board` so its refill is observable, then reparse the saved scratch
+board and require the complete semantic snapshot to equal the provisional snapshot. `run_drc()` can
+enforce this when given `expected_board_snapshot` and the project's reparsing `board_snapshotter`.
+A zero-count report is invalid when the snapshot differs or cannot be read.
+
+Only after that comparison passes, compute the authoritative post-DRC board digest and place it in
+the release-input manifest. Run artifact guards, Gerber/drill export and measurements only from that
+exact DRC-saved, digest-bound board. This two-stage authority matters because KiCad may reserialize
+bytes while preserving filled geometry; the pre-DRC digest does not identify the exported file. A
+second independently accepted fill or any non-zone semantic change is a different candidate, not
+corroboration, and returns the release to finalization.
 
 - Keep `--exit-code-violations`; without it DRC can write violations and exit zero.
 - Keep `--schematic-parity`; it checks that the board still agrees with the schematic. Require a
@@ -48,8 +53,9 @@ finalization.
   without parity. For every supported KiCad compatibility cell, calibrate parity with a same-stem,
   annotated scratch bundle whose board deliberately omits or mismatches a footprint; require a
   nonzero footprint-error result before trusting clean parity runs on that cell.
-- Keep `--refill-zones --save-board`, then compare the reparsed saved fill with the candidate's bound
-  semantic snapshot. Bare subprocess output cannot establish equality.
+- Keep `--refill-zones --save-board`, then compare the complete reparsed saved-board snapshot with
+  the provisional semantic snapshot. Bare subprocess output cannot establish equality. Bind the
+  authoritative board digest only after this passes.
 - Capture the command status before piping output, and judge the report contents as well.
 - Re-run the layout generator after every schematic change that can alter values, fields,
   footprints, or connectivity.

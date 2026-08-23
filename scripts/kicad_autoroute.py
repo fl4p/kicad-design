@@ -21,13 +21,15 @@ from typing import Any, Iterable
 
 CONFIG_SCHEMA = "kicad-autoroute-config-v1"
 CONFIG_SCHEMA_V2 = "kicad-autoroute-config-v2"
-MANIFEST_SCHEMA = "kicad-route-manifest-v1"
-MANIFEST_SCHEMA_V2 = "kicad-route-manifest-v2"
+MANIFEST_SCHEMA = "kicad-route-manifest-v3"
+MANIFEST_SCHEMA_V2 = "kicad-route-manifest-v4"
 SEED_ATTESTATION_SCHEMA = "kicad-autoroute-seed-attestation-v1"
-REPORT_SCHEMA = "kicad-route-candidate-report-v1"
+REPORT_SCHEMA = "kicad-route-candidate-report-v2"
+SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
+COMPATIBILITY_SCHEMA = "kicad-autoroute-compatibility-v2"
 DRC_BASELINE_SCHEMA = "kicad-drc-baseline-v1"
 BACKEND_ID = "freerouting-2.3.0-temurin-25.0.4+7"
-ROUTE_APPLICATOR_VERSION = "1"
+ROUTE_APPLICATOR_VERSION = "2"
 PROMOTION_CHECKS = frozenset(
     {
         "source_unchanged",
@@ -441,7 +443,7 @@ def _load_config_v2(path: Path) -> dict:
         tools["adapter"], "tools.adapter", "kicad-autoroute-adapter-v1"
     )
     applicator = _v2_tool_entry(
-        tools["applicator"], "tools.applicator", "kicad-autoroute-applicator-v1"
+        tools["applicator"], "tools.applicator", "kicad-autoroute-applicator-v2"
     )
     audit = _v2_tool_entry(
         tools["audit"], "tools.audit", "kicad-autoroute-audit-v1"
@@ -1376,6 +1378,7 @@ def validate_promotion_report(report: Any) -> dict:
         "seed_sha256", "config_sha256", "input_bundle", "input_bundle_sha256",
         "applicator", "toolchain", "scope", "raw_candidate_sha256",
         "review_candidate_sha256", "routes", "routes_sha256", "checks", "blocks",
+        "snapshot_schema",
     }
     if is_v2:
         promotion_keys |= {"seed_attestation", "selected_scope_policy"}
@@ -1385,6 +1388,14 @@ def validate_promotion_report(report: Any) -> dict:
         promotion_keys,
         promotion_keys,
     )
+    if promotion["snapshot_schema"] != SNAPSHOT_SCHEMA:
+        raise AutorouteError("candidate report promotion snapshot schema is unsupported")
+    for where in ("seed", "candidate"):
+        semantic = root.get(where, {}).get("semantic")
+        if not isinstance(semantic, dict) or semantic.get("snapshot_schema") != SNAPSHOT_SCHEMA:
+            raise AutorouteError(
+                f"candidate report {where} semantic snapshot schema is unsupported"
+            )
     for key in (
         "seed_sha256", "config_sha256", "input_bundle_sha256",
         "raw_candidate_sha256", "review_candidate_sha256", "routes_sha256",
@@ -1442,6 +1453,7 @@ def validate_promotion_report(report: Any) -> dict:
         raise AutorouteError("candidate report configuration digest differs from promotion")
     manifest_probe = {
             "schema": MANIFEST_SCHEMA_V2 if is_v2 else MANIFEST_SCHEMA,
+            "snapshot_schema": promotion["snapshot_schema"],
             "seed_sha256": promotion["seed_sha256"],
             "applicator": promotion["applicator"],
             "input_bundle": promotion["input_bundle"],
@@ -1468,7 +1480,7 @@ def validate_manifest(manifest: dict) -> dict:
     if schema not in {MANIFEST_SCHEMA, MANIFEST_SCHEMA_V2}:
         raise AutorouteError(f"unsupported route manifest schema {schema!r}")
     root_keys = {
-        "schema", "seed_sha256", "applicator", "input_bundle", "toolchain",
+        "schema", "snapshot_schema", "seed_sha256", "applicator", "input_bundle", "toolchain",
         "scope", "candidate", "routes", "routes_sha256",
     }
     if schema == MANIFEST_SCHEMA_V2:
@@ -1479,6 +1491,8 @@ def validate_manifest(manifest: dict) -> dict:
         root_keys,
         root_keys,
     )
+    if root["snapshot_schema"] != SNAPSHOT_SCHEMA:
+        raise AutorouteError("manifest snapshot_schema is unsupported")
     if schema == MANIFEST_SCHEMA_V2:
         validate_seed_attestation(root["seed_attestation"], "manifest.seed_attestation")
     if not _HEX64.match(str(root["seed_sha256"])):
@@ -1551,9 +1565,11 @@ def validate_manifest(manifest: dict) -> dict:
     _strict_object(
         toolchain["compatibility_cell"],
         "manifest.toolchain.compatibility_cell",
-        {"os", "arch", "kicad_cli", "pcbnew"},
-        {"os", "arch", "kicad_cli", "pcbnew"},
+        {"os", "arch", "kicad_cli", "pcbnew", "snapshot_schema"},
+        {"os", "arch", "kicad_cli", "pcbnew", "snapshot_schema"},
     )
+    if toolchain["compatibility_cell"]["snapshot_schema"] != root["snapshot_schema"]:
+        raise AutorouteError("manifest compatibility cell snapshot schema differs from manifest")
     scope = _validate_manifest_scope(root["scope"])
     candidate = _strict_object(
         root["candidate"],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -97,6 +98,37 @@ class ScaffoldTests(unittest.TestCase):
             ])
         self.assertEqual(result, 0)
         return plan
+
+    def test_applicator_rejects_pre_snapshot_v2_manifest_contracts(self):
+        asset = (
+            Path(__file__).resolve().parent.parent
+            / "assets" / "autoroute" / "autoroute_apply.py"
+        )
+        spec = importlib.util.spec_from_file_location("autoroute_apply_asset", asset)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        envelope = {
+            "schema": module.MANIFEST_SCHEMA,
+            "snapshot_schema": module.SNAPSHOT_SCHEMA,
+            "seed_sha256": "0" * 64,
+            "applicator": None,
+            "input_bundle": None,
+            "toolchain": None,
+            "scope": None,
+            "candidate": None,
+            "routes": None,
+            "routes_sha256": None,
+            "seed_attestation": None,
+        }
+        old = dict(envelope, schema="kicad-route-manifest-v2")
+        with self.assertRaisesRegex(module.ApplyError, "schema"):
+            module._validate_manifest_envelope({}, old)
+        wrong_snapshot = dict(
+            envelope, snapshot_schema="kicad-route-semantic-snapshot-v1"
+        )
+        with self.assertRaisesRegex(module.ApplyError, "snapshot schema"):
+            module._validate_manifest_envelope({}, wrong_snapshot)
 
     def test_snapshot_plan_apply_is_digest_approved_and_idempotent(self):
         with tempfile.TemporaryDirectory() as raw:

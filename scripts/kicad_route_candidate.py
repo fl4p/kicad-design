@@ -36,6 +36,9 @@ try:
         AutorouteError,
         CONFIG_SCHEMA_V2,
         REPORT_SCHEMA,
+        SNAPSHOT_SCHEMA,
+        COMPATIBILITY_SCHEMA,
+        ROUTE_APPLICATOR_VERSION,
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
@@ -53,6 +56,7 @@ try:
         verify_project_styles,
     )
     from kicad_repro import digest
+    from kicad_graphics import GraphicError, complete_graphic_geometry
     from kicad_verify import (
         VerifyError,
         find_kicad_cli,
@@ -65,6 +69,9 @@ except ImportError:  # imported as scripts.kicad_route_candidate
         AutorouteError,
         CONFIG_SCHEMA_V2,
         REPORT_SCHEMA,
+        SNAPSHOT_SCHEMA,
+        COMPATIBILITY_SCHEMA,
+        ROUTE_APPLICATOR_VERSION,
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
@@ -82,6 +89,7 @@ except ImportError:  # imported as scripts.kicad_route_candidate
         verify_project_styles,
     )
     from .kicad_repro import digest
+    from .kicad_graphics import GraphicError, complete_graphic_geometry
     from .kicad_verify import (
         VerifyError,
         find_kicad_cli,
@@ -91,7 +99,6 @@ except ImportError:  # imported as scripts.kicad_route_candidate
     )
 
 
-SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
 LOG_TAIL_CHARS = 12000
 # KiCad's DSN/SES import can canonicalize a decimal coordinate by one internal
 # nanometre (for example 16.774999 mm to 16.775000 mm) without moving an item
@@ -107,6 +114,69 @@ DSN_LOCKED_POINT_QUANTUM_NM = 1000
 
 class RouteReportError(RuntimeError):
     """The candidate workflow could not produce a trustworthy report."""
+
+
+def _validate_semantic_snapshot(snapshot, where):
+    """Validate the worker boundary before any snapshot field is trusted."""
+    required = {
+        "schema", "board", "netclasses", "routing", "nonrouting_sha256",
+        "nonrouting_point_quantum_nm", "nonrouting_category_sha256",
+        "nonrouting_items", "nonrouting_counts",
+    }
+    if not isinstance(snapshot, dict) or set(snapshot) != required:
+        present = sorted(snapshot) if isinstance(snapshot, dict) else type(snapshot).__name__
+        raise RouteReportError(
+            "%s semantic snapshot has unsupported fields: %s" % (where, present)
+        )
+    if snapshot["schema"] != SNAPSHOT_SCHEMA:
+        raise RouteReportError(
+            "%s semantic snapshot schema %r is unsupported; expected %r"
+            % (where, snapshot["schema"], SNAPSHOT_SCHEMA)
+        )
+    for key in ("board", "netclasses", "routing", "nonrouting_category_sha256",
+                "nonrouting_items", "nonrouting_counts"):
+        if not isinstance(snapshot[key], dict):
+            raise RouteReportError("%s semantic snapshot %s is not an object" % (where, key))
+    if snapshot["nonrouting_point_quantum_nm"] != NONROUTING_POINT_QUANTUM_NM:
+        raise RouteReportError(
+            "%s semantic snapshot point quantum is unsupported" % where
+        )
+    if snapshot["board"] != snapshot["nonrouting_items"].get("board"):
+        raise RouteReportError(
+            "%s semantic snapshot board summary differs from nonrouting items"
+            % where
+        )
+    if not re.fullmatch(r"[0-9a-f]{64}", str(snapshot["nonrouting_sha256"])):
+        raise RouteReportError("%s semantic snapshot digest is invalid" % where)
+    categories = snapshot["nonrouting_category_sha256"]
+    if set(categories) != set(snapshot["nonrouting_items"]):
+        raise RouteReportError("%s semantic snapshot category coverage differs" % where)
+    if any(not re.fullmatch(r"[0-9a-f]{64}", str(value))
+           for value in categories.values()):
+        raise RouteReportError("%s semantic snapshot category digest is invalid" % where)
+    for key, value in snapshot["nonrouting_items"].items():
+        if categories[key] != _json_digest(value):
+            raise RouteReportError(
+                "%s semantic snapshot category %s digest does not match its "
+                "items" % (where, key)
+            )
+    if snapshot["nonrouting_sha256"] != _json_digest(
+            snapshot["nonrouting_items"]):
+        raise RouteReportError(
+            "%s semantic snapshot nonrouting digest does not match its items"
+            % where
+        )
+    counts = snapshot["nonrouting_counts"]
+    expected_counts = {
+        key: len(snapshot["nonrouting_items"][key])
+        for key in ("footprints", "zones", "drawings")
+    }
+    if counts != expected_counts:
+        raise RouteReportError(
+            "%s semantic snapshot nonrouting counts do not match its items"
+            % where
+        )
+    return snapshot
 
 
 def _read_utf8(path: Path) -> str:
@@ -320,13 +390,14 @@ def _compatibility_cell(pcbnew_version: str, kicad_cli: Path) -> dict:
         matrix = json.loads(_read_utf8(matrix_path))
     except json.JSONDecodeError as exc:
         raise RouteReportError("autoroute compatibility matrix is invalid JSON") from exc
-    if matrix.get("schema") != "kicad-autoroute-compatibility-v1":
+    if matrix.get("schema") != COMPATIBILITY_SCHEMA:
         raise RouteReportError("unsupported autoroute compatibility matrix schema")
     wanted = {
         "os": platform.system().lower(),
         "arch": platform.machine().lower(),
         "kicad_cli": cli_version,
         "pcbnew": pcbnew_version,
+        "snapshot_schema": SNAPSHOT_SCHEMA,
     }
     matches = [
         cell
@@ -1024,13 +1095,17 @@ def _attest_v2_adapter_seed(
             "configured adapter seed omitted same-stem project context: "
             + ", ".join(missing)
         )
-    generated_snapshot = _worker_call(
+    generated_snapshot_result = _worker_call(
         kicad_python,
         "snapshot",
         [generated_board],
         workspace / "adapter-attested-seed-semantic.json",
         workspace,
-    )["snapshot"]
+    )
+    generated_snapshot = _validate_semantic_snapshot(
+        generated_snapshot_result.get("snapshot"),
+        "adapter regenerated seed snapshot worker",
+    )
     regenerated = make_seed_attestation(
         generated_snapshot, generated_board, config, input_bundle
     )
@@ -1818,13 +1893,17 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
 
         adapter_seed_evidence = None
         if config is not None and config.get("schema") == CONFIG_SCHEMA_V2:
-            supplied_snapshot = _worker_call(
+            supplied_snapshot_result = _worker_call(
                 kicad_python,
                 "snapshot",
                 [seed],
                 workspace / "supplied-seed-attestation-semantic.json",
                 workspace,
-            )["snapshot"]
+            )
+            supplied_snapshot = _validate_semantic_snapshot(
+                supplied_snapshot_result.get("snapshot"),
+                "supplied seed attestation snapshot worker",
+            )
             adapter_seed_evidence = _attest_v2_adapter_seed(
                 config=config,
                 input_bundle=input_bundle,
@@ -1843,7 +1922,9 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
         )
         if not export_result.get("export_ok") or not dsn.is_file() or dsn.stat().st_size == 0:
             raise RouteReportError("KiCad did not produce a non-empty DSN")
-        seed_snapshot = export_result["snapshot"]
+        seed_snapshot = _validate_semantic_snapshot(
+            export_result.get("snapshot"), "seed export worker"
+        )
         empty_delta = {"_added": [], "_removed": []}
         scope = _scope_report(
             seed_snapshot,
@@ -1887,6 +1968,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             "dsn_layer_scope": dsn_layer_scope,
             "dsn_fixed_routes": dsn_fixed_routes,
             "semantic": {
+                "snapshot_schema": seed_snapshot["schema"],
                 "routing": seed_snapshot["routing"]["summary"],
                 "nonrouting_point_quantum_nm": seed_snapshot[
                     "nonrouting_point_quantum_nm"
@@ -2283,7 +2365,9 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
         if not import_result.get("import_ok"):
             raise RouteReportError("KiCad reported SES import failure")
         raw_candidate_board = candidate_board
-        raw_candidate_snapshot = import_result["snapshot"]
+        raw_candidate_snapshot = _validate_semantic_snapshot(
+            import_result.get("snapshot"), "raw candidate import worker"
+        )
         raw_delta = _route_delta(seed_snapshot, raw_candidate_snapshot)
         filtered_result = None
         filtered_apply = None
@@ -2334,7 +2418,10 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 workspace / "filtered-semantic.json",
                 workspace,
             )
-            candidate_snapshot = filtered_snapshot_result["snapshot"]
+            candidate_snapshot = _validate_semantic_snapshot(
+                filtered_snapshot_result.get("snapshot"),
+                "filtered candidate snapshot worker",
+            )
             delta = _route_delta(seed_snapshot, candidate_snapshot)
         else:
             candidate_snapshot = raw_candidate_snapshot
@@ -2418,6 +2505,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             "raw_import": import_result.get("raw_import"),
             "zones_refilled": bool(import_result.get("zones_refilled")),
             "semantic": {
+                "snapshot_schema": candidate_snapshot["schema"],
                 "routing": candidate_snapshot["routing"]["summary"],
                 "nonrouting_point_quantum_nm": candidate_snapshot[
                     "nonrouting_point_quantum_nm"
@@ -2554,7 +2642,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 applicator = None
             else:
                 applicator = {
-                    "schema_version": "1",
+                    "schema_version": ROUTE_APPLICATOR_VERSION,
                     "bundle_path": applicators[0]["path"],
                     "source_sha256": applicators[0]["sha256"],
                 }
@@ -2583,6 +2671,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                     ),
                 })
             initial["promotion"] = {
+                "snapshot_schema": SNAPSHOT_SCHEMA,
                 "seed_sha256": initial["seed"]["board_sha256"],
                 "config_sha256": config["config_sha256"],
                 "input_bundle": input_bundle,
@@ -2601,7 +2690,10 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                     ).get("matrix_sha256"),
                     "compatibility_cell": {
                         key: (compatibility or {}).get(key)
-                        for key in ("os", "arch", "kicad_cli", "pcbnew")
+                        for key in (
+                            "os", "arch", "kicad_cli", "pcbnew",
+                            "snapshot_schema",
+                        )
                     },
                 },
                 "scope": {
@@ -2759,7 +2851,8 @@ def _footprint_item(fp) -> dict:
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     graphics = sorted(
-        (_drawing_item(item) for item in fp.GraphicalItems()),
+        (_drawing_item(item, require_complete=True)
+         for item in fp.GraphicalItems()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     return {
@@ -2803,7 +2896,7 @@ def _zone_item(zone) -> dict:
     }
 
 
-def _drawing_item(item) -> dict:
+def _drawing_item(item, *, require_complete=False) -> dict:
     data = {
         "uuid": _item_uuid(item),
         "kind": type(item).__name__,
@@ -2828,6 +2921,16 @@ def _drawing_item(item) -> dict:
         data["GetStart"], data["GetEnd"] = sorted(
             (data["GetStart"], data["GetEnd"])
         )
+    if require_complete:
+        try:
+            data["complete_geometry"] = complete_graphic_geometry(
+                item, _nonrouting_point
+            )
+        except GraphicError as exc:
+            raise RouteReportError(
+                "cannot completely serialize board graphic %s: %s"
+                % (_item_uuid(item), exc)
+            ) from exc
     return data
 
 
@@ -2844,7 +2947,7 @@ def _semantic_snapshot(board, pcbnew) -> dict:
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     drawings = sorted(
-        (_drawing_item(d) for d in board.GetDrawings()),
+        (_drawing_item(d, require_complete=True) for d in board.GetDrawings()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     nets = {}

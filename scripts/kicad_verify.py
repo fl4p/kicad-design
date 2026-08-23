@@ -28,7 +28,9 @@ False PASSes this exists to close
     failed to fetch the schematic netlist, still write an all-zero DRC report,
     and exit zero. Parity therefore requires a same-stem project/schematic,
     an independently exported and parsed annotated netlist, no parity-failure
-    diagnostic, and the report's footprint-error summary.
+    diagnostic, and the report's footprint-error summary. That category is
+    present even without parity, so release use also requires a compatibility-
+    cell negative control with a deliberate board/schematic mismatch.
 
 Do not lead with "diff against defaults": the rules most likely to bite are
 themselves stock defaults, so a diff reports no difference and the check that
@@ -260,6 +262,13 @@ def ignored_checks_from_report(path):
             out.append(s.lstrip("- ").strip())
         elif s.startswith("**") or (s and not s.startswith("-")):
             break
+    none_markers = [value for value in out if value.casefold() == "none"]
+    if none_markers:
+        if len(out) != 1:
+            raise VerifyError(
+                "%s lists the ignored-check sentinel 'None' together with "
+                "real checks -- the section is contradictory" % p)
+        return []
     return out
 
 
@@ -355,7 +364,7 @@ def _verify_parity_context(board, cli):
 
 
 def run_drc(board, report="drc.rpt", parity=True, cli=None,
-            expected_zone_snapshot=None, zone_snapshotter=None):
+            expected_board_snapshot=None, board_snapshotter=None):
     """DRC with zone refill, violation status, and fail-closed parity.
 
     `parity` defaults True: footprint/symbol field mismatches are invisible
@@ -364,27 +373,29 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
     and `.kicad_sch` files plus a fresh parseable annotated netlist.  Pass
     False only for an explicitly authorized board-only workflow.
 
-    A fabrication-release call must also provide both ``expected_zone_snapshot``
-    (the finalizer-bound per-zone geometry) and ``zone_snapshotter`` (a callable
-    that reparses the saved board and returns the same canonical shape).  That
-    mode adds ``--save-board`` and rejects a clean report when KiCad's persisted
-    refill differs.  Run it only on the isolated scratch release bundle.
+    A fabrication-release call must also provide both
+    ``expected_board_snapshot`` (the provisional complete semantic snapshot)
+    and ``board_snapshotter`` (a callable that reparses the saved board and
+    returns all non-zone objects plus per-zone filled geometry in the same
+    canonical shape). That mode adds ``--save-board`` and rejects a clean
+    report when KiCad's persisted board differs. Run it only on the isolated
+    scratch release bundle, then hash the post-DRC board as release authority.
     """
     board = Path(board)
     if not board.exists():
         raise VerifyError("board %s does not exist" % board)
-    if (expected_zone_snapshot is None) != (zone_snapshotter is None):
+    if (expected_board_snapshot is None) != (board_snapshotter is None):
         raise VerifyError(
-            "expected_zone_snapshot and zone_snapshotter must be supplied "
+            "expected_board_snapshot and board_snapshotter must be supplied "
             "together; otherwise refill equality is UNVERIFIED")
-    if zone_snapshotter is not None and not callable(zone_snapshotter):
-        raise VerifyError("zone_snapshotter must be callable")
+    if board_snapshotter is not None and not callable(board_snapshotter):
+        raise VerifyError("board_snapshotter must be callable")
     cli = find_kicad_cli(cli)
     if parity:
         _verify_parity_context(board, cli)
     cmd = [cli, "pcb", "drc", "--severity-all", "--refill-zones",
            "--exit-code-violations", "-o", str(report)]
-    if zone_snapshotter is not None:
+    if board_snapshotter is not None:
         cmd.append("--save-board")
     if parity:
         cmd.append("--schematic-parity")
@@ -396,18 +407,19 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
         raise VerifyError(
             "KiCad did not execute schematic parity even though DRC produced "
             "a report: %s" % diagnostics.strip()[:400])
-    if zone_snapshotter is not None:
+    if board_snapshotter is not None:
         try:
-            observed_zone_snapshot = zone_snapshotter(board)
+            observed_board_snapshot = board_snapshotter(board)
         except Exception as exc:
             raise VerifyError(
-                "could not reparse the DRC-saved board for zone comparison: "
+                "could not reparse the DRC-saved board for semantic comparison: "
                 "%s" % exc) from exc
-        if observed_zone_snapshot != expected_zone_snapshot:
+        if observed_board_snapshot != expected_board_snapshot:
             raise VerifyError(
-                "DRC returned a report but its persisted refill differs from "
-                "the finalizer-bound zone snapshot; reports and exports are "
-                "invalid until the scratch candidate is finalized again")
+                "DRC returned a report but its persisted board semantics "
+                "differ from the provisional finalizer snapshot; reports and "
+                "exports are invalid until the scratch candidate is finalized "
+                "again")
     counts = _counts_from_report(report, kind="drc")
     if parity and "footprint errors" not in counts:
         raise VerifyError(
@@ -442,12 +454,49 @@ def severity_report(kicad_pro):
     except json.JSONDecodeError as e:
         raise VerifyError("%s is not valid JSON: %s" % (p, e))
 
-    erc = (pro.get("erc") or {}).get("rule_severities") or {}
-    drc = (pro.get("board") or {}).get("design_settings", {}) \
-        .get("rule_severities") or {}
-    # some versions put it at the top level of the board section
-    if not drc:
-        drc = (pro.get("board") or {}).get("rule_severities") or {}
+    invalid_maps = []
+    if not isinstance(pro, dict):
+        pro = {}
+        invalid_maps.append("project root is not an object")
+
+    erc_section = pro.get("erc")
+    if erc_section is None:
+        erc_section = {}
+    elif not isinstance(erc_section, dict):
+        invalid_maps.append("erc is not an object")
+        erc_section = {}
+    erc_raw = erc_section.get("rule_severities")
+    if erc_raw is None:
+        erc = {}
+    elif not isinstance(erc_raw, dict):
+        invalid_maps.append("erc.rule_severities is not an object")
+        erc = {}
+    else:
+        erc = erc_raw
+
+    board_section = pro.get("board")
+    if board_section is None:
+        board_section = {}
+    elif not isinstance(board_section, dict):
+        invalid_maps.append("board is not an object")
+        board_section = {}
+    settings = board_section.get("design_settings")
+    if settings is None:
+        settings = {}
+    elif not isinstance(settings, dict):
+        invalid_maps.append("board.design_settings is not an object")
+        settings = {}
+    drc_raw = settings.get("rule_severities")
+    # Some versions put it at the top level of the board section.
+    if drc_raw is None:
+        drc_raw = board_section.get("rule_severities")
+    if drc_raw is None:
+        drc = {}
+    elif not isinstance(drc_raw, dict):
+        invalid_maps.append("DRC rule_severities is not an object")
+        drc = {}
+    else:
+        drc = drc_raw
 
     out = {
         "erc_entries": len(erc),
@@ -455,7 +504,13 @@ def severity_report(kicad_pro):
         "erc_ignored": sorted(k for k, v in erc.items() if v == "ignore"),
         "drc_ignored": sorted(k for k, v in drc.items() if v == "ignore"),
     }
-    if not erc or not drc:
+    if invalid_maps:
+        out["state"] = "unverified"
+        out["note"] = (
+            "severity configuration has an invalid shape: %s; effective "
+            "severities cannot be established"
+            % "; ".join(invalid_maps))
+    elif not erc or not drc:
         out["state"] = "unverified"
         out["note"] = (
             "rule_severities is %s -- KiCad's built-in defaults are in force "

@@ -21,7 +21,8 @@ import sys
 
 
 CONFIG_SCHEMA = "kicad-autoroute-config-v2"
-MANIFEST_SCHEMA = "kicad-route-manifest-v2"
+MANIFEST_SCHEMA = "kicad-route-manifest-v4"
+SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
 SEED_ATTESTATION_SCHEMA = "kicad-autoroute-seed-attestation-v1"
 RESET_SCHEMA = "kicad-autoroute-route-reset-v1"
 REPORT_SCHEMA = "kicad-autoroute-apply-report-v1"
@@ -245,7 +246,7 @@ def _canonical_route(item, board, pcbnew) -> dict:
             "drill_nm": drill, "layers": layers,
         }
     if isinstance(item, pcbnew.PCB_ARC):
-        raise ApplyError("route arcs are unsupported by snapshot v1")
+        raise ApplyError("route arcs are unsupported by this applicator")
     if isinstance(item, pcbnew.PCB_TRACK):
         start, end = sorted((_point(item.GetStart()), _point(item.GetEnd())))
         if start == end:
@@ -432,19 +433,22 @@ def _validate_scope(config: dict, manifest: dict, routes: list[dict]) -> None:
 
 def _validate_manifest_envelope(config: dict, manifest: dict) -> None:
     required = {
-        "schema", "seed_sha256", "applicator", "input_bundle", "toolchain",
-        "scope", "candidate", "routes", "routes_sha256", "seed_attestation",
+        "schema", "snapshot_schema", "seed_sha256", "applicator",
+        "input_bundle", "toolchain", "scope", "candidate", "routes",
+        "routes_sha256", "seed_attestation",
     }
     if not isinstance(manifest, dict) or set(manifest) != required:
-        raise ApplyError("manifest top-level fields differ from the v2 contract")
+        raise ApplyError("manifest top-level fields differ from the v4 contract")
     if manifest["schema"] != MANIFEST_SCHEMA or not _HEX.fullmatch(str(manifest["seed_sha256"])):
         raise ApplyError("manifest schema or seed digest is invalid")
+    if manifest["snapshot_schema"] != SNAPSHOT_SCHEMA:
+        raise ApplyError("manifest snapshot schema is unsupported")
     if not _HEX.fullmatch(str(manifest["routes_sha256"])):
         raise ApplyError("manifest route digest is invalid")
     applicator = manifest["applicator"]
     if not isinstance(applicator, dict) or set(applicator) != {
         "schema_version", "bundle_path", "source_sha256",
-    } or applicator["schema_version"] != "1" or not _HEX.fullmatch(str(applicator["source_sha256"])):
+    } or applicator["schema_version"] != "2" or not _HEX.fullmatch(str(applicator["source_sha256"])):
         raise ApplyError("manifest applicator evidence is malformed")
     bundle = manifest["input_bundle"]
     if not isinstance(bundle, list) or not bundle or bundle != sorted(
@@ -467,8 +471,12 @@ def _validate_manifest_envelope(config: dict, manifest: dict) -> None:
         if not _HEX.fullmatch(str(toolchain.get(key))):
             raise ApplyError(f"manifest toolchain {key} is invalid")
     cell = toolchain.get("compatibility_cell")
-    if not isinstance(cell, dict) or set(cell) != {"os", "arch", "kicad_cli", "pcbnew"}:
+    if not isinstance(cell, dict) or set(cell) != {
+        "os", "arch", "kicad_cli", "pcbnew", "snapshot_schema",
+    }:
         raise ApplyError("manifest compatibility cell is malformed")
+    if cell["snapshot_schema"] != manifest["snapshot_schema"]:
+        raise ApplyError("manifest compatibility cell snapshot schema differs")
     candidate = manifest["candidate"]
     if not isinstance(candidate, dict) or set(candidate) != {
         "raw_sha256", "review_sha256", "report_sha256",

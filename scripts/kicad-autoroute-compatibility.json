@@ -1,5 +1,5 @@
 {
-  "schema": "kicad-autoroute-compatibility-v1",
+  "schema": "kicad-autoroute-compatibility-v2",
   "backend": "freerouting-2.3.0-temurin-25.0.4+7",
   "cells": [
     {
@@ -7,18 +7,16 @@
       "arch": "arm64",
       "kicad_cli": "10.0.5",
       "pcbnew": "10.0.5",
-      "promotion_enabled": true,
-      "evidence": "KiCad 10.0.5 DSN/SES, fixed-copper proof, filtered manifest apply, zone refill, structured DRC, and shunt-reversal audits",
-      "qualified_utc": "2026-08-18T00:00:00Z",
-      "evidence_sha256": [
-        "eaece489bce9b54341b528b2e7136b3ab0062d204ae54cb52a7b47def4533a31"
-      ]
+      "snapshot_schema": "kicad-route-semantic-snapshot-v2",
+      "promotion_enabled": false,
+      "evidence": "disabled: snapshot v2 complete-graphic serialization and parity negative control require full DSN/SES/promotion requalification; 2026-08-18 v1 evidence is invalidated"
     },
     {
       "os": "darwin",
       "arch": "x86_64",
       "kicad_cli": "10.0.5",
       "pcbnew": "10.0.5",
+      "snapshot_schema": "kicad-route-semantic-snapshot-v2",
       "promotion_enabled": false,
       "evidence": "staged; not yet calibrated"
     },
@@ -27,6 +25,7 @@
       "arch": "aarch64",
       "kicad_cli": "10.0.5",
       "pcbnew": "10.0.5",
+      "snapshot_schema": "kicad-route-semantic-snapshot-v2",
       "promotion_enabled": false,
       "evidence": "staged; not yet calibrated"
     },
@@ -35,6 +34,7 @@
       "arch": "x86_64",
       "kicad_cli": "10.0.5",
       "pcbnew": "10.0.5",
+      "snapshot_schema": "kicad-route-semantic-snapshot-v2",
       "promotion_enabled": false,
       "evidence": "staged; not yet calibrated"
     },
@@ -43,6 +43,7 @@
       "arch": "amd64",
       "kicad_cli": "10.0.5",
       "pcbnew": "10.0.5",
+      "snapshot_schema": "kicad-route-semantic-snapshot-v2",
       "promotion_enabled": false,
       "evidence": "staged; not yet calibrated"
     }

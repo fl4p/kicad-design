@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -83,7 +84,7 @@ class VerifyDrcTests(unittest.TestCase):
 
     @mock.patch.object(verify, "_verify_parity_context")
     @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
-    def test_release_zone_snapshot_rejects_changed_refill_despite_clean_drc(
+    def test_release_board_snapshot_rejects_changed_semantics_despite_clean_drc(
             self, _find, _context):
         with tempfile.TemporaryDirectory() as raw:
             board = self._board(raw)
@@ -98,18 +99,18 @@ class VerifyDrcTests(unittest.TestCase):
             with mock.patch.object(
                     verify, "_run_producing", side_effect=changed_refill):
                 with self.assertRaisesRegex(
-                        verify.VerifyError, "persisted refill differs"):
+                        verify.VerifyError, "persisted board semantics"):
                     verify.run_drc(
                         board,
                         report=report,
-                        expected_zone_snapshot="finalized geometry",
-                        zone_snapshotter=lambda p: Path(p).read_text(
+                        expected_board_snapshot="finalized geometry",
+                        board_snapshotter=lambda p: Path(p).read_text(
                             encoding="utf-8").strip(),
                     )
 
     @mock.patch.object(verify, "_verify_parity_context")
     @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
-    def test_release_zone_snapshot_accepts_identical_persisted_refill(
+    def test_release_board_snapshot_accepts_identical_persisted_semantics(
             self, _find, _context):
         with tempfile.TemporaryDirectory() as raw:
             board = self._board(raw)
@@ -126,22 +127,22 @@ class VerifyDrcTests(unittest.TestCase):
                 rc, counts = verify.run_drc(
                     board,
                     report=report,
-                    expected_zone_snapshot="finalized geometry",
-                    zone_snapshotter=lambda p: Path(p).read_text(
+                    expected_board_snapshot="finalized geometry",
+                    board_snapshotter=lambda p: Path(p).read_text(
                         encoding="utf-8").strip(),
                 )
             self.assertEqual(rc, 0)
             self.assertEqual(counts["drc violations"], 0)
 
     @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
-    def test_release_zone_snapshot_arguments_are_paired(self, _find):
+    def test_release_board_snapshot_arguments_are_paired(self, _find):
         with tempfile.TemporaryDirectory() as raw:
             board = self._board(raw)
             with self.assertRaisesRegex(verify.VerifyError, "supplied together"):
                 verify.run_drc(
                     board,
                     report=Path(raw) / "drc.rpt",
-                    expected_zone_snapshot={},
+                    expected_board_snapshot={},
                 )
 
     @mock.patch.object(verify, "_verify_parity_context")
@@ -214,6 +215,190 @@ class VerifyDrcTests(unittest.TestCase):
             run.side_effect = export
             with self.assertRaisesRegex(verify.VerifyError, "not fully annotated"):
                 verify._verify_parity_context(board, "kicad-cli")
+
+
+class VerifyReportTests(unittest.TestCase):
+    def _report(self, root, text, name="report.rpt"):
+        path = Path(root) / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_live_kicad10_style_drc_and_erc_summaries_parse(self):
+        with tempfile.TemporaryDirectory() as raw:
+            drc = self._report(
+                raw,
+                "** Found 64 DRC violations **\n"
+                "** Found 0 unconnected pads **\n"
+                "** Found 0 Footprint errors **\n",
+                "drc.rpt",
+            )
+            self.assertEqual(
+                verify._counts_from_report(drc, kind="drc"),
+                {
+                    "drc violations": 64,
+                    "unconnected pads": 0,
+                    "footprint errors": 0,
+                },
+            )
+            erc = self._report(
+                raw,
+                "** ERC messages: 3 Errors 2 Warnings 1 **\n",
+                "erc.rpt",
+            )
+            self.assertEqual(
+                verify._counts_from_report(erc, kind="erc"),
+                {"erc messages": 3, "errors": 2, "warnings": 1},
+            )
+
+    def test_malformed_and_truncated_reports_fail_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            malformed = self._report(raw, "no summary here\n")
+            with self.assertRaisesRegex(
+                    verify.VerifyError, "missing required DRC summary"):
+                verify._counts_from_report(malformed, kind="drc")
+            truncated = self._report(
+                raw, "** Found 0 DRC violations **\n", "truncated.rpt")
+            with self.assertRaisesRegex(verify.VerifyError, "unconnected pads"):
+                verify._counts_from_report(truncated, kind="drc")
+
+    def test_conflicting_duplicate_drc_and_erc_summaries_fail_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            drc = self._report(
+                raw,
+                "** Found 2 DRC violations **\n"
+                "** Found 0 DRC violations **\n"
+                "** Found 0 unconnected pads **\n",
+                "drc.rpt",
+            )
+            with self.assertRaisesRegex(verify.VerifyError, "different counts"):
+                verify._counts_from_report(drc, kind="drc")
+            erc = self._report(
+                raw,
+                "** ERC messages: 0 Errors 0 Warnings 0 **\n"
+                "** ERC messages: 1 Errors 1 Warnings 0 **\n",
+                "erc.rpt",
+            )
+            with self.assertRaisesRegex(verify.VerifyError, "conflicting ERC"):
+                verify._counts_from_report(erc, kind="erc")
+
+    def test_both_ignored_check_header_shapes_and_absence(self):
+        with tempfile.TemporaryDirectory() as raw:
+            erc = self._report(
+                raw,
+                "** Ignored checks:\n"
+                "- Pin not connected\n"
+                "** ERC messages: 0 Errors 0 Warnings 0 **\n",
+                "erc.rpt",
+            )
+            self.assertEqual(
+                verify.ignored_checks_from_report(erc), ["Pin not connected"])
+            drc = self._report(
+                raw,
+                "** Ignored checks **\n"
+                "- Footprint doesn't match filters\n"
+                "** Found 0 DRC violations **\n",
+                "drc.rpt",
+            )
+            self.assertEqual(
+                verify.ignored_checks_from_report(drc),
+                ["Footprint doesn't match filters"],
+            )
+            empty = self._report(
+                raw, "** Ignored checks **\n    - None\n** End of Report **\n",
+                "empty.rpt")
+            self.assertEqual(verify.ignored_checks_from_report(empty), [])
+            contradictory = self._report(
+                raw,
+                "** Ignored checks **\n- None\n- Real ignored check\n"
+                "** End of Report **\n",
+                "contradictory.rpt",
+            )
+            with self.assertRaisesRegex(verify.VerifyError, "contradictory"):
+                verify.ignored_checks_from_report(contradictory)
+            absent = self._report(raw, "** Found 0 DRC violations **\n", "absent.rpt")
+            self.assertIsNone(verify.ignored_checks_from_report(absent))
+
+    def test_run_producing_rejects_missing_and_stale_reports(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "drc.rpt"
+            with mock.patch.object(verify, "_run", return_value=(0, "", "")):
+                with self.assertRaisesRegex(verify.VerifyError, "did not write"):
+                    verify._run_producing(["kicad-cli", "pcb"], report)
+            report.write_text("stale\n", encoding="utf-8")
+            with mock.patch.object(verify, "_run", return_value=(0, "", "")):
+                with self.assertRaisesRegex(verify.VerifyError, "mtime unchanged"):
+                    verify._run_producing(["kicad-cli", "pcb"], report)
+
+    def test_run_producing_accepts_current_rewrite(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "erc.rpt"
+
+            def rewrite(_cmd):
+                report.write_text("fresh report\n", encoding="utf-8")
+                return 0, "out", "err"
+
+            with mock.patch.object(verify, "_run", side_effect=rewrite):
+                self.assertEqual(
+                    verify._run_producing(["kicad-cli", "sch"], report),
+                    (0, "out", "err"),
+                )
+
+    @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
+    def test_run_erc_parses_fresh_report_and_preserves_nonclean_status(self, _find):
+        with tempfile.TemporaryDirectory() as raw:
+            schematic = Path(raw) / "probe.kicad_sch"
+            schematic.write_text("(kicad_sch)\n", encoding="utf-8")
+            report = Path(raw) / "erc.rpt"
+
+            def produce(_cmd, report_path):
+                Path(report_path).write_text(
+                    "** ERC messages: 1 Errors 1 Warnings 0 **\n",
+                    encoding="utf-8",
+                )
+                return 5, "", ""
+
+            with mock.patch.object(
+                    verify, "_run_producing", side_effect=produce):
+                rc, counts = verify.run_erc(schematic, report=report)
+            self.assertEqual(rc, 5)
+            self.assertEqual(counts["errors"], 1)
+
+    def test_severity_report_is_tristate_for_missing_invalid_and_valid_maps(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw) / "probe.kicad_pro"
+            project.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(verify.severity_report(project)["state"], "unverified")
+
+            project.write_text(json.dumps({
+                "erc": {"rule_severities": []},
+                "board": {"design_settings": {"rule_severities": "bad"}},
+            }), encoding="utf-8")
+            invalid = verify.severity_report(project)
+            self.assertEqual(invalid["state"], "unverified")
+            self.assertIn("invalid shape", invalid["note"])
+
+            project.write_text("[]\n", encoding="utf-8")
+            invalid_root = verify.severity_report(project)
+            self.assertEqual(invalid_root["state"], "unverified")
+            self.assertIn("project root", invalid_root["note"])
+
+            project.write_text(json.dumps({
+                "erc": {"rule_severities": {"pin_not_connected": "ignore"}},
+                "board": {"design_settings": {
+                    "rule_severities": {"invalid_outline": "error"}
+                }},
+            }), encoding="utf-8")
+            valid = verify.severity_report(project)
+            self.assertEqual(valid["state"], "verified")
+            self.assertEqual(valid["erc_ignored"], ["pin_not_connected"])
+
+            project.write_text(json.dumps({
+                "erc": {"rule_severities": {"x": "silenced"}},
+                "board": {"design_settings": {"rule_severities": {"y": "error"}}},
+            }), encoding="utf-8")
+            bad_value = verify.severity_report(project)
+            self.assertEqual(bad_value["state"], "unverified")
+            self.assertIn("not a KiCad severity", bad_value["note"])
 
 
 if __name__ == "__main__":

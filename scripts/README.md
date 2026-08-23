@@ -19,6 +19,7 @@ Run command examples from the skill repository root unless a section says otherw
 
 | module | use it for |
 |---|---|
+| `kicad_graphics.py` | internal complete semantic serialization of footprint graphic shapes and text |
 | `kicad_netlist.py` | parse KiCad netlists across supported pretty-print formats and reject empty or inconsistent exports |
 | `kicad_symlib.py` | resolve inherited symbols, common unit 0, body styles, and pin transforms |
 | `kicad_verify.py` | run ERC/DRC safely and resolve ignored checks from reports plus project configuration |
@@ -93,11 +94,12 @@ supported KiCad cell with a real same-stem annotated negative control whose scra
 omits or mismatches a footprint, and require nonzero footprint errors. Pass `parity=False` only for an
 explicitly authorized board-only workflow and preserve that waiver in the release record.
 
-For fabrication release, call `run_drc()` on the isolated scratch bundle with both the finalizer-bound
-`expected_zone_snapshot` and a project `zone_snapshotter` that reparses saved filled geometry. This
-adds `--save-board` and rejects the report when the persisted refill differs. Without those arguments,
-the helper has run a refill but has not established equality with release geometry. Treat exit zero
-as command completion, then judge the structured report.
+For fabrication release, call `run_drc()` on the isolated scratch bundle with both a provisional
+`expected_board_snapshot` and a project `board_snapshotter` that reparses all saved non-zone objects
+and per-zone filled geometry. This adds `--save-board` and rejects the report when the persisted
+semantics differ. Only then hash the post-DRC board as the authoritative release input. Without those
+arguments, the helper has run a refill but has not established equality with release geometry. Treat
+exit zero as command completion, then judge the structured report.
 
 Resolve ignored checks from two sources:
 
@@ -183,10 +185,13 @@ unchanged, qualify a fresh seed, preserve protected routes, filter additions by 
 apply accepted additions to another fresh seed, and rerun DRC, connectivity, parity, and project
 audits.
 
-The semantic snapshot includes direct board drawings plus every footprint graphic with transformed
-geometry, layer, shape, width, lock state, footprint attributes and UUID identity. Keep the snapshot
-schema pinned: footprint-hosted `Edge.Cuts` are nonrouting mechanical authority and must change the
-digest when opened, moved, mirrored or replaced.
+The v2 semantic snapshot includes direct board drawings plus every footprint graphic with
+transformed, shape-dispatched geometry, layer, width/fill, lock state, footprint attributes and UUID
+identity. Segment, rectangle, arc, circle, polygon and Bézier dispatch records their complete
+geometry; text records size, thickness, angle, justification, font/style and mirroring. Unknown or
+unreadable direct or footprint-hosted graphic mechanisms fail closed. Keep the snapshot schema in
+the seed/candidate report, compatibility cell and route manifest: footprint-hosted `Edge.Cuts` must
+change the digest when opened, curved, moved, mirrored or replaced.
 
 Interpret exit zero as “the report completed.” Require the report's promotable verdict and all
 promotion checks; use `--fail-on-findings` when rejection must also fail the process.
@@ -253,8 +258,9 @@ bound below the project root.
 
 - `transform_pin()` remains unverified until calibrated against KiCad on the project and supported
   transform cells.
-- Autoroute promotion remains enabled only for exact compatibility cells tracked in
-  `kicad-autoroute-compatibility.json`; other environments are report-only until qualified.
+- Autoroute promotion is currently disabled for every compatibility cell because snapshot v2 and
+  the parity negative control have not completed the full DSN/SES/promotion requalification. Do not
+  re-enable a cell until new dated, digest-bound evidence covers those mechanisms.
 - Snapshot adapters can prove semantic reproduction without byte identity. Do not claim the latter
   unless the project-owned generator establishes it.
 - Third-party routing does not become design authority merely because DRC passes. Preserve the

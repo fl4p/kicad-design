@@ -344,9 +344,10 @@ class AutorouteContractsTests(unittest.TestCase):
         routes = autoroute.canonical_routes([segment(net="N")])
         manifest = {
             "schema": autoroute.MANIFEST_SCHEMA,
+            "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
             "seed_sha256": "7" * 64,
             "applicator": {
-                "schema_version": "1",
+                "schema_version": autoroute.ROUTE_APPLICATOR_VERSION,
                 "bundle_path": "autoroute_apply.py",
                 "source_sha256": "0" * 64,
             },
@@ -369,6 +370,7 @@ class AutorouteContractsTests(unittest.TestCase):
                     "arch": "arm64",
                     "kicad_cli": "10.0.5",
                     "pcbnew": "10.0.5",
+                    "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
                 },
             },
             "scope": {
@@ -387,6 +389,10 @@ class AutorouteContractsTests(unittest.TestCase):
             "routes_sha256": autoroute.canonical_json_sha256(routes),
         }
         autoroute.validate_manifest(manifest)
+        manifest["snapshot_schema"] = "kicad-route-semantic-snapshot-v1"
+        with self.assertRaisesRegex(autoroute.AutorouteError, "snapshot_schema"):
+            autoroute.validate_manifest(manifest)
+        manifest["snapshot_schema"] = autoroute.SNAPSHOT_SCHEMA
         manifest["seed_sha256"] = "not-a-digest"
         with self.assertRaisesRegex(autoroute.AutorouteError, "seed_sha256"):
             autoroute.validate_manifest(manifest)
@@ -406,8 +412,9 @@ class AutorouteContractsTests(unittest.TestCase):
         }
         manifest = {
             "schema": autoroute.MANIFEST_SCHEMA,
+            "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
             "seed_sha256": "7" * 64,
-            "applicator": {"schema_version": "1", "bundle_path": "autoroute_apply.py", "source_sha256": "0" * 64},
+            "applicator": {"schema_version": autoroute.ROUTE_APPLICATOR_VERSION, "bundle_path": "autoroute_apply.py", "source_sha256": "0" * 64},
             "input_bundle": [{"role": "project-code:autoroute_apply.py", "path": "autoroute_apply.py", "sha256": "0" * 64}],
             "toolchain": {
                 "backend": autoroute.BACKEND_ID,
@@ -416,7 +423,7 @@ class AutorouteContractsTests(unittest.TestCase):
                 "java_version": "25.0.4+7",
                 "install_receipt_sha256": "2" * 64,
                 "compatibility_matrix_sha256": "3" * 64,
-                "compatibility_cell": {"os": "darwin", "arch": "arm64", "kicad_cli": "10.0.5", "pcbnew": "10.0.5"},
+                "compatibility_cell": {"os": "darwin", "arch": "arm64", "kicad_cli": "10.0.5", "pcbnew": "10.0.5", "snapshot_schema": autoroute.SNAPSHOT_SCHEMA},
             },
             "scope": scope,
             "candidate": {"raw_sha256": "4" * 64, "review_sha256": "5" * 64, "report_sha256": "6" * 64},
@@ -445,11 +452,12 @@ class AutorouteContractsTests(unittest.TestCase):
             "styles": config_dict()["scope"]["styles"],
         }
         promotion = {
+            "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
             "seed_sha256": "7" * 64,
             "config_sha256": "8" * 64,
             "input_bundle": bundle,
             "input_bundle_sha256": autoroute.canonical_json_sha256(bundle),
-            "applicator": {"schema_version": "1", "bundle_path": "autoroute_apply.py", "source_sha256": "0" * 64},
+            "applicator": {"schema_version": autoroute.ROUTE_APPLICATOR_VERSION, "bundle_path": "autoroute_apply.py", "source_sha256": "0" * 64},
             "toolchain": {
                 "backend": autoroute.BACKEND_ID,
                 "freerouting_version": "2.3.0",
@@ -457,7 +465,7 @@ class AutorouteContractsTests(unittest.TestCase):
                 "java_version": "25.0.4+7",
                 "install_receipt_sha256": "2" * 64,
                 "compatibility_matrix_sha256": "3" * 64,
-                "compatibility_cell": {"os": "darwin", "arch": "arm64", "kicad_cli": "10.0.5", "pcbnew": "10.0.5"},
+                "compatibility_cell": {"os": "darwin", "arch": "arm64", "kicad_cli": "10.0.5", "pcbnew": "10.0.5", "snapshot_schema": autoroute.SNAPSHOT_SCHEMA},
             },
             "scope": scope,
             "raw_candidate_sha256": "4" * 64,
@@ -473,13 +481,18 @@ class AutorouteContractsTests(unittest.TestCase):
             "created_utc": "2026-08-18T00:00:00Z",
             "source": {}, "tools": {}, "limitations": [],
             "configuration": {"sha256": "8" * 64},
-            "workspace": "/tmp/work", "scratch_copies": {}, "seed": {},
+            "workspace": "/tmp/work", "scratch_copies": {},
+            "seed": {"semantic": {"snapshot_schema": autoroute.SNAPSHOT_SCHEMA}},
             "router_settings": {}, "router_run": {},
-            "candidate": {"board_sha256": "5" * 64, "filtered": {"routes": routes, "routes_sha256": autoroute.canonical_json_sha256(routes)}},
+            "candidate": {"board_sha256": "5" * 64, "semantic": {"snapshot_schema": autoroute.SNAPSHOT_SCHEMA}, "filtered": {"routes": routes, "routes_sha256": autoroute.canonical_json_sha256(routes)}},
             "scope": {}, "findings": [], "promotion": promotion,
             "verdict": "PROMOTABLE_CANDIDATE", "verdict_reason": "all checks passed",
         }
         autoroute.validate_promotion_report(report)
+        report["promotion"]["snapshot_schema"] = "kicad-route-semantic-snapshot-v1"
+        with self.assertRaisesRegex(autoroute.AutorouteError, "snapshot schema"):
+            autoroute.validate_promotion_report(report)
+        report["promotion"]["snapshot_schema"] = autoroute.SNAPSHOT_SCHEMA
         report["mode"] = "exploratory-report"
         with self.assertRaisesRegex(autoroute.AutorouteError, "not a promotable"):
             autoroute.validate_promotion_report(report)
@@ -525,11 +538,12 @@ class AutorouteContractsTests(unittest.TestCase):
             "styles": config_dict()["scope"]["styles"],
         }
         promotion = {
+            "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
             "seed_sha256": "7" * 64, "config_sha256": "8" * 64,
             "input_bundle": bundle,
             "input_bundle_sha256": autoroute.canonical_json_sha256(bundle),
             "applicator": {
-                "schema_version": "1", "bundle_path": "autoroute_apply.py",
+                "schema_version": autoroute.ROUTE_APPLICATOR_VERSION, "bundle_path": "autoroute_apply.py",
                 "source_sha256": "0" * 64,
             },
             "toolchain": {
@@ -540,6 +554,7 @@ class AutorouteContractsTests(unittest.TestCase):
                 "compatibility_cell": {
                     "os": "darwin", "arch": "arm64",
                     "kicad_cli": "10.0.5", "pcbnew": "10.0.5",
+                    "snapshot_schema": autoroute.SNAPSHOT_SCHEMA,
                 },
             },
             "scope": scope, "raw_candidate_sha256": "4" * 64,
@@ -554,10 +569,12 @@ class AutorouteContractsTests(unittest.TestCase):
             "created_utc": "2026-08-18T00:00:00Z", "source": {}, "tools": {},
             "limitations": [],
             "configuration": {"schema": autoroute.CONFIG_SCHEMA_V2, "sha256": "8" * 64},
-            "workspace": "/tmp/work", "scratch_copies": {}, "seed": {},
+            "workspace": "/tmp/work", "scratch_copies": {},
+            "seed": {"semantic": {"snapshot_schema": autoroute.SNAPSHOT_SCHEMA}},
             "router_settings": {}, "router_run": {},
             "candidate": {
                 "board_sha256": "5" * 64,
+                "semantic": {"snapshot_schema": autoroute.SNAPSHOT_SCHEMA},
                 "filtered": {"routes": routes, "routes_sha256": autoroute.canonical_json_sha256(routes)},
             },
             "scope": {}, "findings": [], "promotion": promotion,
