@@ -69,7 +69,11 @@ Before broad-market candidate search:
    empty inventory.
 2. Before treating a result as an empty inventory, verify that the query was unfiltered, fully
    paginated, and permission-scoped to the relevant inventory. Otherwise record
-   `empty-source-untrusted` and ask whether another already-authorized source is available.
+   `empty-source-untrusted` and ask whether another already-authorized source is available. For an
+   exact-MPN or family lookup, query every identity-bearing search surface the source exposes, such
+   as internal part records and manufacturer- or supplier-part mappings, and paginate each queried
+   surface. Preserve the search scope and any unavailable or failed surface rather than calling a
+   scoped miss exhaustive.
 3. If a valid query reports that the inventory itself contains no parts, ask whether it is
    intentionally empty, stale, or uninitialized and whether to proceed without an inventory
    preference. Record `user-confirmed-empty` only for an intentionally empty source; record
@@ -83,17 +87,26 @@ Ask once per task and reuse the answer unless the user says the inventory change
 final selection or release when elapsed time could make recorded quantities unreliable. Distinguish
 these evidence types rather than treating them as interchangeable fallback rungs:
 
-- A user-declared system of record such as InvenTree establishes **recorded** on-hand,
-  reserved/allocated, and available-to-project quantities only as of the query timestamp. Require
-  an exact manufacturer, MPN, and package mapping; an internal alias or family name is not enough.
+- Evidence follows each record's provenance, not the name of the inventory application. Inspect
+  stock-item notes, source links, import metadata, and quantity semantics before treating a number
+  as on-hand. A native stock record with a known receiving and count process can establish
+  **recorded** on-hand, reserved/allocated, and available-to-project quantities only as of the query
+  timestamp. A record imported from order history remains historical-purchase evidence; record its
+  ordered quantity as historical rather than inferring receipt, ownership, total holdings, or
+  current remaining quantity. A verified receipt can establish quantity received, but only
+  controlled stock transactions or a physical count can establish current remaining quantity.
+  Require an exact manufacturer, MPN, and package mapping; an internal alias or family name is not
+  enough.
 - Query already-authorized order history when the user declares it as a parts source, but use it
   only for candidate discovery. It proves that an item was once ordered, not receipt, ownership,
   remaining quantity, condition, or current availability. If the history itself contains no items,
   ask whether another inventory source exists rather than inferring that current inventory is
   empty. Before preferring a historical candidate, use current inventory evidence or ask the user
   to confirm possession, condition, and available-to-project quantity.
-- A distributor catalogue establishes current market availability and lifecycle claims; the
-  vendor datasheet establishes technical suitability.
+- A distributor catalogue establishes distributor-reported availability and lifecycle state only
+  as of the query timestamp; when lifecycle is load-bearing, verify it against current manufacturer
+  product status or an explicit lifecycle, PDN, or EOL notice. Use other PCNs only for the claims
+  they actually state. The vendor datasheet establishes technical suitability.
 
 Inventory access failure is non-blocking after the required user clarification, but missing
 load-bearing electrical, mechanical, safety, exact-MPN, lifecycle, or datasheet evidence retains

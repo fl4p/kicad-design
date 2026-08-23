@@ -1,215 +1,163 @@
-# Review brief: the `kicad-design` skill
+# Review brief: `kicad-design`
 
-Hand this file to a reviewing agent. It is written for the **third** pass; the
-first two are on record and their frontier is recorded below, so the reviewer
-starts where they stopped rather than re-finding what is already fixed.
+Use this brief for the next independent review of the reusable KiCad Agent Skill. Verify the
+snapshot below before relying on it; the repository and installed KiCad version can change.
 
----
+## Repository and review scope
 
-## What this repo is, and why a wrong sentence is expensive
+The repository contains prose instructions and executable helpers for schematic capture, PCB
+layout, component selection, verification, reproducibility, and constrained autorouting. A prose
+error can produce a wrong design even when every Python test passes, while a helper error can turn a
+failed or incomplete check into a false PASS. Review both surfaces.
 
-`kicad-design` is a Claude Code skill: prose instructions an agent follows to
-create and review KiCad schematics and PCBs. It has no test suite and nothing
-executes it. **A wrong fact in it becomes a wrong board**, and it will do so
-silently, because the agent reading it will not doubt it.
+Start with:
 
-Files: `SKILL.md` (schematic + shared; `wc -l` it rather than trusting a number here -- it grows), `PCB.md` (board side),
-`SETUP.md` (datasheet-access preflight), `README.md` (index).
-
-## Environment — verify, do not reason
-
-KiCad **10.0.5** is installed. It was **9.0.4** until 2026-08-09, and that
-upgrade silently changed observable behaviour that this skill had recorded as
-settled — one `pcbnew` call **reversed** (`PCB.md`, trap 1) and the netlist
-export format changed shape (`SKILL.md`, "The netlist export format is not
-stable across major versions"). Neither announced itself; both surfaced as
-downstream code that suddenly matched nothing.
-
-Treat every version-stamped claim in these files as **provisional**, including
-this line: check `kicad-cli --version` and `pcbnew.GetBuildVersion()` at the
-start of a session rather than trusting the number written here. Run things
-rather than recalling them:
-
-```
-python   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
-cli      /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
-symbols  /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
+```sh
+git status --short
+git log --oneline -5
+git diff --check
+git diff -- SKILL.md SETUP.md RELEASE.md FOOTPRINTS.md PCB.md GUARDS.md scripts/ drafts/REVIEW-BRIEF.md
+python3 -m pytest -q scripts/test_*.py
+K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
+KP=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+"$K" --version
+"$KP" -c 'import pcbnew; print(pcbnew.GetBuildVersion())'
 ```
 
-Real `.kicad_pro` / `.kicad_pcb` / `.kicad_sch` files to test against live under
-`~/dev/pv/pwr-metering/hw/` and elsewhere on this machine.
+The paths above are the verified macOS installation paths for this machine. On another host, locate
+and record the equivalent application CLI and bundled Python rather than substituting an unverified
+bare command.
 
-**Label every finding `VERIFIED` (you ran it or read the source) or `SUSPECT`
-(reasoned doubt).** Do not present suspicion as verification. A `SUSPECT` finding
-that says so is useful; one dressed as verified is worse than silence.
+Read the changed file and every companion it relies on. Check cross-references in both directions;
+a correct rule in one file does not repair a contradictory example elsewhere.
 
----
+## Verified baseline at 2026-08-20
 
-## Priority 1 — audit the previous rounds' fixes
+Re-run these probes before the review:
 
-**This is the highest-yield task, and it is not optional.** Read
-`git log -3` and `git show` each of the last commits before reading anything
-else.
+- Git HEAD was `6ef7e99 docs: prefer qualified inventory parts`.
+- The five most recent commits were:
+  - `6ef7e99 docs: prefer qualified inventory parts`
+  - `0521815 docs: plan region-scoped KRT rules`
+  - `14e7f2d docs: tighten routing and variant guidance`
+  - `79c8260 docs: make KiCad checks project-aware`
+  - `4f78b36 docs: refocus kicad design skill`
+- `kicad-cli --version` and `pcbnew.GetBuildVersion()` both reported 10.0.5.
+- Four `scripts/test_*.py` files collected 65 tests.
+- The core documents were 301 lines in `SKILL.md`, 623 in `PCB.md`, 267 in `SETUP.md`, and
+  320 in `GUARDS.md` before the current working-tree edits.
 
-The history so far, which tells you what to expect:
+Do not copy these values into findings without re-running the commands.
 
-| pass | outcome |
-|---|---|
-| review 1 → `612b4cf` | 36 findings, applied |
-| review 2 | found that **`612b4cf` introduced new bugs**, two of which made the file worse than before it |
-| fixes → `9330f63` | applied |
-| review 3 → `8d85146` | the KiCad 9→10 upgrade + a design session: 5 additions |
-| review 4 | found **`8d85146` introduced 3 new bugs** — a mis-scoped API row, a wrong crash diagnosis, and a cross-reference pointing the wrong way — *and* that a pre-existing paragraph licensing scripted edits to third-party boards had become flatly false |
-| fixes → *(latest commit)* | applied |
-| **you** | audit the latest commit the same way |
+## First priority: audit the current diff
 
-A fix applied from a review is **unreviewed code**, and this has now held for
-three consecutive rounds. `612b4cf` shipped a `pn()` rewrite that `KeyError`s on
-191 stock symbols, a code sample that `NameError`s on every run, a new guard with
-no non-degeneracy check, and a comment naming the wrong symbol — all while
-correctly fixing nine other things. `8d85146` re-probed a five-row API table
-after a major-version bump, corrected the row that had inverted, and **stamped a
-second row "unchanged" on the strength of probing one subclass** — the row was
-wrong for every other subclass. Assume the latest commit has the same character,
-and note the pattern in both: the error was never in the headline finding, it was
-in the *neighbouring claim that rode along on the same confidence*.
+The current inventory-guidance work extends `6ef7e99`. Check that it does all of the following
+without broadening unrelated tasks:
 
-Specific things to re-derive rather than trust:
+1. Evidence class follows the record's provenance rather than the application that stores it.
+   Imported order-history quantities must not become physical-stock claims merely because they are
+   represented as InvenTree stock items.
+2. Exact-MPN and family absence checks cover every fully paginated identity-bearing search surface
+   that the interface exposes, preserve unavailable or failed surfaces, and label the conclusion
+   exhaustive or scoped within the declared source. An alias-only search must not establish
+   absence.
+3. Inventory candidates are classified as exact replacements, requirement-preserving value or
+   package changes, topology-changing alternatives, or unsuitable.
+4. Power conversion, voltage regulation, voltage supervision, series load switching, gate drive,
+   and isolation remain distinct circuit roles and requirement sets. A multifunction part may
+   satisfy several verified roles, but a part that changes the power architecture must not be
+   called a drop-in substitute.
+5. Inventory preference remains subordinate to electrical, mechanical, thermal, safety,
+   lifecycle, condition, and available-to-project requirements.
+6. The workflow still avoids credentials, authentication, and account-scoped access that the user
+   did not authorize.
 
-- The unit-0 union claim: 666 `NAME_0_*` sub-symbols with pins, 193 symbols with
-  *all* pins in unit 0 (10.0.5; they were 664/191 on 9.0.4). Is the prescribed
-  union rule actually correct, including body style 0 vs 1/2?
-- `GetEnabledLayers().CuStack()` — does it return what the snippet assumes, in
-  stack order, on a 2- and a 6-layer board? Does the rewritten via-in-pad snippet
-  now run? (`bad` initialised, `pcbnew.FromMM` correct, pair count honest?)
-- The glyph-bbox numbers: **six** symbols exceed the 2.54 height —
-  Earth_Protective 5.080, +VDC 4.318, Earth_Clean 3.810, AC and VAC 3.807,
-  −VDC 3.175 — plus GNDPWR 2.032 and asymmetric at −1.270..+1.016, and
-  Earth_Clean as the width outlier at ±2.540. Recompute from `power.kicad_sym`,
-  and **include the polyline `(xy …)` points**: a pass that counted only
-  `start`/`mid`/`end` reported "exactly four" and missed AC and VAC entirely.
-- `Conn_02x01` exists; the five suffixed variants; "positions per row".
-- The IPC column reassignment in `PCB.md` — is the 0.430 mm figure now ruled
-  against the right column, and is the 0.675 mm figure still ruled against B?
-- Whether any **other** passage still cites a number that a fix changed. This is
-  how the "97 % of a 1206" anecdote was orphaned when the resistor was corrected
-  to 103 %: the fix was right and it silently broke a paragraph 500 lines away.
-- Whether every code sample still parses **and is correctly indented** — a
-  previous fix pass broke two blocks by losing indentation during a replace.
-- Whether a rule the skill states is actually applied to the skill's **own**
-  examples. The `-O`/bare-assert rule was added in one commit and contradicted by
-  four samples in the same two files.
+Look for neighboring claims introduced with the fix. In particular, test whether the new wording
+works for inventory systems whose schemas expose equivalent information under different record
+names.
 
----
+## Second priority: false-PASS behavior
 
-## Priority 2 — the false-PASS audit
+For each described or implemented check, ask:
 
-The repo owner's documented failure mode, and the reason this skill exists:
+1. What happens when an input is missing, stale, empty, unparseable, or outside the supported
+   domain?
+2. Does the result move toward failure or `UNVERIFIED`, or can worse input return PASS?
+3. Does the check prove that it examined a nonempty subject population?
+4. Does a cache or digest cover the code and inputs that derive the result?
+5. Can a failed check persist a stale success result?
+6. Does the provenance claim exactly what was run?
+7. Has the check been calibrated with both a known-bad and a legal input?
 
-> **the anti-monotone false PASS** — a check that, when it *cannot evaluate its
-> input*, returns the value meaning "fine" instead of "unverified". It disappears
-> precisely when the situation is worst, and does so silently.
+Also look for checks that cannot fail on the examples used to justify them. Dead checks and
+anti-monotone checks are the same release risk.
 
-For every check, validator, assertion or cache the skill **describes or
-contains**, answer in writing:
+## Third priority: current toolchain facts
 
-1. **What does it return when it cannot evaluate its input?** Missing data, too
-   few samples, an unparseable file, a probe that failed, an exception. If any of
-   those paths yield "OK", it is broken. Absence of evidence must never encode
-   absence of the problem.
-2. **Is it monotone?** As input gets worse, does the verdict move monotonically
-   toward failure, with no region flipping back to PASS? Test the far tail, not
-   the near miss.
-3. **Is its own precondition checked?** A gate keyed on a flag no caller passes is
-   dead. A cache gated on a file existing proves the file exists, not that it
-   works.
-4. **Is the signature the source of truth, or a PROXY?** Caches and fingerprints
-   must cover the code that *derives* the value, not just the data it reads.
-5. **Can a failed check persist its own false verdict?** Tri-state and round-trip
-   the unknown.
-6. **Does the provenance claim more than was done?** A cached or fallback result
-   must say so.
-7. **Is it calibrated against a known-bad input?** A guard never seen to fire is
-   not a guard.
+Re-run rather than recall claims about:
 
-**And the inverse, which round 2 found and you should hunt for more of:** a check
-that can *never* fail. "Diff `rule_severities` against defaults" was recommended
-in two files as the guard against silently-ignored rules — but every rule both
-files cite as the problem *is* a stock default, so the diff reports nothing on
-every example given. Dead weight dressed as safety is the same defect wearing the
-opposite mask.
+- KiCad CLI exit behavior, report content, serialization, and netlist shape;
+- `pcbnew` API return types, units, layer order, and zone-fill behavior;
+- stock symbol and footprint geometry;
+- current ERC/DRC default severities;
+- external-router input, output, and project-file mutations;
+- standards, fabrication capabilities, lifecycle, and distributor availability.
 
----
+Every numeric clearance, creepage, or conductor-spacing standards claim must identify revision,
+table, column, voltage band, actual voltage, and applicable coating or environmental assumptions.
+For other standards claims, record the revision and the controlling inputs relevant to that claim.
+Treat vendor capabilities and catalogue state as dated facts.
 
-## Priority 3 — facts
+## Fourth priority: source authority and cross-document consistency
 
-Any numeric claim, datasheet citation, standards reference, KiCad API behaviour,
-library geometry or vendor capability that is wrong, stale, or stated without a
-checkable source. Particular rot:
+Check that each workflow preserves the declared authority:
 
-- **KiCad API/CLI claims** — these break between versions. Run them.
-- **Library geometry** — pin offsets, symbol counts, variant names. Parse the
-  library.
-- **Standards numbers** — every spacing figure must carry `standard + revision +
-  table + column + voltage band + the voltage actually used`. IPC-2221**C**
-  (Dec 2023) supersedes B, and the file flags its values as *not* re-verified
-  against C. If you can read C, that is high value.
-- **Vendor capability figures** (fab minimums, part availability) — these move
-  yearly and should carry a date and a source.
-- **Any "rule of thumb" presented as a hard limit.** The skill already contains
-  one such fossil that was wrong (`the smallest 100 nF/250 V X7R is a 1206`).
-  Look for siblings.
+- generated designs are edited through their generator;
+- hand-maintained designs are not silently converted into generated ones;
+- diagnostics operate on scratch copies;
+- transformed or autorouted boards remain candidates until explicitly promoted;
+- release evidence is bound to the exact artefact and becomes stale when an input changes;
+- examples in companions do not weaken the invariant stated in `SKILL.md`.
 
----
+Search the complete repository after correcting a term, number, command, or ownership rule. A local
+fix is incomplete while another live representation states the old contract.
 
-## Priority 4 — structure
+## Current known limitations
 
-Many hundreds of lines of dense prose, no table of contents. Round 2 flagged an **ordering
-trap**: the file-format table hands the agent hardcoded pin arithmetic for
-`Device:R` and `Conn_01xNN` *before* the section that says never to hardcode pin
-arithmetic. An agent reading top-to-bottom does the wrong thing and never learns
-otherwise. Look for more of these: advice that is correct but arrives too late,
-or is buried where a skimming agent will miss it.
+Confirm these, but do not report them as new unless the current text understates their impact:
 
----
+- `scripts/kicad_verify.py` states that `KNOWN_STOCK_IGNORES` was measured on KiCad 9.0.4 and must
+  be re-verified before use with the installed version.
+- `scripts/README.md` leaves `transform_pin()` unverified until calibrated against KiCad for the
+  project's supported transform cells.
+- Autoroute promotion is limited to exact compatibility cells in
+  `kicad-autoroute-compatibility.json`; other environments remain report-only.
+- `FOOTPRINTS.md` intentionally supplies no authoritative numeric IPC-2221C verdict. A project must
+  provide the binding current standard and complete derivation.
 
-## Known outstanding — do not re-report these as new
+## Superseded findings from the old brief
 
-Round 2 raised these and they are **not yet fixed**. Confirm, refine or refute
-them; do not spend the pass rediscovering them:
+Do not re-report these without new evidence:
 
-- `SKILL.md` — the 5 % / 3.92 % / 1 % / 6.35 % gain figures cannot be re-derived
-  from a two-resistor divider; other terms must dominate and are unnamed.
-- `PCB.md` — "a 1210's terminations are ~1.5 mm apart against an 0805's 0.9 mm"
-  is unsourced and reconciles only at one end of the dimensional envelope.
-- `SKILL.md` — JLCPCB 6 mil / PCBWay 0.15 mm silkscreen minimums carry no date or
-  URL.
-- `check_rail_orientation` — still assumes a vertical glyph axis; a 90°-rotated
-  rail over its own horizontal wire passes silently. `matched` is computed but
-  never affects the verdict.
-- `SETUP.md` check 4 — proves `channel="chrome"` headless, while §3a needs
-  `launch_persistent_context(..., headless=False)`. It passes in exactly the
-  situation §3a cannot run.
-- `SETUP.md` — the MPN grep treats the part number as a regex (`grep -ciF`), and
-  `pdftotext` hyphenation can fail a genuine datasheet.
-- `SETUP.md` — the `pdfinfo` exit-status gate may reject the encrypted-stream
-  PDFs the file elsewhere defends; needs calibrating against one.
-- `SKILL.md` — "43 ERC rules on 9.0.4" is unreproducible; counts of 43/44/45/48
-  were measured depending on the writing version.
-- The mtime half of the reproducibility rule does not specify `st_mtime_ns`; a
-  sub-second regeneration on a coarse filesystem re-creates the false PASS.
+- The repository now has four test files and 65 collected tests; the old “no test suite” statement
+  is no longer current.
+- `check_rail_orientation` is no longer present in the current skill or helper code.
+- The PDF exact-MPN example uses `rg --fixed-strings` rather than a regex MPN search.
+- The browser preflight and persistent-context example both currently use headless Chrome.
+- Current reproducibility and report-freshness helpers use `st_mtime_ns`.
+- The old gain-percentage, 1210-versus-0805, silkscreen-minimum, and “smallest 100 nF/250 V X7R”
+  claims are absent from the current core documents.
+- IPC-2221B figures are no longer presented as IPC-2221C pass/fail values.
 
----
+## Review output
 
-## Rules of engagement
+Make no edits during the review. For every finding:
 
-- **Make no edits.** Review only. Run no git command that changes state.
-- Cite `file:line` for every finding.
-- For each: what it says, what is wrong, and the **concrete correction** you would
-  make — not "consider revising".
-- Rank by *likelihood of producing a wrong board*, not by how interesting the
-  finding is.
-- If you find nothing in a category, say so plainly. An honest "I checked X and it
-  is correct" is worth more than a padded list, and the *Verified correct* sections
-  of the previous two reviews are actively useful — they stop the next pass
-  re-litigating settled facts. Include one.
+- label it `VERIFIED` when supported by a command, current source, or authoritative document;
+- label it `SUSPECT` when it is reasoned doubt that still needs a probe;
+- cite `file:line`;
+- state the failure mode and a concrete correction;
+- rank it by likelihood of causing a wrong design or false release verdict.
+
+Include a short “verified correct” section so later reviews do not repeatedly challenge settled
+behavior. Report the commands run and any surface that could not be checked.

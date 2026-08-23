@@ -22,6 +22,14 @@ K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not
 "$K" pcb drc --severity-all --schematic-parity --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
+Grade from an isolated same-stem project bundle: the candidate `.kicad_pcb` and authoritative
+`.kicad_pro` must share a basename, and a parity run also needs the matching root `.kicad_sch`.
+Copy the whole verification context: any `.kicad_dru`, hierarchical schematic sheets, library
+tables and project libraries, route manifest, and other project inputs required to resolve the
+board and schematic. To grade a differently named candidate, copy it under the authoritative stem
+inside that scratch bundle. Do not run DRC on `candidate.kicad_pcb` beside `board.kicad_pro` and
+assume KiCad applied the intended rule and parity authority.
+
 - Keep `--exit-code-violations`; without it DRC can write violations and exit zero.
 - Keep `--schematic-parity`; it checks that the board still agrees with the schematic.
 - Capture the command status before piping output, and judge the report contents as well.
@@ -128,13 +136,20 @@ inventory decision record made under [`SETUP.md`](SETUP.md). Record:
 
 - the logical source label and query timestamp with timezone, without credentials, sensitive
   locations, private endpoints, or raw account responses;
+- for each query that produced a result corpus, every identity-bearing search surface queried, its
+  pagination status, and any unavailable or failed surface; label the conclusion `exhaustive` or
+  `scoped` within that declared source. For `user-confirmed-no-source`, record these fields as
+  `not-applicable`. For `inaccessible-no-authorized-alternative`, preserve any known logical surface
+  and failure, but record pagination and conclusion scope as `not-applicable`;
 - one lookup outcome: `checked-qualified`, `checked-no-qualified-match`,
   `user-confirmed-no-source`, `user-confirmed-empty`, `empty-source-untrusted`, or
   `inaccessible-no-authorized-alternative`;
 - exact manufacturer, MPN, and package mapping for any inventory candidate;
-- quantity required, recorded on-hand, reserved/allocated, and available-to-project;
+- quantity required and, only when the source provenance establishes them, recorded on-hand,
+  reserved/allocated, and available-to-project; otherwise record those fields as unknown;
 - one quantity-evidence state: `recorded-available`, `recorded-insufficient`,
-  `purchase-history-only`, or `unknown`;
+  `purchase-history-only`, or `unknown`; keep any historical ordered quantity separate from
+  recorded on-hand;
 - the selection outcome and the engineering or procurement rationale. If a fully qualifying,
   sufficiently available owned part was not selected, state the applicable tradeoff such as
   condition, lifecycle margin, performance margin, assembly risk, or cost.

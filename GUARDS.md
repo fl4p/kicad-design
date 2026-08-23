@@ -11,6 +11,7 @@ ladder in [`SKILL.md`](SKILL.md) still apply; this file covers the checks the ge
 - [Calibrate detection and acceptance](#calibrate-detection-and-acceptance)
 - [Zone fills need semantic finalization](#zone-fills-need-semantic-finalization)
 - [Matched copper needs shape and quantity gates](#matched-copper-needs-shape-and-quantity-gates)
+- [Guard controlled mechanical interfaces](#guard-controlled-mechanical-interfaces)
 - [Guard visual geometry by object class](#guard-visual-geometry-by-object-class)
 - [Make a diagnostic probe replicate production](#make-a-diagnostic-probe-replicate-production)
 - [Establish a threshold's provenance and floor](#establish-a-thresholds-provenance-and-floor)
@@ -61,6 +62,10 @@ For each load-bearing check, record at least:
 - Derive names, membership, layer sets, endpoint nets and inventory counts from the model or
   reparsed artefact that defines them. A literal name must assert its subject exists; prefer a
   structural identity such as a refdes/pad relation when a rename should not require a code edit.
+  Do not normalize parity-sensitive KiCad data such as root-sheet leading `/`, footprint instance
+  paths, fitted/DNP and BOM flags, custom fields, or one-pad `unconnected-(...)` pseudo-nets. If a
+  temporary router input deliberately filters one of these, compare the before/after inventory
+  against an explicit allowlist and prove the authoritative saved board remained unchanged.
 - Make preconditions executable. An empty parse, zero candidates, a missing zone pair or an
   ambiguous mask is `UNVERIFIED`, never `PASS`. Report the number of subjects examined beside the
   verdict.
@@ -196,6 +201,20 @@ become ambiguous.
 Land Gate A before loosening an existing area gate. Until Gate B has a derived limit, retain the
 existing fail-closed limit or require an explicit recorded waiver; do not silently tune a
 threshold to the current board.
+
+## Guard controlled mechanical interfaces
+
+Keep enclosure-controlled outlines, slots, cutouts, apertures and component datums under one
+mechanical authority, then check the saved and reparsed board rather than the generator constants
+that requested them. Inventory the expected board-native primitive classes, require each contour to
+be closed, and measure count, dimensions and position relative to named datums. A helper footprint
+with no schematic counterpart is not an acceptable final representation of a board-level routed
+slot or cutout.
+
+Calibrate each mechanical guard by removing one feature, shifting one beyond its tolerance and
+adding an unexpected feature; require stable failure IDs that identify the feature and datum. Also
+exercise a legal movement within tolerance so an exact-coordinate check does not masquerade as a
+mechanical-interface guard.
 
 ## Guard visual geometry by object class
 

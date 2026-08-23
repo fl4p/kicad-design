@@ -24,6 +24,8 @@ pays only for what it needs:
 
 ## Contents
 
+- [Gate detailed placement and routing on floorplan review](#gate-detailed-placement-and-routing-on-floorplan-review)
+- [Prove placement is route-ready and define completion](#prove-placement-is-route-ready-and-define-completion)
 - [Scope external autorouting](#scoped-external-autorouting-opt-in-when-native-routing-stalls)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
 - [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
@@ -31,6 +33,111 @@ pays only for what it needs:
 - [Guard symmetry and matching](#symmetry-and-matching-are-invisible-to-drc)
 - [Measure surface-leakage paths](#surface-leakage-measure-the-path-not-the-gap)
 - [Audit isolated-domain clearance](#isolated-designs-the-binding-clearance-is-zone-to-zone-and-drc-is-not-asked)
+
+## Gate detailed placement and routing on floorplan review
+
+Before creating the floorplan, require the schematic-capture completion gate in
+[`SCHEMATIC.md`](SCHEMATIC.md) to pass. Do not start or delegate PCB placement from a connectivity-
+only schematic, generic-symbol draft, stale netlist, or schematic whose rendered semantic review is
+still open. If the user explicitly requests a parallel mechanical or placement study, label it
+provisional and do not promote it to the implementation board until the gate passes.
+
+Before committing a new or materially changed critical floorplan, create a review artifact that
+shows the proposed critical footprints. Use either an image or a provisional `.kicad_pcb`. An
+existing board or previously approved design brief is the baseline unless the task changes it.
+
+The artifact must be scaled well enough to review relative size and position and show:
+
+- the board outline, mounting features, and fixed connectors;
+- each critical footprint, labelled by reference and function;
+- important keepouts, isolation barriers, thermal areas, and intended routing corridors; and
+- the main power, signal, and return-flow relationships that drive placement.
+
+Treat a footprint as critical when its location or orientation carries an electrical, thermal,
+safety, mechanical, assembly, EMC, or routability requirement, or materially constrains another
+critical part. This is the same device-evidence criticality test used in `SKILL.md`; load
+[`SETUP.md`](SETUP.md) for every such component. For an image, derive component blocks from actual
+footprint body or courtyard
+extents when available. For a KiCad artifact, use the selected footprints and leave fine placement
+and copper unfinished.
+
+Present the artifact with a short layout rationale covering only the major decisions: functional
+ordering, required adjacency, partitioning, orientation, return paths, thermal flow, and mechanical
+constraints. State important tradeoffs or uncertainties. Obtain explicit approval when the user or
+project retained the choice. When the user requested an autonomous run or the accepted design brief
+already authorizes those choices, record the assumptions and rationale and continue without adding
+an approval stop.
+
+After approval or a documented authorized autonomous decision, record the reviewed artifact or
+board revision and the accepted decisions in the design documentation, then proceed with detailed
+placement and routing. Re-open the gate when a change to the board outline, fixed connectors,
+critical component or footprint, isolation scheme, major partitioning, or other floorplan
+constraint materially invalidates the accepted arrangement. If an exploratory routing scout changes
+any critical footprint position, orientation or intended corridor shown in the artifact, update the
+artifact. Obtain renewed approval before authoring the critical routing skeleton when the user or
+project retained that choice; otherwise update the recorded autonomous decision and continue.
+
+## Prove placement is route-ready and define completion
+
+An accepted or authorized floorplan is necessary but does not prove that detailed placement is
+routable. Before promotable routing, audit the placed board using actual pad, body, courtyard,
+drilled-hole and side-specific geometry:
+
+- cluster each datasheet-critical bypass, compensation, timing, reference, protection and analogue
+  support part with the pins and return it serves; do not assign a critical passive through a
+  generic grid fallback;
+- orient passives and other routability-sensitive footprints from their pad roles and legal escape
+  directions, not only their body outline or schematic order; a 180-degree rotation can determine
+  whether the required connection is direct or crosses another constrained pad;
+- include the body, courtyard, hole and keepout envelopes on every occupied side and layer,
+  especially opposite-side parts around through-hole connectors, fixtures and cable-relief lands;
+- reserve explicit pad-escape and layer-transition corridors for constrained nets, including
+  guards, Kelvin/sense pairs, differential pairs, slot or barrier crossings, high-current paths and
+  their returns;
+- check that buses, planes and routine routes have not consumed those corridors;
+- assert topology and project-derived maximum path or loop bounds for critical groups. Use a
+  datasheet, electrical model, accepted floorplan or explicit routing budget for numeric limits;
+  never raise a failed bound to match the accidental placement; and
+- treat an exploratory router plateau or repeated congestion at the same pins as evidence to
+  re-evaluate placement and corridor assumptions, constraint serialization, routing ownership and
+  layer strategy. Long cross-board ratsnests from an IC to its critical support parts are direct
+  evidence of bad placement. Diagnose the cause rather than adding unsafe jumpers or lowering
+  completion criteria.
+
+Represent board-level routed slots and cutouts with board-native geometry such as closed
+`Edge.Cuts` contours, not standalone helper footprints with no schematic counterpart. Keep their
+outline, count and datums under one mechanical authority, then remeasure those properties from the
+saved board; generator constants alone do not prove the enclosure interface that will be fabricated.
+
+Classify the requested outcome before routing:
+
+| outcome | permissible residual |
+|---|---|
+| **Placement or routing draft** | May retain ratsnests and named DRC findings when the user explicitly requested a draft; enumerate them and do not call the board complete or fabrication-ready |
+| **Completed PCB implementation** | Zero electrical unconnected items; zero unresolved applicable electrical, copper, outline or other completion-critical DRC findings when graded against the authoritative rule map, regardless of an accidental or unapproved warning/ignore severity; a valid closed outline; applicable schematic parity and project-critical route/return/guard audits passing; every inapplicable check, exclusion or approved waiver explicit and scoped |
+| **Fabrication release** | Completed PCB gate plus the release evidence in [`RELEASE.md`](RELEASE.md), relevant physical-sample and enclosure decisions, fabrication outputs and bound reports |
+
+An operational limit—router pass count, time budget, flattening search progress, tool failure or
+agent cutoff—does not change the requested outcome. Preserve the best candidate, then revise
+agent-owned placement, routing ownership, constraint encoding or layer strategy within the accepted
+design space and continue. If a user-owned mechanical, stackup or interface constraint must change,
+propose the change and obtain approval. If the completed-board gate genuinely cannot be reached
+within the authorized design space, report the task as blocked with exact nets/endpoints and the
+structural cause; never rename that checkpoint a completed or bounded deliverable. An exclusion or
+waiver can bound a specific physical rule deviation; it can never excuse unrouted electrical
+connectivity.
+
+Classify silkscreen and documentation findings separately so cosmetic volume does not hide an
+electrical failure. Conversely, open physical-sample, enclosure, potting, thermal or bench-test
+gates may prevent fabrication release without excusing unfinished electrical CAD.
+
+The agent responsible for the final handoff must independently reproduce the final artefact from
+its declared authority—or verify the exact explicitly hand-maintained final board—and apply the
+verification ladder in [`SKILL.md`](SKILL.md). For external routing, verify the promoted
+manifest-generated final, never the raw candidate or imported SES board. Require a fresh report
+bound to the final artefact, review effective severities, exclusions and applicable board-only
+waivers, prove zero electrical unconnected items, and rerun project connectivity/geometry guards.
+Do not accept another agent's, autorouter's or wrapper's summary as the completion verdict.
 
 ## Scoped external autorouting: opt in when native routing stalls
 
@@ -41,6 +148,20 @@ Choose routing ownership before choosing a backend:
 | **Exploratory** | Probe placement, congestion, possible corridors, via pressure, and whether the current floor plan is plausibly routable | Disposable report only. Never promote it, and do not transplant its coordinates into generator source as if they were reviewed routes |
 | **Critical** | Implement geometry whose shape carries an electrical, thermal, safety, or fabrication requirement | Generator-owned on generated boards; manually authored only on explicitly hand-maintained boards. Route and audit it before making the promotable seed |
 | **Routine** | Complete explicitly allowlisted low-risk connectivity around the finished critical skeleton | Freerouting may propose it; only verified canonical manifest geometry becomes a generator input |
+
+Treat every routing or repair pass as a transaction against a preserved, KiCad-graded checkpoint:
+
+- clear placement-origin shorts, ordinary clearance, hole and edge failures before routing so later
+  findings have an attributable cause;
+- allow rip-up only for named blocking nets or an explicitly named interacting bundle, and protect
+  all unrelated accepted copper;
+- compare the exact gained and lost unconnected endpoint identities, DRC findings and protected
+  primitives after every pass; a lower total count can hide a reopened accepted connection; and
+- keep and restore the best checkpoint by an explicit comparator. Reject a later pass that regresses
+  it, including a routed board re-exported through Specctra or another router representation.
+
+When a local nudge trades one corridor violation for another, restore the clean checkpoint and
+reroute the whole interacting bundle rather than promoting a less visible defect.
 
 External autorouting is optional. Start with the project's established native, manual, interactive,
 or generator-owned routing path. Consider an exploratory Freerouting run when routing is in scope
@@ -158,6 +279,13 @@ area exists in KiCad. Calibrate the consumed-input path with a known-bad route t
 rejects and a legal route that remains accepted; a board reload alone does not prove enforcement by
 the external router.
 
+Preserve parity-sensitive board data exactly through the transformation: root-sheet net names keep
+KiCad's leading `/`, footprint instance paths remain attached to the same instances, fitted/DNP and
+BOM flags and custom fields remain unchanged, and one-pad `unconnected-(...)` pseudo-nets remain in
+the authoritative saved board. If a pinned router version requires a pseudo-net or other
+compatibility cleanup, apply it only to the temporary router input and audit the before/after
+inventory against an explicit allowlist; never normalize the final board to suit the router.
+
 ### Diff the project file after any external router runs
 
 A router may rewrite `.kicad_pro`. One measured case relaxed
@@ -186,6 +314,11 @@ Keep at least these structures critical:
 - RF/HF, controlled-impedance, differential/skew, clock, and other
   stackup/return-path-sensitive routes; and
 - Kelvin, sense, guard, star-point, plane-entry, and other topology-bearing nets.
+
+A driven guard is a topology, not merely copper carrying the guard net. Audit its driver and
+reference, electrical continuity, required enclosure and adjacency, and any requirement-derived
+layer-transition, via, solder-mask or exposure constraints. Same-net decorative copper is not proof
+that the guarded path is continuously protected.
 
 A uniform trace width and clearance can remain routine when those dimensions are
 the whole requirement and the exact class/style is checked after import. If the
@@ -323,7 +456,9 @@ python3 scripts/kicad_autoroute_scaffold.py apply \
 The production flow is a candidate-and-promotion pipeline:
 
 ```text
-optional exploratory scout -> revise placement/corridors -> discard scout copper
+accepted or authorized critical-footprint floorplan -> optional exploratory scout
+-> revise placement/corridors if needed -> discard scout copper
+-> update artifact and renew user approval or recorded autonomous decision as applicable
 -> generator-owned critical skeleton -> deterministic seed with routine opens
 -> Freerouting routine candidate -> verification -> route manifest -> final generator
 ```

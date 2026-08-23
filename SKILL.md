@@ -15,6 +15,7 @@ Read only the companions required by the task:
 
 | file | read it when |
 |---|---|
+| [`SCHEMATIC.md`](SCHEMATIC.md) | the task captures, generates, edits, reviews, or declares completion of a schematic, or begins PCB work from one |
 | [`SETUP.md`](SETUP.md) | the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires a datasheet, reference design, eval-board documentation, current part status, inventory, stock, or distributor data |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or autorouting |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
@@ -138,6 +139,14 @@ Prefer library-derived pins and graphics over memorized offsets. When generating
 6. Emit and export a calibration schematic, then compare every supported angle/mirror cell from
    `kicad_symlib.calibration_plan()` with KiCad's netlist. One exercised cell is not calibration of
    the transform space.
+
+Schematic capture is a human-reviewable engineering deliverable, not merely a connectivity model.
+Apply the capture-completion and PCB-start gates in [`SCHEMATIC.md`](SCHEMATIC.md). In particular,
+do not represent a typed component with a generic box or generic two-pin placeholder when its
+electrical class has an established symbol: use the appropriate resistor, capacitor, polarized
+capacitor, fuse, inductor, diode, Zener/TVS, transistor, potentiometer, connector, power, test-point,
+or other class-specific graphic with correct pin and polarity semantics. A reference prefix, value,
+footprint, or clean ERC result does not repair an incorrect or semantically empty graphic.
 
 Use balanced S-expression blocks when parsing KiCad files. Do not pair fields with a single
 cross-block `.*?` regular expression; it can combine a property coordinate with an unrelated pin
@@ -264,10 +273,18 @@ Before broad-market search in a component-selection, substitution, or procuremen
 - Never initiate authentication or ask for credentials merely to complete the check. If the
   declared source is inaccessible, ask whether another already-authorized source is available,
   record the outcome, and continue only after the user answers.
-- Prefer an owned part only when its exact manufacturer, MPN, and package match and it satisfies
-  every mandatory constraint with suitable condition and sufficient available-to-project quantity.
+- Prefer an owned part only when the inventory record establishes its exact manufacturer, MPN,
+  and package and the candidate satisfies every mandatory constraint with suitable condition and
+  sufficient available-to-project quantity.
   Record the lookup outcome and selection rationale when the decision is made; inventory preference
   never compensates for missing engineering or lifecycle evidence.
+- After checking exact replacements, sweep owned inventory by required function and classify each
+  relevant result as an exact replacement, a requirement-preserving value or package change, a
+  topology-changing alternative, or unsuitable. Treat power conversion, regulation, supervision,
+  series load switching, gate drive, and isolation as distinct circuit roles and requirement sets;
+  one part may satisfy several roles only when each is verified. Report topology-changing
+  candidates separately rather than hiding them under “no replacement” or presenting
+  non-interchangeable roles as drop-ins.
 
 Then:
 
@@ -300,6 +317,14 @@ If the needed evidence remains inaccessible, stop and request the document. Do n
 part or quote a specification from memory merely to keep moving.
 
 ## Review and hand off
+
+Preserve the user's requested outcome through the handoff. Distinguish an exploratory placement or
+routing draft, a completed PCB implementation, and a fabrication release; do not let a tool, retry
+limit or delegated agent silently downgrade one into another. For board work, apply the placement
+readiness and hard completion gates in [`PCB.md`](PCB.md). If a requested completed board still has
+electrical ratsnests or true copper DRC failures, continue by revising placement or routing strategy,
+or report it blocked with exact evidence—never report it complete merely because a bounded run
+ended.
 
 Recompute important arithmetic independently, remeasure geometry from the emitted files, and
 separate confirmation of a defect from confirmation of the reported number.
