@@ -230,10 +230,9 @@ Do not omit `--exit-code-violations`: ERC and DRC can report violations while ex
 hide its status behind a pipeline; capture the command status before filtering output or enable
 `pipefail`. Judge the report contents as well as the process status.
 
-Treat every `.kicad_pro` severity map as sparse configured overrides, not a complete effective rule
-universe. Missing or empty maps are especially `unverified`, but a nonempty map still cannot prove
-that nothing else defaults to `ignore`; require a complete, version-bound resolution. Diff
-`.kicad_pro` before and after generators and restore unintended changes before running verification.
+Treat every `.kicad_pro` severity map as sparse configured overrides — even a nonempty map cannot
+prove nothing else defaults to `ignore`; resolve effective severities per [`RELEASE.md`](RELEASE.md).
+Diff `.kicad_pro` before and after generators and restore unintended changes before verification.
 
 Parse exported netlists independently of KiCad's pretty-printing. Accept arbitrary whitespace,
 count the input `(net` blocks, require the parsed count to match, require nodes, and test an older
@@ -277,27 +276,13 @@ Before broad-market search in a component-selection, substitution, or procuremen
 
 - Derive the mandatory electrical, mechanical, thermal, environmental, safety, compliance,
   assembly, lifecycle, package, and quantity constraints before evaluating candidates.
-- Check user-owned inventory through a user-declared, already-authorized read-only source and query
-  any similarly authorized order history the user declares for candidate discovery. If no source
-  has been declared, ask the user whether an inventory exists and how it can be queried. If a valid
-  inventory query reports that the inventory itself is empty, ask whether the source is
-  intentionally empty, stale, or uninitialized before proceeding. Ask once per task and reuse the
-  answer; a non-empty inventory with no qualifying match is not an empty inventory.
-- Never initiate authentication or ask for credentials merely to complete the check. If the
-  declared source is inaccessible, ask whether another already-authorized source is available,
-  record the outcome, and continue only after the user answers.
-- Prefer an owned part only when the inventory record establishes its exact manufacturer, MPN,
-  and package and the candidate satisfies every mandatory constraint with suitable condition and
-  sufficient available-to-project quantity.
-  Record the lookup outcome and selection rationale when the decision is made; inventory preference
-  never compensates for missing engineering or lifecycle evidence.
-- After checking exact replacements, sweep owned inventory by required function and classify each
-  relevant result as an exact replacement, a requirement-preserving value or package change, a
-  topology-changing alternative, or unsuitable. Treat power conversion, regulation, supervision,
-  series load switching, gate drive, and isolation as distinct circuit roles and requirement sets;
-  one part may satisfy several roles only when each is verified. Report topology-changing
-  candidates separately rather than hiding them under “no replacement” or presenting
-  non-interchangeable roles as drop-ins.
+- Check user-owned inventory and any declared order history under [`SETUP.md`](SETUP.md)'s
+  owned-inventory contract: only user-declared, already-authorized read-only sources; never
+  initiate authentication or request credentials; ask once per task and record the lookup outcome.
+- Prefer an owned part, and sweep inventory by required function after exact replacements, only
+  under that contract's evidence and classification rules; report topology-changing candidates
+  separately, and never let inventory preference compensate for missing engineering or lifecycle
+  evidence.
 
 Then:
 

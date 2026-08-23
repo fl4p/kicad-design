@@ -108,6 +108,20 @@ these evidence types rather than treating them as interchangeable fallback rungs
   product status or an explicit lifecycle, PDN, or EOL notice. Use other PCNs only for the claims
   they actually state. The vendor datasheet establishes technical suitability.
 
+Prefer an owned part only when the inventory record establishes its exact manufacturer, MPN, and
+package and the candidate satisfies every mandatory constraint with suitable condition and
+sufficient available-to-project quantity. Record the lookup outcome and selection rationale when
+the decision is made; inventory preference never compensates for missing engineering or lifecycle
+evidence.
+
+After checking exact replacements, sweep owned inventory by required function and classify each
+relevant result as an exact replacement, a requirement-preserving value or package change, a
+topology-changing alternative, or unsuitable. Treat power conversion, regulation, supervision,
+series load switching, gate drive, and isolation as distinct circuit roles and requirement sets;
+one part may satisfy several roles only when each is verified. Report topology-changing
+candidates separately rather than hiding them under “no replacement” or presenting
+non-interchangeable roles as drop-ins.
+
 Inventory access failure is non-blocking after the required user clarification, but missing
 load-bearing electrical, mechanical, safety, exact-MPN, lifecycle, or datasheet evidence retains
 this skill's fail-closed behavior. Follow [`RELEASE.md`](RELEASE.md) for the inventory decision
