@@ -21,6 +21,7 @@ import collections
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -46,6 +47,7 @@ try:
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
+        canonical_routes,
         compare_drc,
         config_path,
         filter_candidate_routes,
@@ -86,6 +88,7 @@ except ImportError:  # imported as scripts.kicad_route_candidate
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
+        canonical_routes,
         compare_drc,
         config_path,
         filter_candidate_routes,
@@ -306,12 +309,378 @@ def _validate_routing(routing, where):
         raise RouteReportError("%s summary does not match route items" % where)
 
 
+def _require_string(value, where, *, nonempty=False):
+    if not isinstance(value, str) or (nonempty and not value):
+        raise RouteReportError("%s is not a valid string" % where)
+
+
+def _require_float(value, where):
+    if (isinstance(value, bool) or not isinstance(value, float)
+            or not math.isfinite(value)):
+        raise RouteReportError("%s is not a float" % where)
+
+
+def _require_layers(value, where):
+    if not isinstance(value, list):
+        raise RouteReportError("%s is not a layer list" % where)
+    for index, layer in enumerate(value):
+        _require_int(layer, "%s[%d]" % (where, index), minimum=0)
+    if value != sorted(set(value)):
+        raise RouteReportError("%s is not canonical" % where)
+
+
+def _validate_path(value, where):
+    _require_exact_fields(value, {"closed", "points_nm"}, where)
+    if not isinstance(value["closed"], bool):
+        raise RouteReportError("%s closed is not a boolean" % where)
+    points = value["points_nm"]
+    if not isinstance(points, list) or not points:
+        raise RouteReportError("%s points_nm is empty or invalid" % where)
+    for index, point in enumerate(points):
+        _require_point(point, "%s points_nm[%d]" % (where, index))
+
+
+def _validate_shape_geometry(value, where):
+    common = {
+        "shape", "shape_kind", "width_nm", "stroke_type", "fill_mode",
+        "hatch_line_width_nm", "hatch_line_spacing_nm",
+    }
+    variants = {
+        "segment": {"start_nm", "end_nm"},
+        "rectangle": {"corners", "corner_radius_nm"},
+        "arc": {
+            "start_nm", "mid_nm", "end_nm", "center_nm", "radius_nm",
+            "angle_deg", "clockwise",
+        },
+        "circle": {"center_nm", "radius_nm"},
+        "polygon": {"polygons"},
+        "bezier": {"start_nm", "control1_nm", "control2_nm", "end_nm"},
+    }
+    if not isinstance(value, dict):
+        raise RouteReportError("%s is not an object" % where)
+    kind = value.get("shape_kind")
+    fields = variants.get(kind)
+    if fields is None:
+        raise RouteReportError("%s has unsupported shape kind %r" % (where, kind))
+    _require_exact_fields(value, common | fields, where)
+    expected_shape = {
+        "segment": 0, "rectangle": 1, "arc": 2, "circle": 3,
+        "polygon": 4, "bezier": 5,
+    }[kind]
+    if value["shape"] != expected_shape:
+        raise RouteReportError("%s shape code does not match its kind" % where)
+    for key in (
+        "shape", "width_nm", "fill_mode", "hatch_line_width_nm",
+        "hatch_line_spacing_nm",
+    ):
+        _require_int(value[key], "%s %s" % (where, key), minimum=0)
+    _require_string(value["stroke_type"], where + " stroke_type", nonempty=True)
+    if value["stroke_type"] not in {
+            "default", "solid", "dash", "dot", "dash_dot", "dash_dot_dot"}:
+        raise RouteReportError("%s stroke_type is unsupported" % where)
+    for key in (
+        "start_nm", "mid_nm", "end_nm", "center_nm", "control1_nm",
+        "control2_nm",
+    ):
+        if key in value:
+            _require_point(value[key], "%s %s" % (where, key))
+    if kind in {"segment", "bezier"} and value["start_nm"] > value["end_nm"]:
+        raise RouteReportError("%s endpoints are not canonical" % where)
+    if kind == "rectangle":
+        _validate_path(value["corners"], where + " corners")
+        _require_int(
+            value["corner_radius_nm"], where + " corner_radius_nm", minimum=0
+        )
+    if kind == "arc":
+        _require_int(value["radius_nm"], where + " radius_nm", minimum=0)
+        _require_float(value["angle_deg"], where + " angle_deg")
+        if not isinstance(value["clockwise"], bool):
+            raise RouteReportError("%s clockwise is not a boolean" % where)
+    if kind == "circle":
+        _require_int(value["radius_nm"], where + " radius_nm", minimum=0)
+    if kind == "polygon":
+        polygons = value["polygons"]
+        if not isinstance(polygons, list) or not polygons:
+            raise RouteReportError("%s polygons is empty or invalid" % where)
+        for index, polygon in enumerate(polygons):
+            polygon_where = "%s polygons[%d]" % (where, index)
+            _require_exact_fields(polygon, {"outline", "holes"}, polygon_where)
+            _validate_path(polygon["outline"], polygon_where + " outline")
+            if not isinstance(polygon["holes"], list):
+                raise RouteReportError("%s holes is not a list" % polygon_where)
+            for hole_index, hole in enumerate(polygon["holes"]):
+                _validate_path(
+                    hole, "%s holes[%d]" % (polygon_where, hole_index)
+                )
+
+
+def _validate_text_geometry(value, where):
+    fields = {
+        "text", "position_nm", "size_nm", "thickness_nm", "angle_deg",
+        "horizontal_justify", "vertical_justify", "mirrored", "bold",
+        "italic", "knockout", "font_name", "style_name", "line_spacing",
+        "keep_upright",
+    }
+    _require_exact_fields(value, fields, where)
+    for key in ("text", "font_name", "style_name"):
+        _require_string(value[key], "%s %s" % (where, key))
+    for key in ("position_nm", "size_nm"):
+        _require_point(value[key], "%s %s" % (where, key))
+    _require_int(value["thickness_nm"], where + " thickness_nm", minimum=0)
+    _require_float(value["angle_deg"], where + " angle_deg")
+    _require_float(value["line_spacing"], where + " line_spacing")
+    for key in ("horizontal_justify", "vertical_justify"):
+        _require_int(value[key], "%s %s" % (where, key))
+    for key in (
+        "mirrored", "bold", "italic", "knockout", "keep_upright",
+    ):
+        if not isinstance(value[key], bool):
+            raise RouteReportError("%s %s is not a boolean" % (where, key))
+
+
+def _validate_complete_geometry(value, where):
+    if not isinstance(value, dict) or not value:
+        raise RouteReportError("%s is empty or invalid" % where)
+    if not set(value) <= {"shape_geometry", "text_geometry"}:
+        raise RouteReportError("%s has unsupported fields" % where)
+    if "shape_geometry" in value:
+        _validate_shape_geometry(value["shape_geometry"], where + " shape")
+    if "text_geometry" in value:
+        _validate_text_geometry(value["text_geometry"], where + " text")
+
+
+def _validate_drawing(value, where):
+    required = {"uuid", "kind", "layers", "complete_geometry"}
+    optional = {
+        "GetPosition", "GetStart", "GetEnd", "GetWidth", "GetShape",
+        "GetText", "GetTextSize", "GetTextAngleDegrees", "IsLocked",
+    }
+    if not isinstance(value, dict) or not required <= set(value):
+        raise RouteReportError("%s lacks required fields" % where)
+    if set(value) - required - optional:
+        raise RouteReportError("%s has unsupported fields" % where)
+    _require_string(value["uuid"], where + " uuid", nonempty=True)
+    _require_string(value["kind"], where + " kind", nonempty=True)
+    expected_geometry = {
+        "PCB_SHAPE": {"shape_geometry"},
+        "PCB_TEXT": {"text_geometry"},
+    }.get(value["kind"])
+    if expected_geometry is None:
+        raise RouteReportError("%s kind is unsupported" % where)
+    _require_layers(value["layers"], where + " layers")
+    _validate_complete_geometry(value["complete_geometry"], where + " geometry")
+    if set(value["complete_geometry"]) != expected_geometry:
+        raise RouteReportError("%s geometry differs from its object kind" % where)
+    for key in ("GetPosition", "GetStart", "GetEnd", "GetTextSize"):
+        if key in value:
+            _require_point(value[key], "%s %s" % (where, key))
+    for key in ("GetWidth", "GetShape"):
+        if key in value:
+            _require_int(value[key], "%s %s" % (where, key), minimum=0)
+    if "GetText" in value:
+        _require_string(value["GetText"], where + " GetText")
+    if "GetTextAngleDegrees" in value:
+        _require_float(value["GetTextAngleDegrees"], where + " GetTextAngleDegrees")
+    if "IsLocked" in value and not isinstance(value["IsLocked"], bool):
+        raise RouteReportError("%s IsLocked is not a boolean" % where)
+    if "GetStart" in value and "GetEnd" in value and value["GetStart"] > value["GetEnd"]:
+        raise RouteReportError("%s raw endpoints are not canonical" % where)
+    complete = value["complete_geometry"]
+    if "shape_geometry" in complete:
+        shape = complete["shape_geometry"]
+        if value.get("GetShape") != shape["shape"] or value.get("GetWidth") != shape["width_nm"]:
+            raise RouteReportError("%s raw shape fields differ from complete geometry" % where)
+    if "text_geometry" in complete:
+        text = complete["text_geometry"]
+        cross = {
+            "GetText": "text", "GetPosition": "position_nm",
+            "GetTextSize": "size_nm", "GetTextAngleDegrees": "angle_deg",
+        }
+        if any(value.get(raw) != text[field] for raw, field in cross.items()):
+            raise RouteReportError("%s raw text fields differ from complete geometry" % where)
+
+
+def _validate_pad(value, where):
+    _require_exact_fields(
+        value,
+        {
+            "number", "net", "position_nm", "size_nm", "drill_nm", "shape",
+            "orientation_deg", "layers", "locked",
+        },
+        where,
+    )
+    _require_string(value["number"], where + " number")
+    _require_string(value["net"], where + " net")
+    for key in ("position_nm", "size_nm", "drill_nm"):
+        _require_point(value[key], "%s %s" % (where, key))
+    _require_int(value["shape"], where + " shape", minimum=0)
+    _require_float(value["orientation_deg"], where + " orientation_deg")
+    _require_layers(value["layers"], where + " layers")
+    if not isinstance(value["locked"], bool):
+        raise RouteReportError("%s locked is not a boolean" % where)
+
+
+def _validate_footprint(value, where):
+    _require_exact_fields(
+        value,
+        {
+            "uuid", "reference", "fpid", "position_nm", "orientation_deg",
+            "flipped", "locked", "attributes", "pads", "graphics",
+        },
+        where,
+    )
+    for key in ("uuid", "reference"):
+        _require_string(value[key], "%s %s" % (where, key), nonempty=True)
+    _require_string(value["fpid"], where + " fpid")
+    _require_point(value["position_nm"], where + " position_nm")
+    _require_float(value["orientation_deg"], where + " orientation_deg")
+    for key in ("flipped", "locked"):
+        if not isinstance(value[key], bool):
+            raise RouteReportError("%s %s is not a boolean" % (where, key))
+    _require_int(value["attributes"], where + " attributes", minimum=0)
+    if not isinstance(value["pads"], list) or not isinstance(value["graphics"], list):
+        raise RouteReportError("%s pad/graphic collections are not lists" % where)
+    for index, pad in enumerate(value["pads"]):
+        _validate_pad(pad, "%s pads[%d]" % (where, index))
+    for index, drawing in enumerate(value["graphics"]):
+        _validate_drawing(drawing, "%s graphics[%d]" % (where, index))
+    for key in ("pads", "graphics"):
+        canonical = sorted(
+            value[key],
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        )
+        if value[key] != canonical:
+            raise RouteReportError("%s %s are not canonical" % (where, key))
+
+
+def _validate_zone(value, where):
+    _require_exact_fields(
+        value,
+        {
+            "name", "net", "layers", "priority", "rule_area", "locked",
+            "min_thickness_nm", "corners_nm",
+        },
+        where,
+    )
+    _require_string(value["name"], where + " name")
+    _require_string(value["net"], where + " net")
+    _require_layers(value["layers"], where + " layers")
+    _require_int(value["priority"], where + " priority", minimum=0)
+    _require_int(value["min_thickness_nm"], where + " min_thickness_nm", minimum=0)
+    for key in ("rule_area", "locked"):
+        if not isinstance(value[key], bool):
+            raise RouteReportError("%s %s is not a boolean" % (where, key))
+    corners = value["corners_nm"]
+    if not isinstance(corners, list):
+        raise RouteReportError("%s corners_nm is not a list" % where)
+    for index, point in enumerate(corners):
+        _require_point(point, "%s corners_nm[%d]" % (where, index))
+    if corners != sorted(corners):
+        raise RouteReportError("%s corners_nm is not canonical" % where)
+
+
+def _identity_semantics(snapshot):
+    """Return expected identity semantics, with known UUID bindings where available."""
+    expected = []
+    known = {}
+
+    def add(kind, semantic, uuid=None):
+        expected.append((kind, semantic))
+        if uuid is not None:
+            if uuid in known:
+                raise RouteReportError("semantic snapshot repeats UUID %s" % uuid)
+            known[uuid] = {"kind": kind, "semantic": semantic}
+
+    for footprint in snapshot["nonrouting_items"]["footprints"]:
+        own = {
+            key: value for key, value in footprint.items()
+            if key not in {"uuid", "pads", "graphics"}
+        }
+        add("footprint", own, footprint["uuid"])
+        for pad in footprint["pads"]:
+            add("pad", {"parent_reference": footprint["reference"], "pad": pad})
+        for graphic in footprint["graphics"]:
+            add(
+                "footprint-graphic",
+                {
+                    "parent_reference": footprint["reference"],
+                    "parent_uuid": footprint["uuid"],
+                    "parent_attributes": footprint["attributes"],
+                    "graphic": {
+                        key: value for key, value in graphic.items() if key != "uuid"
+                    },
+                },
+                graphic["uuid"],
+            )
+    for route in snapshot["routing"]["items"]:
+        add("route", route)
+    for zone in snapshot["nonrouting_items"]["zones"]:
+        add("zone", zone)
+    for drawing in snapshot["nonrouting_items"]["drawings"]:
+        add(
+            "drawing",
+            {key: value for key, value in drawing.items() if key != "uuid"},
+            drawing["uuid"],
+        )
+    return expected, known
+
+
+def _validate_identities(snapshot, where):
+    identities = snapshot["identities"]
+    if not isinstance(identities, dict):
+        raise RouteReportError("%s identities is not an object" % where)
+    uuid_pattern = re.compile(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    )
+    allowed = {
+        "footprint", "pad", "footprint-graphic", "route", "zone", "drawing",
+    }
+    actual = []
+    for uuid, entry in identities.items():
+        if not isinstance(uuid, str) or not uuid_pattern.fullmatch(uuid):
+            raise RouteReportError("%s identity UUID %r is invalid" % (where, uuid))
+        _require_exact_fields(entry, {"kind", "semantic"}, where + " identity " + uuid)
+        if entry["kind"] not in allowed or not isinstance(entry["semantic"], dict):
+            raise RouteReportError("%s identity %s is malformed" % (where, uuid))
+        actual.append((entry["kind"], entry["semantic"]))
+
+    expected, known = _identity_semantics(snapshot)
+    for uuid, entry in known.items():
+        if identities.get(uuid) != entry:
+            raise RouteReportError(
+                "%s identity %s differs from validated object semantics"
+                % (where, uuid)
+            )
+    expected_counter = collections.Counter(
+        (kind, json.dumps(semantic, sort_keys=True, separators=(",", ":")))
+        for kind, semantic in expected
+    )
+    actual_counter = collections.Counter(
+        (kind, json.dumps(semantic, sort_keys=True, separators=(",", ":")))
+        for kind, semantic in actual
+    )
+    if actual_counter != expected_counter:
+        raise RouteReportError(
+            "%s identity coverage differs from validated board objects" % where
+        )
+
+
+def identity_map_from_snapshot(snapshot):
+    """Create the exact DRC UUID map after snapshot validation."""
+    return {
+        uuid: entry["kind"] + ":" + json.dumps(
+            entry["semantic"], sort_keys=True, separators=(",", ":")
+        )
+        for uuid, entry in snapshot["identities"].items()
+    }
+
+
 def _validate_semantic_snapshot(snapshot, where):
     """Validate the worker boundary before any snapshot field is trusted."""
     required = {
         "schema", "board", "netclasses", "routing", "nonrouting_sha256",
         "nonrouting_point_quantum_nm", "nonrouting_category_sha256",
-        "nonrouting_items", "nonrouting_counts",
+        "nonrouting_items", "nonrouting_counts", "identities",
     }
     if not isinstance(snapshot, dict) or set(snapshot) != required:
         present = sorted(snapshot) if isinstance(snapshot, dict) else type(snapshot).__name__
@@ -324,7 +693,7 @@ def _validate_semantic_snapshot(snapshot, where):
             % (where, snapshot["schema"], SNAPSHOT_SCHEMA)
         )
     for key in ("board", "netclasses", "routing", "nonrouting_category_sha256",
-                "nonrouting_items", "nonrouting_counts"):
+                "nonrouting_items", "nonrouting_counts", "identities"):
         if not isinstance(snapshot[key], dict):
             raise RouteReportError("%s semantic snapshot %s is not an object" % (where, key))
     _validate_board_summary(snapshot["board"], where + " semantic snapshot board")
@@ -352,6 +721,33 @@ def _validate_semantic_snapshot(snapshot, where):
             raise RouteReportError(
                 "%s semantic snapshot nonrouting %s is not a list"
                 % (where, key)
+            )
+    for index, footprint in enumerate(snapshot["nonrouting_items"]["footprints"]):
+        _validate_footprint(
+            footprint, "%s semantic snapshot footprints[%d]" % (where, index)
+        )
+    footprints = snapshot["nonrouting_items"]["footprints"]
+    if footprints != sorted(
+        footprints,
+        key=lambda item: (
+            item["reference"], json.dumps(item, sort_keys=True)
+        ),
+    ):
+        raise RouteReportError("%s semantic snapshot footprints are not canonical" % where)
+    for index, zone in enumerate(snapshot["nonrouting_items"]["zones"]):
+        _validate_zone(zone, "%s semantic snapshot zones[%d]" % (where, index))
+    for index, drawing in enumerate(snapshot["nonrouting_items"]["drawings"]):
+        _validate_drawing(
+            drawing, "%s semantic snapshot drawings[%d]" % (where, index)
+        )
+    for key in ("zones", "drawings"):
+        values = snapshot["nonrouting_items"][key]
+        if values != sorted(
+            values,
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        ):
+            raise RouteReportError(
+                "%s semantic snapshot %s are not canonical" % (where, key)
             )
     if not re.fullmatch(r"[0-9a-f]{64}", str(snapshot["nonrouting_sha256"])):
         raise RouteReportError("%s semantic snapshot digest is invalid" % where)
@@ -394,6 +790,7 @@ def _validate_semantic_snapshot(snapshot, where):
             "%s semantic snapshot nonrouting counts do not match its items"
             % where
         )
+    _validate_identities(snapshot, where + " semantic snapshot")
     return snapshot
 
 
@@ -1521,6 +1918,7 @@ def _validate_identity_envelope(
     request_id: str,
     pcbnew_version: str,
     board_sha256: str,
+    expected_snapshot: dict,
     where: str,
 ) -> dict[str, str]:
     required = {
@@ -1541,7 +1939,6 @@ def _validate_identity_envelope(
     identities = value["identity_map"]
     if (
         not isinstance(identities, dict)
-        or not identities
         or any(not isinstance(key, str) or not key for key in identities)
         or any(
             not isinstance(item, str)
@@ -1579,6 +1976,11 @@ def _validate_identity_envelope(
         raise RouteReportError("%s identity kind coverage does not match its map" % where)
     if value["identity_sha256"] != canonical_json_sha256(identities):
         raise RouteReportError("%s identity digest does not match its map" % where)
+    expected_identities = identity_map_from_snapshot(expected_snapshot)
+    if identities != expected_identities:
+        raise RouteReportError(
+            "%s identity map differs from the validated board snapshot" % where
+        )
     return identities
 
 
@@ -1589,6 +1991,17 @@ def _identity_map(
     workspace: Path,
     pcbnew_version: str,
 ) -> dict[str, str]:
+    snapshot_result = _worker_call(
+        kicad_python,
+        "snapshot",
+        [board],
+        output.with_name(output.stem + "-semantic.json"),
+        workspace,
+        pcbnew_version,
+    )
+    expected_snapshot = _validate_semantic_snapshot(
+        snapshot_result.get("snapshot"), "identity-map semantic worker"
+    )
     request_id = secrets.token_hex(24)
     before = _file_stamp(output)
     board_sha256 = digest(board)
@@ -1621,6 +2034,7 @@ def _identity_map(
         request_id=request_id,
         pcbnew_version=pcbnew_version,
         board_sha256=board_sha256,
+        expected_snapshot=expected_snapshot,
         where="KiCad identity-map worker",
     )
 
@@ -1724,6 +2138,7 @@ def _validate_route_apply_summary(
     input_board_sha256: str,
     routes: list[dict],
     output_board_sha256: str,
+    reloaded_snapshot: dict,
 ):
     required = {
         "schema", "request_id", "pcbnew_version", "input_board_sha256",
@@ -1757,10 +2172,40 @@ def _validate_route_apply_summary(
         for key in ("segments", "vias")
     ):
         raise RouteReportError("route applicator counts are malformed")
-    if not re.fullmatch(
-        r"[0-9a-f]{64}", str(result["applied_routes_after_reload_sha256"])
-    ):
-        raise RouteReportError("route applicator reload digest is malformed")
+    selected_nets = {item["net"] for item in routes}
+    reloaded_routes = []
+    for item in reloaded_snapshot["routing"]["items"]:
+        if item["net"] not in selected_nets:
+            continue
+        if item["kind"] == "segment":
+            reloaded_routes.append({
+                "kind": "segment",
+                "net": item["net"],
+                "layer": item["layer"],
+                "width_nm": item["width_nm"],
+                "start_nm": item["start_nm"],
+                "end_nm": item["end_nm"],
+            })
+        elif item["kind"] == "via":
+            reloaded_routes.append({
+                "kind": "via",
+                "net": item["net"],
+                "at_nm": item["position_nm"],
+                "diameter_nm": item["width_nm"],
+                "drill_nm": item["drill_nm"],
+                "layers": [item["top_layer"], item["bottom_layer"]],
+            })
+        else:
+            raise RouteReportError(
+                "route applicator reload contains unsupported selected-net arc"
+            )
+    expected_reload_sha256 = canonical_json_sha256(
+        canonical_routes(reloaded_routes)
+    )
+    if result["applied_routes_after_reload_sha256"] != expected_reload_sha256:
+        raise RouteReportError(
+            "route applicator reload digest differs from validated output semantics"
+        )
     if result["output_board_sha256"] != output_board_sha256:
         raise RouteReportError(
             "route applicator summary is not bound to the live output board"
@@ -1828,6 +2273,18 @@ def _apply_filtered_routes(
         ) from exc
 
     output_board_sha256 = digest(board)
+    reload_snapshot_result = _worker_call(
+        kicad_python,
+        "snapshot",
+        [board],
+        workspace / f"{label}-reload-semantic.json",
+        workspace,
+        pcbnew_version,
+    )
+    reload_snapshot = _validate_semantic_snapshot(
+        reload_snapshot_result.get("snapshot"),
+        "route applicator reload semantic worker",
+    )
     _validate_route_apply_summary(
         result,
         request_id=request_id,
@@ -1835,12 +2292,14 @@ def _apply_filtered_routes(
         input_board_sha256=input_board_sha256,
         routes=routes,
         output_board_sha256=output_board_sha256,
+        reloaded_snapshot=reload_snapshot,
     )
     result["identity_map"] = _validate_identity_envelope(
         identity_envelope,
         request_id=request_id,
         pcbnew_version=pcbnew_version,
         board_sha256=output_board_sha256,
+        expected_snapshot=reload_snapshot,
         where="route applicator identity worker",
     )
     result["worker_log"] = _log_record(run)
@@ -3353,22 +3812,38 @@ def _pad_item(pad) -> dict:
     }
 
 
-def _footprint_item(fp, persisted_graphics=None, used_persistence=None) -> dict:
-    pads = sorted(
-        (_pad_item(pad) for pad in fp.Pads()),
-        key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
+def _record_identity(identities, item, kind, semantic):
+    uuid = _item_uuid(item)
+    if uuid in identities:
+        raise RouteReportError("board identity UUID %s occurs more than once" % uuid)
+    identities[uuid] = {"kind": kind, "semantic": semantic}
+
+
+def _footprint_item(
+    fp,
+    persisted_graphics=None,
+    used_persistence=None,
+    identities=None,
+) -> dict:
+    pad_pairs = sorted(
+        ((_pad_item(pad), pad) for pad in fp.Pads()),
+        key=lambda pair: json.dumps(
+            pair[0], sort_keys=True, separators=(",", ":")
+        ),
     )
-    graphics = sorted(
-        (_drawing_item(
+    graphic_pairs = sorted(
+        ((_drawing_item(
             item,
             require_complete=True,
             persisted_graphics=persisted_graphics,
             used_persistence=used_persistence,
-        )
+        ), item)
          for item in fp.GraphicalItems()),
-        key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
+        key=lambda pair: json.dumps(
+            pair[0], sort_keys=True, separators=(",", ":")
+        ),
     )
-    return {
+    data = {
         "uuid": _item_uuid(fp),
         "reference": str(fp.GetReference()),
         # str(LIB_ID) is the SWIG proxy repr and contains a process-specific
@@ -3380,13 +3855,42 @@ def _footprint_item(fp, persisted_graphics=None, used_persistence=None) -> dict:
         "flipped": bool(fp.IsFlipped()),
         "locked": bool(fp.IsLocked()),
         "attributes": int(fp.GetAttributes()),
-        "pads": pads,
+        "pads": [pair[0] for pair in pad_pairs],
         # PCB_SHAPE coordinates returned by KiCad for footprint graphics are
         # transformed into board space.  Keeping them here makes a moved,
         # rotated, mirrored, opened, or replaced footprint-hosted Edge.Cuts
         # contour part of the nonrouting digest.
-        "graphics": graphics,
+        "graphics": [pair[0] for pair in graphic_pairs],
     }
+    if identities is not None:
+        own = {
+            key: value for key, value in data.items()
+            if key not in {"uuid", "pads", "graphics"}
+        }
+        _record_identity(identities, fp, "footprint", own)
+        for pad_data, pad in pad_pairs:
+            _record_identity(
+                identities,
+                pad,
+                "pad",
+                {"parent_reference": data["reference"], "pad": pad_data},
+            )
+        for graphic_data, graphic in graphic_pairs:
+            _record_identity(
+                identities,
+                graphic,
+                "footprint-graphic",
+                {
+                    "parent_reference": data["reference"],
+                    "parent_uuid": data["uuid"],
+                    "parent_attributes": data["attributes"],
+                    "graphic": {
+                        key: value for key, value in graphic_data.items()
+                        if key != "uuid"
+                    },
+                },
+            )
+    return data
 
 
 def _zone_item(zone) -> dict:
@@ -3428,7 +3932,7 @@ def _drawing_item(
         "GetWidth": int,
         "GetShape": int,
         "GetText": str,
-        "GetTextSize": _point,
+        "GetTextSize": _nonrouting_point,
         "GetTextAngleDegrees": lambda x: round(float(x), 9),
         "IsLocked": bool,
     }
@@ -3463,36 +3967,67 @@ def _drawing_item(
     return data
 
 
-def _semantic_snapshot(board, pcbnew) -> dict:
-    board_path = Path(str(board.GetFileName())).resolve()
-    try:
-        persisted_graphics = graphic_persistence(board_path)
-    except GraphicError as exc:
-        raise RouteReportError(
-            "cannot bind saved board graphic semantics: %s" % exc
-        ) from exc
+def _semantic_snapshot(board, pcbnew, *, persisted_graphics=None) -> dict:
+    if persisted_graphics is None:
+        board_path = Path(str(board.GetFileName())).resolve()
+        try:
+            persisted_graphics = graphic_persistence(board_path)
+        except GraphicError as exc:
+            raise RouteReportError(
+                "cannot bind saved board graphic semantics: %s" % exc
+            ) from exc
     used_persistence = set()
-    routes = [_route_item(item, board, pcbnew) for item in board.GetTracks()]
-    routes.sort(key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")))
+    identities = {}
+    route_pairs = sorted(
+        ((_route_item(item, board, pcbnew), item) for item in board.GetTracks()),
+        key=lambda pair: json.dumps(
+            pair[0], sort_keys=True, separators=(",", ":")
+        ),
+    )
+    routes = [pair[0] for pair in route_pairs]
+    for route_data, route_item in route_pairs:
+        _record_identity(identities, route_item, "route", route_data)
     locked = [x for x in routes if x["locked"]]
-    footprints = sorted(
-        (_footprint_item(fp, persisted_graphics, used_persistence)
-         for fp in board.GetFootprints()),
-        key=lambda x: (x["reference"], json.dumps(x, sort_keys=True)),
+    footprint_pairs = sorted(
+        ((_footprint_item(
+            fp, persisted_graphics, used_persistence, identities
+        ), fp) for fp in board.GetFootprints()),
+        key=lambda pair: (
+            pair[0]["reference"], json.dumps(pair[0], sort_keys=True)
+        ),
     )
-    zones = sorted(
-        (_zone_item(z) for z in board.Zones()),
-        key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
+    footprints = [pair[0] for pair in footprint_pairs]
+    zone_pairs = sorted(
+        ((_zone_item(zone), zone) for zone in board.Zones()),
+        key=lambda pair: json.dumps(
+            pair[0], sort_keys=True, separators=(",", ":")
+        ),
     )
-    drawings = sorted(
-        (_drawing_item(
+    zones = [pair[0] for pair in zone_pairs]
+    for zone_data, zone_item in zone_pairs:
+        _record_identity(identities, zone_item, "zone", zone_data)
+    drawing_pairs = sorted(
+        ((_drawing_item(
             d,
             require_complete=True,
             persisted_graphics=persisted_graphics,
             used_persistence=used_persistence,
-        ) for d in board.GetDrawings()),
-        key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
+        ), d) for d in board.GetDrawings()),
+        key=lambda pair: json.dumps(
+            pair[0], sort_keys=True, separators=(",", ":")
+        ),
     )
+    drawings = [pair[0] for pair in drawing_pairs]
+    for drawing_data, drawing_item in drawing_pairs:
+        _record_identity(
+            identities,
+            drawing_item,
+            "drawing",
+            {
+                key: value for key, value in drawing_data.items()
+                if key != "uuid"
+            },
+        )
     if used_persistence != set(persisted_graphics):
         missing = sorted(set(persisted_graphics) - used_persistence)
         raise RouteReportError(
@@ -3561,6 +4096,7 @@ def _semantic_snapshot(board, pcbnew) -> dict:
             "zones": len(zones),
             "drawings": len(drawings),
         },
+        "identities": dict(sorted(identities.items())),
     }
 
 
@@ -3675,7 +4211,8 @@ def _pcb_worker(argv: list[str]) -> int:
         ok = bool(pcbnew.ImportSpecctraSES(board, str(ses_path)))
         raw_import = None
         if ok:
-            pcbnew.SaveBoard(str(board_path), board)
+            if not pcbnew.SaveBoard(str(board_path), board):
+                raise RouteReportError("KiCad could not save raw SES import")
             raw_path = board_path.with_name(
                 board_path.stem + "-raw-import" + board_path.suffix
             )
@@ -3689,8 +4226,10 @@ def _pcb_worker(argv: list[str]) -> int:
             # islands/clearance created by the new routing.  The candidate
             # snapshot and every downstream DRC must see the refilled board.
             filler = pcbnew.ZONE_FILLER(board)
-            filler.Fill(board.Zones())
-            pcbnew.SaveBoard(str(board_path), board)
+            if not filler.Fill(board.Zones()):
+                raise RouteReportError("zone refill failed after SES import")
+            if not pcbnew.SaveBoard(str(board_path), board):
+                raise RouteReportError("KiCad could not save refilled SES import")
             board = pcbnew.LoadBoard(str(board_path))
             if project is not None:
                 board.SetProject(project)

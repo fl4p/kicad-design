@@ -15,19 +15,6 @@ from pathlib import Path
 import re
 import sys
 
-try:
-    from kicad_graphics import (
-        GraphicError,
-        complete_graphic_geometry,
-        graphic_persistence,
-    )
-except ImportError:  # imported as scripts.kicad_route_manifest
-    from .kicad_graphics import (
-        GraphicError,
-        complete_graphic_geometry,
-        graphic_persistence,
-    )
-
 from kicad_autoroute import (
     AutorouteError,
     COMPATIBILITY_SCHEMA,
@@ -49,59 +36,8 @@ from kicad_autoroute import (
 )
 
 
-def _uuid(item) -> str:
-    for getter in (
-        lambda: item.m_Uuid.AsString(),
-        lambda: item.GetUuid().AsString(),
-        lambda: str(item.m_Uuid),
-    ):
-        try:
-            value = getter()
-        except Exception:
-            continue
-        if value:
-            return str(value)
-    raise AutorouteError(f"cannot read UUID for {type(item).__name__}")
-
-
 def _point(value) -> list[int]:
     return [int(value.x), int(value.y)]
-
-
-def _drawing_identity(drawing, *, require_complete=False, persistence=None) -> dict:
-    values = {"kind": type(drawing).__name__, "layer": int(drawing.GetLayer())}
-    for name in ("GetStart", "GetEnd", "GetPosition"):
-        if hasattr(drawing, name):
-            try:
-                values[name] = _point(getattr(drawing, name)())
-            except Exception:
-                pass
-    if hasattr(drawing, "GetText"):
-        try:
-            values["text"] = str(drawing.GetText())
-        except Exception:
-            pass
-    for name, key, converter in (
-        ("GetShape", "shape", int),
-        ("GetWidth", "width_nm", int),
-        ("IsLocked", "locked", bool),
-    ):
-        if hasattr(drawing, name):
-            try:
-                values[key] = converter(getattr(drawing, name)())
-            except Exception:
-                pass
-    if require_complete:
-        try:
-            values["complete_geometry"] = complete_graphic_geometry(
-                drawing, _point, persistence=persistence
-            )
-        except GraphicError as exc:
-            raise AutorouteError(
-                "cannot completely serialize board graphic %s: %s"
-                % (_uuid(drawing), exc)
-            ) from exc
-    return values
 
 
 def _board_route(item, board, pcbnew) -> dict:
@@ -219,116 +155,29 @@ def apply_manifest(
 
 
 def identity_map(board, pcbnew, *, persisted_graphics=None) -> dict[str, str]:
-    """Map KiCad DRC UUIDs to stable board-semantic identities."""
-    if persisted_graphics is None:
+    """Map UUIDs using the same fully validated snapshot semantics as DRC."""
+    try:
         try:
-            persisted_graphics = graphic_persistence(
-                Path(str(board.GetFileName())).resolve()
+            from kicad_route_candidate import (
+                RouteReportError,
+                _semantic_snapshot,
+                _validate_semantic_snapshot,
+                identity_map_from_snapshot,
             )
-        except GraphicError as exc:
-            raise AutorouteError(
-                "cannot bind saved board graphic semantics: %s" % exc
-            ) from exc
-    if not isinstance(persisted_graphics, dict):
-        raise AutorouteError("persisted board graphics are not an object")
-    used_persistence = set()
-    out = {}
-
-    def add(item, identity):
-        uuid = _uuid(item)
-        if uuid in out:
-            raise AutorouteError(
-                "board identity UUID %s occurs more than once" % uuid
+        except ImportError:
+            from .kicad_route_candidate import (
+                RouteReportError,
+                _semantic_snapshot,
+                _validate_semantic_snapshot,
+                identity_map_from_snapshot,
             )
-        out[uuid] = identity
-
-    for fp in board.GetFootprints():
-        ref = str(fp.GetReference())
-        add(fp, f"footprint:{ref}")
-        for pad in fp.Pads():
-            pos = _point(pad.GetPosition())
-            identity = (
-                f"pad:{ref}:{pad.GetNumber()}:{pad.GetNetname()}:"
-                f"{pos[0]}:{pos[1]}"
-            )
-            add(pad, identity)
-        for graphic in fp.GraphicalItems():
-            uuid = _uuid(graphic)
-            persistence = None
-            if hasattr(graphic, "GetShape"):
-                if uuid not in persisted_graphics:
-                    raise AutorouteError(
-                        "board graphic %s has no saved stroke binding" % uuid
-                    )
-                persistence = persisted_graphics[uuid]
-                used_persistence.add(uuid)
-            values = _drawing_identity(
-                graphic, require_complete=True, persistence=persistence
-            )
-            values.update({
-                "parent_reference": ref,
-                "parent_uuid": _uuid(fp),
-                "parent_attributes": int(fp.GetAttributes()),
-            })
-            add(
-                graphic,
-                "footprint-graphic:" + json.dumps(
-                    values, sort_keys=True, separators=(",", ":")
-                ),
-            )
-    for item in board.GetTracks():
-        route = _board_route(item, board, pcbnew)
-        add(
-            item,
-            "route:" + json.dumps(
-                route, sort_keys=True, separators=(",", ":")
-            ),
+        snapshot = _semantic_snapshot(
+            board, pcbnew, persisted_graphics=persisted_graphics
         )
-    for zone in board.Zones():
-        corners = sorted(
-            _point(zone.GetCornerPosition(index))
-            for index in range(zone.GetNumCorners())
-        )
-        identity = {
-            "kind": "zone",
-            "name": str(zone.GetZoneName()),
-            "net": str(zone.GetNetname()),
-            "layers": sorted(int(x) for x in zone.GetLayerSet().Seq()),
-            "priority": int(zone.GetAssignedPriority()),
-            "corners_nm": corners,
-        }
-        add(
-            zone,
-            "zone:" + json.dumps(
-                identity, sort_keys=True, separators=(",", ":")
-            ),
-        )
-    for drawing in board.GetDrawings():
-        uuid = _uuid(drawing)
-        persistence = None
-        if hasattr(drawing, "GetShape"):
-            if uuid not in persisted_graphics:
-                raise AutorouteError(
-                    "board graphic %s has no saved stroke binding" % uuid
-                )
-            persistence = persisted_graphics[uuid]
-            used_persistence.add(uuid)
-        values = _drawing_identity(
-            drawing, require_complete=True, persistence=persistence
-        )
-        add(
-            drawing,
-            "drawing:" + json.dumps(
-                values, sort_keys=True, separators=(",", ":")
-            ),
-        )
-    if used_persistence != set(persisted_graphics):
-        missing = sorted(set(persisted_graphics) - used_persistence)
-        raise AutorouteError(
-            "saved board graphics are not completely represented by pcbnew: %s"
-            % ", ".join(missing[:4])
-        )
-    return out
+        _validate_semantic_snapshot(snapshot, "identity worker")
+        return identity_map_from_snapshot(snapshot)
+    except RouteReportError as exc:
+        raise AutorouteError("cannot establish board identity map: %s" % exc) from exc
 
 
 def _init_pcbnew():

@@ -67,6 +67,7 @@ def semantic_snapshot():
         },
         "nonrouting_items": nonrouting_items,
         "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
+        "identities": {},
     }
 
 
@@ -472,8 +473,24 @@ class RouteCandidateTests(unittest.TestCase):
 
     def test_semantic_snapshot_boundary_recomputes_digests_and_counts(self):
         snapshot = semantic_snapshot()
-        snapshot["nonrouting_items"]["footprints"].append({"uuid": "forged"})
+        snapshot["nonrouting_items"]["board"]["enabled_layers"].append(1)
         with self.assertRaisesRegex(route.RouteReportError, "digest"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_rejects_self_consistent_nonrouting_forgery(self):
+        snapshot = semantic_snapshot()
+        snapshot["nonrouting_items"]["footprints"] = [
+            {"uuid": "forged-only"}
+        ]
+        snapshot["nonrouting_category_sha256"] = {
+            key: route._json_digest(value)
+            for key, value in snapshot["nonrouting_items"].items()
+        }
+        snapshot["nonrouting_sha256"] = route._json_digest(
+            snapshot["nonrouting_items"]
+        )
+        snapshot["nonrouting_counts"]["footprints"] = 1
+        with self.assertRaisesRegex(route.RouteReportError, "unsupported fields"):
             route._validate_semantic_snapshot(snapshot, "test")
 
     def test_semantic_snapshot_boundary_rejects_forged_routing_summary(self):
@@ -505,6 +522,10 @@ class RouteCandidateTests(unittest.TestCase):
                 "locked_sha256": route._json_digest([]),
             },
         }
+        uuid = "22222222-2222-4222-8222-222222222222"
+        snapshot["identities"] = {
+            uuid: {"kind": "route", "semantic": item}
+        }
         self.assertIs(
             route._validate_semantic_snapshot(snapshot, "test"), snapshot
         )
@@ -525,6 +546,28 @@ class RouteCandidateTests(unittest.TestCase):
         snapshot = semantic_snapshot()
         snapshot["netclasses"]["forged"] = True
         with self.assertRaisesRegex(route.RouteReportError, "unsupported fields"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_rejects_non_kicad_identity_uuid(self):
+        snapshot = semantic_snapshot()
+        item = segment()
+        snapshot["routing"] = {
+            "items": [item],
+            "locked_items": [],
+            "summary": {
+                "count": 1,
+                "by_kind": {"segment": 1},
+                "by_net": {"N": 1},
+                "total_track_length_mm": 0.00001,
+                "sha256": route._json_digest([item]),
+                "locked_count": 0,
+                "locked_sha256": route._json_digest([]),
+            },
+        }
+        snapshot["identities"] = {
+            "not-a-uuid": {"kind": "route", "semantic": item}
+        }
+        with self.assertRaisesRegex(route.RouteReportError, "identity UUID"):
             route._validate_semantic_snapshot(snapshot, "test")
 
     def test_pcb_worker_requires_fresh_output(self):
@@ -574,19 +617,70 @@ class RouteCandidateTests(unittest.TestCase):
                         workspace, "10.0.5",
                     )
 
+    def test_ses_import_worker_rejects_failed_zone_refill(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            board_path = workspace / "x.kicad_pcb"
+            ses_path = workspace / "x.ses"
+            snapshot_path = workspace / "snapshot.json"
+            board_path.write_text("seed\n", encoding="utf-8")
+            ses_path.write_text("session\n", encoding="utf-8")
+            board = mock.Mock()
+            board.Zones.return_value = []
+            filler = mock.Mock()
+            filler.Fill.return_value = False
+            pcbnew = mock.Mock()
+            pcbnew.ImportSpecctraSES.return_value = True
+            pcbnew.SaveBoard.return_value = True
+            pcbnew.ZONE_FILLER.return_value = filler
+            env = {
+                "KICAD_ROUTE_WORKER_ROOT": str(workspace),
+                "KICAD_ROUTE_WORKER_REQUEST_ID": "a" * 48,
+            }
+            with (
+                mock.patch.dict(route.os.environ, env, clear=False),
+                mock.patch.object(route, "_init_pcbnew", return_value=(object(), pcbnew)),
+                mock.patch.object(
+                    route, "_load_board_with_project",
+                    return_value=(board, None, None),
+                ),
+            ):
+                with self.assertRaisesRegex(route.RouteReportError, "zone refill failed"):
+                    route._pcb_worker([
+                        "import", str(board_path), str(ses_path),
+                        str(snapshot_path),
+                    ])
+            filler.Fill.assert_called_once_with([])
+
     def test_identity_envelope_recomputes_digest_count_and_kind_coverage(self):
-        identities = {
-            "fp-uuid": "footprint:R1",
-            "pad-uuid": "pad:R1:1:GND:0:0",
+        snapshot = semantic_snapshot()
+        item = segment()
+        snapshot["routing"] = {
+            "items": [item],
+            "locked_items": [],
+            "summary": {
+                "count": 1,
+                "by_kind": {"segment": 1},
+                "by_net": {"N": 1},
+                "total_track_length_mm": 0.00001,
+                "sha256": route._json_digest([item]),
+                "locked_count": 0,
+                "locked_sha256": route._json_digest([]),
+            },
         }
+        uuid = "11111111-1111-4111-8111-111111111111"
+        snapshot["identities"] = {
+            uuid: {"kind": "route", "semantic": item}
+        }
+        identities = route.identity_map_from_snapshot(snapshot)
         value = {
             "schema": route.IDENTITY_WORKER_SCHEMA,
             "request_id": "a" * 48,
             "pcbnew_version": "10.0.5",
             "board_sha256": "b" * 64,
             "identity_map": identities,
-            "identity_count": 2,
-            "identity_kinds": {"footprint": 1, "pad": 1},
+            "identity_count": 1,
+            "identity_kinds": {"route": 1},
             "identity_sha256": route.canonical_json_sha256(identities),
         }
         self.assertEqual(
@@ -595,17 +689,35 @@ class RouteCandidateTests(unittest.TestCase):
                 request_id="a" * 48,
                 pcbnew_version="10.0.5",
                 board_sha256="b" * 64,
+                expected_snapshot=snapshot,
                 where="test",
             ),
             identities,
         )
-        value["identity_count"] = 1
+        value["identity_count"] = 0
         with self.assertRaisesRegex(route.RouteReportError, "count"):
             route._validate_identity_envelope(
                 value,
                 request_id="a" * 48,
                 pcbnew_version="10.0.5",
                 board_sha256="b" * 64,
+                expected_snapshot=snapshot,
+                where="test",
+            )
+        forged = {uuid: "route:{\"kind\":\"invented\"}"}
+        value.update({
+            "identity_map": forged,
+            "identity_count": 1,
+            "identity_kinds": {"route": 1},
+            "identity_sha256": route.canonical_json_sha256(forged),
+        })
+        with self.assertRaisesRegex(route.RouteReportError, "validated board snapshot"):
+            route._validate_identity_envelope(
+                value,
+                request_id="a" * 48,
+                pcbnew_version="10.0.5",
+                board_sha256="b" * 64,
+                expected_snapshot=snapshot,
                 where="test",
             )
 
@@ -619,6 +731,12 @@ class RouteCandidateTests(unittest.TestCase):
             "end_nm": [1_000_000, 0],
         }]
         routes_sha = route.canonical_json_sha256(routes)
+        reloaded_snapshot = semantic_snapshot()
+        reloaded_item = segment(
+            start=(0, 0), end=(1_000_000, 0), width=200_000
+        )
+        reloaded_item["length_nm"] = 1_000_000
+        reloaded_snapshot["routing"]["items"] = [reloaded_item]
         value = {
             "schema": route.ROUTE_APPLY_WORKER_SCHEMA,
             "request_id": "c" * 48,
@@ -628,7 +746,7 @@ class RouteCandidateTests(unittest.TestCase):
             "segments": 1,
             "vias": 0,
             "routes_sha256": routes_sha,
-            "applied_routes_after_reload_sha256": "e" * 64,
+            "applied_routes_after_reload_sha256": routes_sha,
             "output_board_sha256": "f" * 64,
         }
         self.assertIs(
@@ -639,6 +757,7 @@ class RouteCandidateTests(unittest.TestCase):
                 input_board_sha256="d" * 64,
                 routes=routes,
                 output_board_sha256="f" * 64,
+                reloaded_snapshot=reloaded_snapshot,
             ),
             value,
         )
@@ -651,6 +770,19 @@ class RouteCandidateTests(unittest.TestCase):
                 input_board_sha256="d" * 64,
                 routes=routes,
                 output_board_sha256="f" * 64,
+                reloaded_snapshot=reloaded_snapshot,
+            )
+        value["input_routes_sha256"] = routes_sha
+        value["applied_routes_after_reload_sha256"] = "e" * 64
+        with self.assertRaisesRegex(route.RouteReportError, "reload digest"):
+            route._validate_route_apply_summary(
+                value,
+                request_id="c" * 48,
+                pcbnew_version="10.0.5",
+                input_board_sha256="d" * 64,
+                routes=routes,
+                output_board_sha256="f" * 64,
+                reloaded_snapshot=reloaded_snapshot,
             )
 
     def test_footprint_graphic_mutation_changes_nonrouting_snapshot(self):
@@ -670,7 +802,7 @@ class RouteCandidateTests(unittest.TestCase):
             def AsString(self):
                 return self.value
 
-        class Graphic:
+        class PCB_SHAPE:
             def __init__(self):
                 self.start = Point(1_000_000, 2_000_000)
                 self.end = Point(3_000_000, 2_000_000)
@@ -742,7 +874,7 @@ class RouteCandidateTests(unittest.TestCase):
             def GetAttributes(self):
                 return 2
 
-        graphic = Graphic()
+        graphic = PCB_SHAPE()
         footprint = Footprint(graphic)
         before = route._footprint_item(
             footprint, {"graphic-uuid": {"stroke_type": "solid"}}, set()
@@ -770,8 +902,11 @@ class RouteCandidateTests(unittest.TestCase):
             def AsString(self):
                 return self.value
 
-        class Graphic:
-            m_Uuid = Kiid("graphic-uuid")
+        class PCB_SHAPE:
+            m_Uuid = Kiid("33333333-3333-4333-8333-333333333333")
+
+            def GetLayerSet(self):
+                return LayerSet()
 
             def GetLayer(self):
                 return 44
@@ -804,7 +939,7 @@ class RouteCandidateTests(unittest.TestCase):
                 return True
 
         class Footprint:
-            m_Uuid = Kiid("footprint-uuid")
+            m_Uuid = Kiid("44444444-4444-4444-8444-444444444444")
 
             def GetReference(self):
                 return "MH1"
@@ -813,10 +948,41 @@ class RouteCandidateTests(unittest.TestCase):
                 return []
 
             def GraphicalItems(self):
-                return [Graphic()]
+                return [PCB_SHAPE()]
 
             def GetAttributes(self):
                 return 2
+
+            def GetFPID(self):
+                return Fpid()
+
+            def GetPosition(self):
+                return Point()
+
+            def GetOrientationDegrees(self):
+                return 0.0
+
+            def IsFlipped(self):
+                return False
+
+            def IsLocked(self):
+                return True
+
+        class LayerSet:
+            def Seq(self):
+                return [44]
+
+        class EmptyLayerSet:
+            def Seq(self):
+                return []
+
+        class Fpid:
+            def GetUniStringLibId(self):
+                return "Local:Slot"
+
+        class NetInfo:
+            def NetsByName(self):
+                return {}
 
         class Board:
             def GetFootprints(self):
@@ -831,46 +997,46 @@ class RouteCandidateTests(unittest.TestCase):
             def GetDrawings(self):
                 return []
 
+            def GetAllNetClasses(self):
+                return {}
+
+            def GetNetInfo(self):
+                return NetInfo()
+
+            def GetCopperLayerCount(self):
+                return 0
+
+            def IsLayerEnabled(self, _layer):
+                return False
+
+            def GetEnabledLayers(self):
+                return EmptyLayerSet()
+
+        pcbnew = mock.Mock()
+        pcbnew.IsCopperLayer.return_value = False
+        graphic_uuid = "33333333-3333-4333-8333-333333333333"
         identities = manifest.identity_map(
-            Board(), mock.Mock(),
-            persisted_graphics={"graphic-uuid": {"stroke_type": "solid"}},
+            Board(), pcbnew,
+            persisted_graphics={graphic_uuid: {"stroke_type": "solid"}},
         )
-        self.assertIn("graphic-uuid", identities)
-        self.assertIn("footprint-graphic:", identities["graphic-uuid"])
-        self.assertIn('"parent_reference":"MH1"', identities["graphic-uuid"])
+        self.assertIn(graphic_uuid, identities)
+        self.assertIn("footprint-graphic:", identities[graphic_uuid])
+        self.assertIn('"parent_reference":"MH1"', identities[graphic_uuid])
 
     def test_identity_map_rejects_duplicate_board_uuids(self):
         class Kiid:
             def AsString(self):
-                return "duplicate-uuid"
+                return "55555555-5555-4555-8555-555555555555"
 
-        class Footprint:
+        class Item:
             m_Uuid = Kiid()
 
-            def GetReference(self):
-                return "R1"
-
-            def Pads(self):
-                return []
-
-            def GraphicalItems(self):
-                return []
-
-        class Board:
-            def GetFootprints(self):
-                return [Footprint(), Footprint()]
-
-            def GetTracks(self):
-                return []
-
-            def Zones(self):
-                return []
-
-            def GetDrawings(self):
-                return []
-
-        with self.assertRaisesRegex(route.AutorouteError, "occurs more than once"):
-            manifest.identity_map(Board(), mock.Mock(), persisted_graphics={})
+        identities = {}
+        route._record_identity(identities, Item(), "drawing", {"value": 1})
+        with self.assertRaisesRegex(route.RouteReportError, "occurs more than once"):
+            route._record_identity(
+                identities, Item(), "drawing", {"value": 2}
+            )
 
     def test_bezier_control_mutation_changes_complete_geometry(self):
         class Point:
@@ -925,17 +1091,17 @@ class RouteCandidateTests(unittest.TestCase):
         before = graphics.complete_graphic_geometry(
             curve, convert, persistence=persisted
         )
-        before_identity = manifest._drawing_identity(
-            curve, require_complete=True, persistence=persisted
-        )
         curve.c1.y += 500_000
         after = graphics.complete_graphic_geometry(
             curve, convert, persistence=persisted
         )
-        after_identity = manifest._drawing_identity(
-            curve, require_complete=True, persistence=persisted
-        )
         self.assertNotEqual(before, after)
+        before_identity = "drawing:" + json.dumps(
+            before, sort_keys=True, separators=(",", ":")
+        )
+        after_identity = "drawing:" + json.dumps(
+            after, sort_keys=True, separators=(",", ":")
+        )
         self.assertNotEqual(before_identity, after_identity)
         self.assertEqual(
             after["shape_geometry"]["control1_nm"], [1_000_000, 2_500_000]
