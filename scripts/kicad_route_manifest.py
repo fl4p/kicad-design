@@ -50,6 +50,32 @@ def _point(value) -> list[int]:
     return [int(value.x), int(value.y)]
 
 
+def _drawing_identity(drawing) -> dict:
+    values = {"kind": type(drawing).__name__, "layer": int(drawing.GetLayer())}
+    for name in ("GetStart", "GetEnd", "GetPosition"):
+        if hasattr(drawing, name):
+            try:
+                values[name] = _point(getattr(drawing, name)())
+            except Exception:
+                pass
+    if hasattr(drawing, "GetText"):
+        try:
+            values["text"] = str(drawing.GetText())
+        except Exception:
+            pass
+    for name, key, converter in (
+        ("GetShape", "shape", int),
+        ("GetWidth", "width_nm", int),
+        ("IsLocked", "locked", bool),
+    ):
+        if hasattr(drawing, name):
+            try:
+                values[key] = converter(getattr(drawing, name)())
+            except Exception:
+                pass
+    return values
+
+
 def _board_route(item, board, pcbnew) -> dict:
     if isinstance(item, pcbnew.PCB_VIA):
         return {
@@ -177,6 +203,16 @@ def identity_map(board, pcbnew) -> dict[str, str]:
                 f"{pos[0]}:{pos[1]}"
             )
             out[_uuid(pad)] = identity
+        for graphic in fp.GraphicalItems():
+            values = _drawing_identity(graphic)
+            values.update({
+                "parent_reference": ref,
+                "parent_uuid": _uuid(fp),
+                "parent_attributes": int(fp.GetAttributes()),
+            })
+            out[_uuid(graphic)] = "footprint-graphic:" + json.dumps(
+                values, sort_keys=True, separators=(",", ":")
+            )
     for item in board.GetTracks():
         route = _board_route(item, board, pcbnew)
         out[_uuid(item)] = "route:" + json.dumps(
@@ -199,18 +235,7 @@ def identity_map(board, pcbnew) -> dict[str, str]:
             identity, sort_keys=True, separators=(",", ":")
         )
     for drawing in board.GetDrawings():
-        values = {"kind": type(drawing).__name__, "layer": int(drawing.GetLayer())}
-        for name in ("GetStart", "GetEnd", "GetPosition"):
-            if hasattr(drawing, name):
-                try:
-                    values[name] = _point(getattr(drawing, name)())
-                except Exception:
-                    pass
-        if hasattr(drawing, "GetText"):
-            try:
-                values["text"] = str(drawing.GetText())
-            except Exception:
-                pass
+        values = _drawing_identity(drawing)
         out[_uuid(drawing)] = "drawing:" + json.dumps(
             values, sort_keys=True, separators=(",", ":")
         )

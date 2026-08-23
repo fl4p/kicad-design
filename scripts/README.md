@@ -84,12 +84,20 @@ before trusting generated connectivity.
 
 ### Run checks with `kicad_verify.py`
 
-Use `run_erc()` and `run_drc()` so `--exit-code-violations`, report freshness, zone refill and
-required report labels remain load-bearing. Parity-enabled `run_drc()` requires same-stem
+Use `run_erc()` and `run_drc()` so `--exit-code-violations`, report freshness, command-level zone
+refill and required report labels remain load-bearing. Parity-enabled `run_drc()` requires same-stem
 `.kicad_pcb`, `.kicad_pro` and `.kicad_sch` files, independently exports and parses a fresh annotated
-netlist, rejects KiCad parity-load diagnostics, and requires the footprint-error report summary.
-Pass `parity=False` only for an explicitly authorized board-only workflow and preserve that waiver
-in the release record. Treat exit zero as command completion, then judge the structured report.
+netlist, rejects known KiCad parity-load diagnostics, and requires the footprint-error report
+category. That category does not prove parity ran: KiCad emits it without parity too. Qualify every
+supported KiCad cell with a real same-stem annotated negative control whose scratch board deliberately
+omits or mismatches a footprint, and require nonzero footprint errors. Pass `parity=False` only for an
+explicitly authorized board-only workflow and preserve that waiver in the release record.
+
+For fabrication release, call `run_drc()` on the isolated scratch bundle with both the finalizer-bound
+`expected_zone_snapshot` and a project `zone_snapshotter` that reparses saved filled geometry. This
+adds `--save-board` and rejects the report when the persisted refill differs. Without those arguments,
+the helper has run a refill but has not established equality with release geometry. Treat exit zero
+as command completion, then judge the structured report.
 
 Resolve ignored checks from two sources:
 
@@ -107,6 +115,10 @@ concurrent writer cannot replace the artefact between verification and release u
 
 A matching digest proves byte identity for the tested outputs. It does not prove that an unexercised
 branch, cache key, or physical model is correct on another input.
+
+For release, inventory every produced file in a canonical receipt with path, type, size and SHA-256;
+bind authorization to the receipt digest and call `verify_unchanged_since()` immediately before
+transfer. An input-manifest digest stored beside an unhashed output does not prevent replacement.
 
 ## Use the autorouting boundary
 
@@ -170,6 +182,11 @@ Retain full-run workspaces. The wrapper must keep the source read-only, prove de
 unchanged, qualify a fresh seed, preserve protected routes, filter additions by scope/style/layer,
 apply accepted additions to another fresh seed, and rerun DRC, connectivity, parity, and project
 audits.
+
+The semantic snapshot includes direct board drawings plus every footprint graphic with transformed
+geometry, layer, shape, width, lock state, footprint attributes and UUID identity. Keep the snapshot
+schema pinned: footprint-hosted `Edge.Cuts` are nonrouting mechanical authority and must change the
+digest when opened, moved, mirrored or replaced.
 
 Interpret exit zero as “the report completed.” Require the report's promotable verdict and all
 promotion checks; use `--fail-on-findings` when rejection must also fail the process.

@@ -79,6 +79,70 @@ class VerifyDrcTests(unittest.TestCase):
             cmd = producing.call_args.args[0]
             self.assertIn("--refill-zones", cmd)
             self.assertIn("--schematic-parity", cmd)
+            self.assertNotIn("--save-board", cmd)
+
+    @mock.patch.object(verify, "_verify_parity_context")
+    @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
+    def test_release_zone_snapshot_rejects_changed_refill_despite_clean_drc(
+            self, _find, _context):
+        with tempfile.TemporaryDirectory() as raw:
+            board = self._board(raw)
+            report = Path(raw) / "drc.rpt"
+
+            def changed_refill(cmd, report_path):
+                self.assertIn("--save-board", cmd)
+                board.write_text("changed filled geometry\n", encoding="utf-8")
+                Path(report_path).write_text(_CLEAN_DRC, encoding="utf-8")
+                return 0, "", ""
+
+            with mock.patch.object(
+                    verify, "_run_producing", side_effect=changed_refill):
+                with self.assertRaisesRegex(
+                        verify.VerifyError, "persisted refill differs"):
+                    verify.run_drc(
+                        board,
+                        report=report,
+                        expected_zone_snapshot="finalized geometry",
+                        zone_snapshotter=lambda p: Path(p).read_text(
+                            encoding="utf-8").strip(),
+                    )
+
+    @mock.patch.object(verify, "_verify_parity_context")
+    @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
+    def test_release_zone_snapshot_accepts_identical_persisted_refill(
+            self, _find, _context):
+        with tempfile.TemporaryDirectory() as raw:
+            board = self._board(raw)
+            board.write_text("finalized geometry\n", encoding="utf-8")
+            report = Path(raw) / "drc.rpt"
+
+            def stable_refill(cmd, report_path):
+                self.assertIn("--save-board", cmd)
+                Path(report_path).write_text(_CLEAN_DRC, encoding="utf-8")
+                return 0, "", ""
+
+            with mock.patch.object(
+                    verify, "_run_producing", side_effect=stable_refill):
+                rc, counts = verify.run_drc(
+                    board,
+                    report=report,
+                    expected_zone_snapshot="finalized geometry",
+                    zone_snapshotter=lambda p: Path(p).read_text(
+                        encoding="utf-8").strip(),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(counts["drc violations"], 0)
+
+    @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
+    def test_release_zone_snapshot_arguments_are_paired(self, _find):
+        with tempfile.TemporaryDirectory() as raw:
+            board = self._board(raw)
+            with self.assertRaisesRegex(verify.VerifyError, "supplied together"):
+                verify.run_drc(
+                    board,
+                    report=Path(raw) / "drc.rpt",
+                    expected_zone_snapshot={},
+                )
 
     @mock.patch.object(verify, "_verify_parity_context")
     @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")

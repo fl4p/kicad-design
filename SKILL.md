@@ -198,6 +198,10 @@ K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not
      --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
+This board command is a verification rung, not fabrication-release evidence: its refill remains
+inside the subprocess. For release, follow [`RELEASE.md`](RELEASE.md)'s scratch `--save-board` and
+reparsed zone-snapshot comparison before exporting the finalized cached geometry.
+
 Select the rungs that cover the changed surface and the claim being made, then run the selected
 rungs from inner to outer. Do not turn a focused edit or diagnosis into a release build merely
 because an outer rung exists:

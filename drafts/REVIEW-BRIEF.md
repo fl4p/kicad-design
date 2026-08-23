@@ -51,7 +51,8 @@ Reproduce the false-PASS probes and check that the corrective delta does all of 
 without weakening neighboring workflows:
 
 1. Parity-enabled DRC fails closed without same-stem project/schematic context, independently parses
-   a fresh annotated netlist, rejects parity-load diagnostics and requires footprint-error evidence.
+   a fresh annotated netlist and rejects parity-load diagnostics. Treat the footprint-error category
+   as report-format evidence only, and qualify execution with a real mismatched-board negative control.
 2. DRC, artifact guards and exports consume one finalized zone snapshot; refill or stale-zone
    handling cannot silently create different accepted candidates.
 3. A canonical release manifest binds project/rule files, hierarchy, resolved libraries, generator,
@@ -65,6 +66,14 @@ without weakening neighboring workflows:
    authority while unowned proxies fail.
 8. Provisional pre-gate PCB work is limited to outline/mechanical studies independent of unresolved
    connectivity.
+9. DRC persists its refill on the scratch board and a reparsed per-zone snapshot must equal the
+   finalizer-bound snapshot; zero DRC counts cannot override a mismatch.
+10. A canonical output receipt hashes every report and deliverable, and order authorization binds
+    the receipt digest rather than only an input manifest.
+11. Direct and footprint-hosted `Edge.Cuts` both reach outline audits and autoroute nonrouting
+    snapshots; mutate a footprint contour and require the snapshot digest to change.
+12. Parity compatibility uses a real same-stem annotated negative control; the footprint-error
+    summary alone is not claimed as proof that parity executed.
 
 Look for neighboring claims introduced with the fix, especially board-only workflows, global
 library resolution, project-variable overrides and external construction models.

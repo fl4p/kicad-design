@@ -354,7 +354,8 @@ def _verify_parity_context(board, cli):
                 % ", ".join(unannotated[:12]))
 
 
-def run_drc(board, report="drc.rpt", parity=True, cli=None):
+def run_drc(board, report="drc.rpt", parity=True, cli=None,
+            expected_zone_snapshot=None, zone_snapshotter=None):
     """DRC with zone refill, violation status, and fail-closed parity.
 
     `parity` defaults True: footprint/symbol field mismatches are invisible
@@ -362,15 +363,29 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None):
     board contradicting the schematic.  True requires same-stem `.kicad_pro`
     and `.kicad_sch` files plus a fresh parseable annotated netlist.  Pass
     False only for an explicitly authorized board-only workflow.
+
+    A fabrication-release call must also provide both ``expected_zone_snapshot``
+    (the finalizer-bound per-zone geometry) and ``zone_snapshotter`` (a callable
+    that reparses the saved board and returns the same canonical shape).  That
+    mode adds ``--save-board`` and rejects a clean report when KiCad's persisted
+    refill differs.  Run it only on the isolated scratch release bundle.
     """
     board = Path(board)
     if not board.exists():
         raise VerifyError("board %s does not exist" % board)
+    if (expected_zone_snapshot is None) != (zone_snapshotter is None):
+        raise VerifyError(
+            "expected_zone_snapshot and zone_snapshotter must be supplied "
+            "together; otherwise refill equality is UNVERIFIED")
+    if zone_snapshotter is not None and not callable(zone_snapshotter):
+        raise VerifyError("zone_snapshotter must be callable")
     cli = find_kicad_cli(cli)
     if parity:
         _verify_parity_context(board, cli)
     cmd = [cli, "pcb", "drc", "--severity-all", "--refill-zones",
            "--exit-code-violations", "-o", str(report)]
+    if zone_snapshotter is not None:
+        cmd.append("--save-board")
     if parity:
         cmd.append("--schematic-parity")
     cmd.append(str(board))
@@ -381,11 +396,24 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None):
         raise VerifyError(
             "KiCad did not execute schematic parity even though DRC produced "
             "a report: %s" % diagnostics.strip()[:400])
+    if zone_snapshotter is not None:
+        try:
+            observed_zone_snapshot = zone_snapshotter(board)
+        except Exception as exc:
+            raise VerifyError(
+                "could not reparse the DRC-saved board for zone comparison: "
+                "%s" % exc) from exc
+        if observed_zone_snapshot != expected_zone_snapshot:
+            raise VerifyError(
+                "DRC returned a report but its persisted refill differs from "
+                "the finalizer-bound zone snapshot; reports and exports are "
+                "invalid until the scratch candidate is finalized again")
     counts = _counts_from_report(report, kind="drc")
     if parity and "footprint errors" not in counts:
         raise VerifyError(
-            "%s is missing the 'footprint errors' summary required to prove "
-            "that schematic parity ran" % report)
+            "%s is missing the required 'footprint errors' report-format "
+            "category; this category alone does not prove parity executed"
+            % report)
     if rc not in (0, 5):
         raise VerifyError("kicad-cli pcb drc failed (rc=%d): %s" % (rc, err[:400]))
     return rc, counts

@@ -19,7 +19,7 @@ Treat a green DRC as “no active rule reported a violation,” not as proof tha
 
 ```sh
 K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
-"$K" pcb drc --severity-all --refill-zones --schematic-parity \
+"$K" pcb drc --severity-all --refill-zones --save-board --schematic-parity \
      --exit-code-violations -o drc.rpt x.kicad_pcb
 ```
 
@@ -33,18 +33,23 @@ assume KiCad applied the intended rule and parity authority.
 
 Create one finalized release candidate in that scratch bundle. Run the project's pinned zone
 finalizer and in-memory semantic-settle gate, save once, and bind the resulting board digest and
-per-zone geometry snapshot. Run DRC, artifact guards, Gerber/drill export and measurements from
-that exact saved board. If a consumer refills zones, prove its per-zone filled geometry equals the
-bound snapshot; a second independently accepted fill is a different candidate, not corroboration.
-Any detected refill difference invalidates the reports and exports and returns the release to the
-finalization step.
+per-zone geometry snapshot. Run DRC with `--save-board` so its refill is observable, then reparse the
+saved scratch board and compare every filled zone with the bound snapshot. `run_drc()` can enforce
+this when given `expected_zone_snapshot` and the project's reparsing `zone_snapshotter`. A zero-count
+report is invalid when the snapshot differs or cannot be read. Run artifact guards, Gerber/drill
+export and measurements only from that exact DRC-saved and rechecked board. A second independently
+accepted fill is a different candidate, not corroboration; any difference returns the release to
+finalization.
 
 - Keep `--exit-code-violations`; without it DRC can write violations and exit zero.
 - Keep `--schematic-parity`; it checks that the board still agrees with the schematic. Require a
-  fresh independently parsed annotated netlist and the DRC report's footprint-error summary; KiCad
-  can otherwise print that parity could not run while returning a clean DRC report.
-- Keep `--refill-zones`, and compare the resulting fill with the candidate's bound semantic
-  snapshot. Do not silently allow DRC and fabrication export to consume different fills.
+  fresh independently parsed annotated netlist, recognized-diagnostic rejection and the DRC
+  report's footprint-error category. The category is only a report-format check: KiCad emits it even
+  without parity. For every supported KiCad compatibility cell, calibrate parity with a same-stem,
+  annotated scratch bundle whose board deliberately omits or mismatches a footprint; require a
+  nonzero footprint-error result before trusting clean parity runs on that cell.
+- Keep `--refill-zones --save-board`, then compare the reparsed saved fill with the candidate's bound
+  semantic snapshot. Bare subprocess output cannot establish equality.
 - Capture the command status before piping output, and judge the report contents as well.
 - Re-run the layout generator after every schematic change that can alter values, fields,
   footprints, or connectivity.
@@ -105,12 +110,18 @@ Run the actual exports:
 
 ```sh
 K="${KICAD_CLI:-kicad-cli}"   # set KICAD_CLI to an absolute path when it is not on PATH
-"$K" pcb export gerbers --check-zones --output fab x.kicad_pcb
+"$K" pcb export gerbers --output fab x.kicad_pcb
 "$K" pcb export drill   --output fab/ x.kicad_pcb
 "$K" sch export bom --output fab/bom.csv --group-by 'Value,Footprint,MPN' \
      --fields 'Reference,Value,Footprint,MPN,Manufacturer,${QUANTITY}' x.kicad_sch
 "$K" pcb export pos --output fab/cpl.csv --format csv --units mm --side both x.kicad_pcb
 ```
+
+These exports consume the already finalized, DRC-saved cached geometry. Do not ask the Gerber
+subprocess to perform another unobservable refill. Verify the bound board digest immediately before
+and after export; if another tool or concurrent writer changes it, discard the output set. If a
+project chooses an exporter refill/check mode, capture and prove that consumer's filled geometry
+equals the same bound snapshot before accepting its files.
 
 Check every exit status and log. Confirm that the expected copper layers appear. Measure from the
 board rather than memory:
@@ -127,18 +138,27 @@ belong to a closed contour; handle inherently closed circles and rectangles expl
 
 ```python
 points = collections.Counter()
-for drawing in board.GetDrawings():
+edge_items = [(None, item) for item in board.GetDrawings()]
+edge_items += [
+    (footprint, item)
+    for footprint in board.GetFootprints()
+    for item in footprint.GraphicalItems()
+]
+for owner, drawing in edge_items:
     if board.GetLayerName(drawing.GetLayer()) != "Edge.Cuts":
         continue
     if drawing.GetShape() in (pcbnew.SHAPE_T_RECT, pcbnew.SHAPE_T_CIRCLE):
         continue
+    # For footprint graphics, calibrate that GetStart/GetEnd are transformed
+    # board coordinates for every supported rotation/mirror/tool-version cell.
     points[key(drawing.GetStart())] += 1
     points[key(drawing.GetEnd())] += 1
 open_ends = [point for point, count in points.items() if count != 2]
 ```
 
-Calibrate this for the outline primitives the project permits; endpoint degree alone is not a full
-topology proof for arbitrary self-intersections.
+Calibrate this for direct drawings and footprint-hosted primitives, including every supported
+rotation and mirror. Inventory each carrier and its parent footprint UUID/attributes. Endpoint
+degree alone is not a full topology proof for arbitrary self-intersections.
 
 ## Verify BOM and sourcing evidence
 
@@ -207,12 +227,22 @@ input an immutable identity or cryptographic digest. Include at least:
   other external input consumed by a load-bearing guard; and
 - pinned KiCad/finalizer/tool versions, commands, configuration and approved waivers.
 
-Record the manifest digest inside or alongside every DRC/ERC report, artifact-guard result,
-fabrication output set, assembly output and order authorization. Commit or otherwise archive the
-manifest, its resolvable inputs and outputs together. A report bound only to the root schematic and
-board is insufficient: changing `.kicad_pro` severity, a hierarchical sheet, a rule file or a
-library can change the verdict or copper while those two digests remain unchanged.
+After producing the files, create a canonical, path-sorted release receipt. Record the input-manifest
+digest plus the canonical path, output type, byte size and SHA-256 of every DRC/ERC report,
+artifact-guard result, Gerber, drill/map, BOM, CPL, drawing and payload archive. Keep the receipt
+outside any payload archive it hashes so the construction is not self-referential. Hash the receipt
+itself, then create a separate order-authorization record that names that receipt digest. Re-open
+through stable file descriptors and re-check every size/digest immediately before transfer or
+ordering; replacing one output must invalidate the receipt. `kicad_repro.py` provides stable digest
+and replacement-detection primitives, but the project release wrapper owns the complete inventory.
+
+Commit or otherwise archive the manifest, receipt, their resolvable inputs and outputs together. A
+report bound only to the root schematic and board is insufficient: changing `.kicad_pro` severity,
+a hierarchical sheet, a rule file or a library can change the verdict or copper while those two
+digests remain unchanged. Likewise, placing only the input-manifest digest beside an output does not
+bind that output's bytes.
 
 Regenerate after any bound-input change or GUI serialization step. Treat reports and fabrication
-files as cached outputs that expire when the manifest digest changes; a verbal revision label
-cannot prove which inputs produced the released copper.
+files as cached outputs that expire when the input-manifest digest changes and as invalid whenever
+their receipt entry no longer matches. A verbal revision label cannot prove which inputs produced
+the released copper.

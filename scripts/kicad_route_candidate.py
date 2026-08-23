@@ -91,7 +91,7 @@ except ImportError:  # imported as scripts.kicad_route_candidate
     )
 
 
-SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v1"
+SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
 LOG_TAIL_CHARS = 12000
 # KiCad's DSN/SES import can canonicalize a decimal coordinate by one internal
 # nanometre (for example 16.774999 mm to 16.775000 mm) without moving an item
@@ -2670,6 +2670,18 @@ def _optional_call(item, name, converter=lambda x: x):
         ) from exc
 
 
+def _item_uuid(item) -> str:
+    try:
+        value = str(item.m_Uuid.AsString())
+    except Exception as exc:
+        raise RouteReportError(
+            "cannot resolve UUID for %s: %s" % (type(item).__name__, exc)
+        ) from exc
+    if not value:
+        raise RouteReportError("%s has an empty UUID" % type(item).__name__)
+    return value
+
+
 def _route_item(item, board, pcbnew) -> dict:
     common = {
         "net": str(item.GetNetname()),
@@ -2746,7 +2758,12 @@ def _footprint_item(fp) -> dict:
         (_pad_item(pad) for pad in fp.Pads()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
+    graphics = sorted(
+        (_drawing_item(item) for item in fp.GraphicalItems()),
+        key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
+    )
     return {
+        "uuid": _item_uuid(fp),
         "reference": str(fp.GetReference()),
         # str(LIB_ID) is the SWIG proxy repr and contains a process-specific
         # pointer, so it makes identical boards hash differently.  The
@@ -2756,7 +2773,13 @@ def _footprint_item(fp) -> dict:
         "orientation_deg": round(float(fp.GetOrientationDegrees()), 9),
         "flipped": bool(fp.IsFlipped()),
         "locked": bool(fp.IsLocked()),
+        "attributes": int(fp.GetAttributes()),
         "pads": pads,
+        # PCB_SHAPE coordinates returned by KiCad for footprint graphics are
+        # transformed into board space.  Keeping them here makes a moved,
+        # rotated, mirrored, opened, or replaced footprint-hosted Edge.Cuts
+        # contour part of the nonrouting digest.
+        "graphics": graphics,
     }
 
 
@@ -2781,7 +2804,11 @@ def _zone_item(zone) -> dict:
 
 
 def _drawing_item(item) -> dict:
-    data = {"kind": type(item).__name__, "layers": _layers(item)}
+    data = {
+        "uuid": _item_uuid(item),
+        "kind": type(item).__name__,
+        "layers": _layers(item),
+    }
     converters = {
         "GetPosition": _nonrouting_point,
         "GetStart": _nonrouting_point,

@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import kicad_route_candidate as route
+import kicad_route_manifest as manifest
 
 
 def segment(net="N", locked=False, start=(0, 0), end=(10, 0), width=200_000):
@@ -411,6 +412,161 @@ class RouteCandidateTests(unittest.TestCase):
             y = 65_379_999
 
         self.assertEqual(route._nonrouting_point(Point()), [16_775_000, 65_380_000])
+
+    def test_footprint_graphic_mutation_changes_nonrouting_snapshot(self):
+        class Point:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class LayerSet:
+            def Seq(self):
+                return [44]
+
+        class Kiid:
+            def __init__(self, value):
+                self.value = value
+
+            def AsString(self):
+                return self.value
+
+        class Graphic:
+            def __init__(self):
+                self.start = Point(1_000_000, 2_000_000)
+                self.end = Point(3_000_000, 2_000_000)
+                self.m_Uuid = Kiid("graphic-uuid")
+
+            def GetLayerSet(self):
+                return LayerSet()
+
+            def GetStart(self):
+                return self.start
+
+            def GetEnd(self):
+                return self.end
+
+            def GetWidth(self):
+                return 50_000
+
+            def GetShape(self):
+                return 0
+
+            def IsLocked(self):
+                return True
+
+        class Fpid:
+            def GetUniStringLibId(self):
+                return "Local:Slot"
+
+        class Footprint:
+            def __init__(self, graphic):
+                self.graphic = graphic
+                self.m_Uuid = Kiid("footprint-uuid")
+
+            def Pads(self):
+                return []
+
+            def GraphicalItems(self):
+                return [self.graphic]
+
+            def GetReference(self):
+                return "MH1"
+
+            def GetFPID(self):
+                return Fpid()
+
+            def GetPosition(self):
+                return Point(10_000_000, 20_000_000)
+
+            def GetOrientationDegrees(self):
+                return 90.0
+
+            def IsFlipped(self):
+                return False
+
+            def IsLocked(self):
+                return True
+
+            def GetAttributes(self):
+                return 2
+
+        graphic = Graphic()
+        footprint = Footprint(graphic)
+        before = route._footprint_item(footprint)
+        self.assertEqual(before["graphics"][0]["uuid"], "graphic-uuid")
+        self.assertEqual(before["attributes"], 2)
+
+        graphic.end.x += 500_000
+        after = route._footprint_item(footprint)
+        self.assertNotEqual(
+            route._json_digest(before), route._json_digest(after)
+        )
+
+    def test_identity_map_includes_footprint_hosted_graphic(self):
+        class Point:
+            x = 1_000_000
+            y = 2_000_000
+
+        class Kiid:
+            def __init__(self, value):
+                self.value = value
+
+            def AsString(self):
+                return self.value
+
+        class Graphic:
+            m_Uuid = Kiid("graphic-uuid")
+
+            def GetLayer(self):
+                return 44
+
+            def GetStart(self):
+                return Point()
+
+            def GetEnd(self):
+                return Point()
+
+            def GetShape(self):
+                return 0
+
+            def GetWidth(self):
+                return 50_000
+
+            def IsLocked(self):
+                return True
+
+        class Footprint:
+            m_Uuid = Kiid("footprint-uuid")
+
+            def GetReference(self):
+                return "MH1"
+
+            def Pads(self):
+                return []
+
+            def GraphicalItems(self):
+                return [Graphic()]
+
+            def GetAttributes(self):
+                return 2
+
+        class Board:
+            def GetFootprints(self):
+                return [Footprint()]
+
+            def GetTracks(self):
+                return []
+
+            def Zones(self):
+                return []
+
+            def GetDrawings(self):
+                return []
+
+        identities = manifest.identity_map(Board(), mock.Mock())
+        self.assertIn("graphic-uuid", identities)
+        self.assertIn("footprint-graphic:", identities["graphic-uuid"])
+        self.assertIn('"parent_reference":"MH1"', identities["graphic-uuid"])
 
     def test_project_audit_commands_are_argv_not_shell(self):
         with tempfile.TemporaryDirectory() as raw:
