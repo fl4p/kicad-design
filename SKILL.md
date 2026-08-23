@@ -229,7 +229,9 @@ Do not omit `--exit-code-violations`: ERC and DRC can report violations while ex
 hide its status behind a pipeline; capture the command status before filtering output or enable
 `pipefail`. Judge the report contents as well as the process status.
 
-Treat a missing or empty severity map as `unverified`, not as proof that nothing is ignored. Diff
+Treat every `.kicad_pro` severity map as sparse configured overrides, not a complete effective rule
+universe. Missing or empty maps are especially `unverified`, but a nonempty map still cannot prove
+that nothing else defaults to `ignore`; require a complete, version-bound resolution. Diff
 `.kicad_pro` before and after generators and restore unintended changes before running verification.
 
 Parse exported netlists independently of KiCad's pretty-printing. Accept arbitrary whitespace,
