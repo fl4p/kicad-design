@@ -88,6 +88,9 @@ For each described or implemented check, ask:
 5. Can a failed check persist a stale success result?
 6. Does the provenance claim exactly what was run?
 7. Has the check been calibrated with both a known-bad and a legal input?
+8. Does the check establish the named physical function, or only confirm that the generator's
+   expected geometry is present? For a load-bearing barrier or path, require a geometry-preserving,
+   DRC-clean mutation that defeats the function while leaving the proxy checks green.
 
 Also look for checks that cannot fail on the examples used to justify them. Dead checks and
 anti-monotone checks are the same release risk.

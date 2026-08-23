@@ -216,6 +216,18 @@ adding an unexpected feature; require stable failure IDs that identify the featu
 exercise a legal movement within tolerance so an exact-coordinate check does not masquerade as a
 mechanical-interface guard.
 
+Keep interface geometry and physical function as separate verdicts. When a slot, cutout, neck,
+aperture or datum claims a thermal, fluidic, isolation, EMC or structural effect, invoke the
+applicable domain workflow and guard the requirement-derived topology as well as the contour. A
+count/dimension/datum PASS proves only that the named geometry exists and is manufacturable.
+
+Calibrate the domain guard with a semantics-breaking mutation that preserves the mechanical
+inventory: keep the same legal contours while placing the protected component on the wrong side,
+leaving the dominant path uninterrupted, or adding a material or copper bypass. The domain guard
+must emit its own stable failure ID even though the mechanical guard remains green. This mutation
+must be derived independently from the physical requirement; copying the generator's own labels or
+coordinates into the audit repeats one assumption rather than testing it.
+
 ## Guard visual geometry by object class
 
 Treat visual checks as artifact guards. Use KiCad's own text and graphic extents where available,

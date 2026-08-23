@@ -249,6 +249,11 @@ a calibrated mutation suite behind them — carried a dangling via and a stub of
 board DRC found immediately. The guards were not wrong; the defect was outside the question they
 asked.
 
+Agreement between a design note, generator constants and an audit copied from those constants is
+one repeated assumption, not independent evidence. When physical function depends on geometry,
+derive the guard's topology and limit from the named requirement or validated model, then calibrate
+it with a DRC-clean mutation that preserves the feature's appearance while defeating its function.
+
 After a refactor, build flag, or change to a guard's scope, explicitly reassess which checks still
 cover the resulting artefact and rerun every affected rung. Budget the full release workflow only
 when making a release claim; otherwise report the narrower verification scope instead of calling

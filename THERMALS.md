@@ -18,6 +18,7 @@ checks in [`GUARDS.md`](GUARDS.md).
 - [Carry temperature through the accuracy budget](#carry-temperature-through-the-accuracy-budget)
 - [Place sources, sinks and sensitive parts deliberately](#place-sources-sinks-and-sensitive-parts-deliberately)
 - [Design the whole heat path](#design-the-whole-heat-path)
+- [Prove thermal barriers interrupt the dominant path](#prove-thermal-barriers-interrupt-the-dominant-path)
 - [Handle exposed pads, vias, paste and zones together](#handle-exposed-pads-vias-paste-and-zones-together)
 - [Guard thermally matched copper](#guard-thermally-matched-copper)
 - [Validate models and the finished board](#validate-models-and-the-finished-board)
@@ -141,6 +142,31 @@ Total copper area is only a scalar proxy. Heat spreading and transient response 
 copper is removed, whether it remains connected to the source, neck width and boundary location.
 Do not turn an area percentage into a thermal limit without a temperature or resistance budget
 and a sensitivity to removal at the relevant location.
+
+## Prove thermal barriers interrupt the dominant path
+
+A routed slot, cutout, neck or sensor tab is geometry, not evidence of thermal isolation. For each
+claimed barrier, name the source region, protected component or region, dominant source-to-target
+path, allowed bridges and required temperature or thermal-resistance result. The barrier must lie
+topologically between the source and target: a slot parallel to the dominant path, or a sensor at
+the source-side root of a nominal tab, does not interrupt that path.
+
+Check the saved and reparsed board across the complete construction. Include filled copper on every
+layer, tracks, pads, vias, laminate bridges, connectors, shields, fasteners and enclosure contacts
+that can bypass the intended neck. Establish that the protected component is on the isolated side,
+then quantify the remaining copper and laminate cross-section, path length and any parallel bypass.
+Slot count, dimensions and coordinates establish only that the cutouts can be fabricated.
+
+Give this functional claim its own artifact guard and stable failure ID. Calibrate it with an
+appearance-preserving known-bad mutation: retain legal, closed slots with the expected count and
+dimensions while moving the target to the source side, rotating or relocating the barrier so it no
+longer crosses the path, or adding an all-layer copper bypass. Also exercise a legal geometry change
+that preserves the derived physical margin. Derive the expected topology and limit from the thermal
+requirement or model, not from the generator constants that produced the current board.
+
+When the thermal result still requires a physical prototype, state the unverified quantity and the
+experiment that will resolve it. A board may be manufacturable as a thermal experiment, but it is
+not a functionally validated implementation of the isolation claim.
 
 ## Handle exposed pads, vias, paste and zones together
 

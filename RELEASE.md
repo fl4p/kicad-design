@@ -8,7 +8,7 @@ when temperature or heat flow is load-bearing.
 
 - [Run board verification](#run-board-verification)
 - [Resolve effective rule maps](#resolve-effective-rule-maps)
-- [Separate manufacturable from final](#separate-manufacturable-from-final)
+- [Separate manufacturable, fit for purpose and final](#separate-manufacturable-fit-for-purpose-and-final)
 - [Export and measure fabrication data](#export-and-measure-fabrication-data)
 - [Verify BOM and sourcing evidence](#verify-bom-and-sourcing-evidence)
 - [Bind outputs to their source artefact](#bind-outputs-to-their-source-artefact)
@@ -57,18 +57,27 @@ Do not rely only on a diff against defaults: a load-bearing rule may already def
 Enumerate first, then use the diff to expose project-specific changes. Restore unintended project
 file mutations before generating the reports bound to the release.
 
-## Separate manufacturable from final
+## Separate manufacturable, fit for purpose and final
 
-Answer two questions independently:
+Answer three questions independently:
 
 - **Manufacturable:** can the fab build the board from the supplied geometry, stackup, drill, and
   other outputs?
-- **Final:** is this the exact revision the user wants fabricated, including silkscreen, hazard
-  markings, revision identifiers, and all pending board changes?
+- **Fit for purpose:** do the emitted electrical, thermal, mechanical, fluidic, safety and EMC
+  structures satisfy the load-bearing design requirements, or carry an explicit prototype waiver
+  naming the unverified quantity and acceptance experiment?
+- **Final and approved to order:** is this the exact revision the user wants fabricated, including
+  silkscreen, hazard markings, revision identifiers, accepted waivers and all pending board changes?
 
 Classify BOM, assembly, integration, and documentation findings separately. A board can be
 manufacturable while still blocked from ordering, and a sourcing problem does not necessarily make
 its bare PCB unmanufacturable.
+
+Do not report a merely manufacturable board as “ready for fabrication” when an unresolved
+load-bearing functional geometry claim remains. Say that the fabrication data is manufacturable
+and that design release is blocked. A deliberately ordered experiment is permissible only when its
+scope, unresolved claim, measurements and decision criterion are recorded and explicitly accepted;
+DRC-clean geometry alone is not that acceptance.
 
 ## Export and measure fabrication data
 
