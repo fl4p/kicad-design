@@ -16,8 +16,8 @@ Start with:
 git status --short
 git log --oneline -5
 git diff --check
-git diff -- README.md SKILL.md SETUP.md SCHEMATIC.md PCB.md PCBNEW.md FOOTPRINTS.md \
-  GUARDS.md THERMALS.md RELEASE.md scripts/ drafts/REVIEW-BRIEF.md
+git diff -- README.md SKILL.md SETUP.md SCHEMATIC.md PCB.md AUTOROUTING.md PCBNEW.md \
+  FOOTPRINTS.md GUARDS.md THERMALS.md RELEASE.md VARIANTS.md scripts/ drafts/REVIEW-BRIEF.md
 python3 -m pytest -q scripts/test_*.py
 K=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
 KP=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3

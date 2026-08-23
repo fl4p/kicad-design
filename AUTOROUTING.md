@@ -386,6 +386,6 @@ with schematic parity, the calibrated project-audit result, and exact manifest
 re-extraction. A failure in any member makes the report fail; a DRC-only report is
 not release evidence.
 
-See [`scripts/README.md`](scripts/README.md) for the command contract and
-[`drafts/PCB-AUTOROUTING.md`](drafts/PCB-AUTOROUTING.md) for the research evidence
-and limitations behind this policy.
+See [`scripts/README.md`](scripts/README.md) for the command contract. The research evidence and
+limitations behind this policy are archived on the `drafts-archive` branch
+(`git show drafts-archive:drafts/PCB-AUTOROUTING.md`).
