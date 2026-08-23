@@ -300,9 +300,10 @@ load-bearing-omission rules at the end of this section apply.
   routing, zone fill, canonicalisation, save) and search/retry counts bucketed by OUTCOME with mean
   and share of total — in stdout and in the returned stats. Keep phases coarse and aligned with
   actionable decisions, and check callers before wrapping an entry point: recursion and retries
-  double-count. Legitimate opt-outs, provided rather than argued away: timers inside functions
-  called millions of times, timing-perturbed concurrent or deadline code, and byte-reproducible
-  artefacts, which must exclude wall times by construction.
+  double-count, and a bucket that silently sums a nested sub-search into its parent misattributes
+  the very asymmetry you are hunting. Legitimate opt-outs, provided rather than argued away:
+  timers inside functions called millions of times, timing-perturbed concurrent or deadline code,
+  and byte-reproducible artefacts, which must exclude wall times by construction.
 - **Report timings as measurements, never impressions.** A duration recalled from waiting is not a
   measurement and invites diagnosing a phase that was never the cost.
 - **Slice by outcome or phase, not only by function.** Success and failure share the same stacks,
@@ -331,8 +332,9 @@ load-bearing-omission rules at the end of this section apply.
   it and silently give back the speedup. Note it where the code is missing, not at the
   compensating mechanism — for surprising, load-bearing absences only.
 
-The complete measured case (one 4-layer, 169-connection board, `--full` 44 min → 2 min 58 s,
-byte-identical `.kicad_pcb` throughout, with the duplicate counts, hit rates and A/B numbers) is
+The complete measured case (one 4-layer, 169-connection board, `--full` from not finishing a
+second round within 44 min to 2 min 58 s, byte-identical `.kicad_pcb` throughout, with the
+duplicate counts, hit rates and A/B numbers) is
 preserved in this file's history at commit `1a4ce0a` and in the knowledge-base note
 `~/dev/kb/tooling/pcbnew-generator-outcome-profiling.md`. Treat its numbers as one board's
 asymmetry, not as thresholds.

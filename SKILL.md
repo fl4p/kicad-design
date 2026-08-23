@@ -231,7 +231,8 @@ hide its status behind a pipeline; capture the command status before filtering o
 `pipefail`. Judge the report contents as well as the process status.
 
 Treat every `.kicad_pro` severity map as sparse configured overrides — even a nonempty map cannot
-prove nothing else defaults to `ignore`; resolve effective severities per [`RELEASE.md`](RELEASE.md).
+prove nothing else defaults to `ignore`; require the complete, version-bound effective resolution
+per [`RELEASE.md`](RELEASE.md).
 Diff `.kicad_pro` before and after generators and restore unintended changes before verification.
 
 Parse exported netlists independently of KiCad's pretty-printing. Accept arbitrary whitespace,

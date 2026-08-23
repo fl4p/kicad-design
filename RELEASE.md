@@ -71,8 +71,9 @@ restriction flags. Record which findings were dismissed and the authoritative ev
 `--severity-all` does not resurrect rules whose effective severity is `ignore`. Before calling ERC
 or DRC clean:
 
-1. Resolve the effective severities, including KiCad defaults absent from a sparse project map;
-   a nonempty `.kicad_pro` map is still only an override set, never completeness evidence.
+1. Resolve the effective severities for the exact KiCad version in use, including KiCad defaults
+   absent from a sparse project map, and record the version the resolution binds to; a nonempty
+   `.kicad_pro` map is still only an override set, never completeness evidence.
 2. List every ignored rule and every exclusion in the release report.
 3. Record pin-map changes that alter ERC compatibility.
 4. Diff `.kicad_pro` before and after each generator or GUI-assisted transformation.
