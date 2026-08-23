@@ -21,8 +21,10 @@ False PASSes this exists to close
     map yields ``[]``, which reports "no rules are ignored" at the exact moment
     you know least, while KiCad's built-in defaults are fully in force.
 
-    So :func:`severity_report` is **tri-state**. A missing or empty map is
-    ``UNVERIFIED``, never clean.
+    So :func:`severity_report` treats the project's sparse maps as configured
+    overrides, never as a complete rule universe. It returns ``UNVERIFIED``
+    unless the caller also supplies a complete, version-bound resolution of
+    the effective ERC and DRC maps.
 
 3.  **A requested parity check may not run.** KiCad 10 can print that it
     failed to fetch the schematic netlist, still write an all-zero DRC report,
@@ -431,19 +433,31 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
     return rc, counts
 
 
-def severity_report(kicad_pro):
-    """Tri-state enumeration of the ERC/DRC severity maps.
+def severity_report(kicad_pro, effective_rule_maps=None):
+    """Report configured overrides and, when supplied, effective severities.
 
     Returns a dict::
 
         {"state": "verified" | "unverified",
-         "erc_ignored": [...], "drc_ignored": [...],
-         "erc_entries": int, "drc_entries": int,
+         "configured_erc_ignored": [...],
+         "configured_drc_ignored": [...],
+         "configured_erc_entries": int,
+         "configured_drc_entries": int,
+         "effective_erc_ignored": [...],
+         "effective_drc_ignored": [...],
+         "effective_erc_entries": int,
+         "effective_drc_entries": int,
+         "kicad_version": str | None,
          "note": str}
 
-    ``state == "unverified"`` when a map is missing or empty. That is NOT a
-    pass: it means KiCad's built-in defaults are in force and this function
-    cannot tell you what they are. Resolve them against your KiCad version --
+    ``.kicad_pro`` rule maps are sparse overrides even when nonempty, so the
+    project file alone can never make this report ``verified``. To establish
+    that state, pass ``effective_rule_maps`` with ``complete is True``, a
+    nonempty ``kicad_version``, and nonempty ``erc`` and ``drc`` maps resolved
+    for that exact KiCad compatibility cell. This function validates that
+    attestation and checks it against explicit project overrides; the caller
+    remains responsible for proving that its rule universe is complete.
+
     :data:`KNOWN_STOCK_IGNORES` is a starting list, not an authority.
     """
     p = Path(kicad_pro)
@@ -499,42 +513,120 @@ def severity_report(kicad_pro):
         drc = drc_raw
 
     out = {
-        "erc_entries": len(erc),
-        "drc_entries": len(drc),
-        "erc_ignored": sorted(k for k, v in erc.items() if v == "ignore"),
-        "drc_ignored": sorted(k for k, v in drc.items() if v == "ignore"),
+        "configured_erc_entries": len(erc),
+        "configured_drc_entries": len(drc),
+        "configured_erc_ignored": sorted(
+            k for k, v in erc.items() if v == "ignore"),
+        "configured_drc_ignored": sorted(
+            k for k, v in drc.items() if v == "ignore"),
+        "effective_erc_entries": 0,
+        "effective_drc_entries": 0,
+        "effective_erc_ignored": [],
+        "effective_drc_ignored": [],
+        "kicad_version": None,
     }
+    legal_configured = {"error", "warning", "ignore", "exclusion", "unset"}
+    bad_configured = {k: v for m in (erc, drc) for k, v in m.items()
+                      if (not isinstance(k, str) or not isinstance(v, str)
+                          or v not in legal_configured)}
     if invalid_maps:
         out["state"] = "unverified"
         out["note"] = (
             "severity configuration has an invalid shape: %s; effective "
             "severities cannot be established"
             % "; ".join(invalid_maps))
-    elif not erc or not drc:
+    elif bad_configured:
         out["state"] = "unverified"
         out["note"] = (
-            "rule_severities is %s -- KiCad's built-in defaults are in force "
-            "and are NOT enumerated here. An empty ignore list from an absent "
-            "map means 'unknown', not 'nothing ignored'. Stock defaults known "
-            "to sit at ignore include: %s (verify against your KiCad version)."
-            % ("absent/empty for " + ", ".join(
-                x for x, y in (("ERC", erc), ("DRC", drc)) if not y),
+            "configured map contains %d entr%s with an invalid rule name or "
+            "non-KiCad severity (%s); effective severities cannot be "
+            "established"
+            % (len(bad_configured),
+               "y" if len(bad_configured) == 1 else "ies",
+               ", ".join("%s=%r" % kv
+                         for kv in sorted(bad_configured.items())[:4])))
+    elif effective_rule_maps is None:
+        missing = [name for name, values in (("ERC", erc), ("DRC", drc))
+                   if not values]
+        out["state"] = "unverified"
+        out["note"] = (
+            "project rule_severities maps are sparse overrides%s; KiCad's "
+            "defaults and the complete rule universe are unresolved. A "
+            "nonempty sparse map is not a complete effective map, and an "
+            "empty configured-ignore list means 'unknown', not 'nothing "
+            "ignored'. Supply a complete version-bound effective-rule "
+            "resolution. Stock defaults known to sit at ignore include: %s "
+            "(verify against your KiCad version)."
+            % ((" (absent/empty for " + ", ".join(missing) + ")")
+               if missing else "",
                ", ".join(KNOWN_STOCK_IGNORES)))
     else:
-        legal = {"error", "warning", "ignore", "exclusion", "unset"}
-        bad = {k: v for m in (erc, drc) for k, v in m.items()
-               if not isinstance(v, str) or v not in legal}
-        if bad:
+        resolution_errors = []
+        if not isinstance(effective_rule_maps, dict):
+            resolution_errors.append("resolution is not an object")
+            resolved_erc = {}
+            resolved_drc = {}
+            version = None
+        else:
+            if effective_rule_maps.get("complete") is not True:
+                resolution_errors.append("complete is not true")
+            version = effective_rule_maps.get("kicad_version")
+            if not isinstance(version, str) or not version.strip():
+                resolution_errors.append("kicad_version is missing")
+                version = None
+            resolved_erc = effective_rule_maps.get("erc")
+            resolved_drc = effective_rule_maps.get("drc")
+            if not isinstance(resolved_erc, dict) or not resolved_erc:
+                resolution_errors.append("ERC effective map is absent/empty")
+                resolved_erc = {}
+            if not isinstance(resolved_drc, dict) or not resolved_drc:
+                resolution_errors.append("DRC effective map is absent/empty")
+                resolved_drc = {}
+
+        legal_effective = {"error", "warning", "ignore", "exclusion"}
+        for label, resolved in (("ERC", resolved_erc),
+                                ("DRC", resolved_drc)):
+            invalid = {k: v for k, v in resolved.items()
+                       if (not isinstance(k, str) or not isinstance(v, str)
+                           or v not in legal_effective)}
+            if invalid:
+                resolution_errors.append(
+                    "%s effective map has invalid entries: %s"
+                    % (label, ", ".join("%s=%r" % kv for kv in
+                                       sorted(invalid.items())[:4])))
+
+        for label, configured, resolved in (
+                ("ERC", erc, resolved_erc), ("DRC", drc, resolved_drc)):
+            for rule, configured_value in configured.items():
+                if rule not in resolved:
+                    resolution_errors.append(
+                        "%s effective map omits configured rule %s"
+                        % (label, rule))
+                elif (configured_value != "unset"
+                      and resolved[rule] != configured_value):
+                    resolution_errors.append(
+                        "%s effective %s=%s conflicts with configured %s"
+                        % (label, rule, resolved[rule], configured_value))
+
+        if resolution_errors:
             out["state"] = "unverified"
             out["note"] = (
-                "map contains %d entr%s with a value that is not a KiCad "
-                "severity (%s) -- the effective severity of those rules "
-                "cannot be established"
-                % (len(bad), "y" if len(bad) == 1 else "ies",
-                   ", ".join("%s=%r" % kv for kv in sorted(bad.items())[:4])))
+                "effective-rule resolution is invalid: %s"
+                % "; ".join(resolution_errors))
         else:
+            out.update({
+                "effective_erc_entries": len(resolved_erc),
+                "effective_drc_entries": len(resolved_drc),
+                "effective_erc_ignored": sorted(
+                    k for k, v in resolved_erc.items() if v == "ignore"),
+                "effective_drc_ignored": sorted(
+                    k for k, v in resolved_drc.items() if v == "ignore"),
+                "kicad_version": version.strip(),
+            })
             out["state"] = "verified"
-            out["note"] = "both maps present; effective ignores listed above"
+            out["note"] = (
+                "complete effective maps supplied for KiCad %s and checked "
+                "against configured project overrides" % version.strip())
     return out
 
 
@@ -554,12 +646,25 @@ if __name__ == "__main__":
     pcb = Path(sys.argv[3]) if len(sys.argv) > 3 else base.with_suffix(".kicad_pcb")
 
     sev = severity_report(pro)
-    print("severity map: %s (ERC %d entries, DRC %d entries)"
-          % (sev["state"].upper(), sev["erc_entries"], sev["drc_entries"]))
-    if sev["erc_ignored"]:
-        print("  ERC ignored:", ", ".join(sev["erc_ignored"]))
-    if sev["drc_ignored"]:
-        print("  DRC ignored:", ", ".join(sev["drc_ignored"]))
+    print("severity map: %s (configured ERC %d entries, DRC %d entries)"
+          % (sev["state"].upper(), sev["configured_erc_entries"],
+             sev["configured_drc_entries"]))
+    if sev["configured_erc_ignored"]:
+        print("  configured ERC ignores:",
+              ", ".join(sev["configured_erc_ignored"]))
+    if sev["configured_drc_ignored"]:
+        print("  configured DRC ignores:",
+              ", ".join(sev["configured_drc_ignored"]))
+    if sev["state"] == "verified":
+        print("  effective maps: KiCad %s, ERC %d entries, DRC %d entries"
+              % (sev["kicad_version"], sev["effective_erc_entries"],
+                 sev["effective_drc_entries"]))
+        if sev["effective_erc_ignored"]:
+            print("  effective ERC ignores:",
+                  ", ".join(sev["effective_erc_ignored"]))
+        if sev["effective_drc_ignored"]:
+            print("  effective DRC ignores:",
+                  ", ".join(sev["effective_drc_ignored"]))
     if sev["state"] == "unverified":
         print("  !!", sev["note"])
 

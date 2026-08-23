@@ -104,10 +104,14 @@ exit zero as command completion, then judge the structured report.
 Resolve ignored checks from two sources:
 
 1. The report's `Ignored checks` section states what KiCad skipped during that run.
-2. `.kicad_pro` states configured project severities and provides a cross-check.
+2. `.kicad_pro` states sparse configured overrides and provides a cross-check; even a nonempty map
+   does not enumerate KiCad defaults or the complete rule universe.
 
-Return `UNVERIFIED` when either source cannot be parsed. A missing sparse map is not proof that no
-defaults are ignored.
+`severity_report()` therefore returns `UNVERIFIED` for a project file by itself. It can return
+`VERIFIED` only when passed an explicitly complete, version-bound effective ERC/DRC resolution; it
+validates that resolution's shape and checks every explicit project override against it. The caller
+must preserve the compatibility-cell evidence proving that the supplied rule universe is complete.
+A missing or merely nonempty sparse map is never proof that no defaults are ignored.
 
 ### Prove reproducibility with `kicad_repro.py`
 

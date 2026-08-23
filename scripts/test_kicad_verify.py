@@ -363,7 +363,7 @@ class VerifyReportTests(unittest.TestCase):
             self.assertEqual(rc, 5)
             self.assertEqual(counts["errors"], 1)
 
-    def test_severity_report_is_tristate_for_missing_invalid_and_valid_maps(self):
+    def test_severity_report_rejects_missing_and_malformed_project_maps(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw) / "probe.kicad_pro"
             project.write_text("{}\n", encoding="utf-8")
@@ -382,23 +382,90 @@ class VerifyReportTests(unittest.TestCase):
             self.assertEqual(invalid_root["state"], "unverified")
             self.assertIn("project root", invalid_root["note"])
 
+    def test_severity_report_keeps_nonempty_sparse_maps_unverified(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw) / "probe.kicad_pro"
             project.write_text(json.dumps({
                 "erc": {"rule_severities": {"pin_not_connected": "ignore"}},
                 "board": {"design_settings": {
                     "rule_severities": {"invalid_outline": "error"}
                 }},
             }), encoding="utf-8")
-            valid = verify.severity_report(project)
-            self.assertEqual(valid["state"], "verified")
-            self.assertEqual(valid["erc_ignored"], ["pin_not_connected"])
+            sparse = verify.severity_report(project)
+            self.assertEqual(sparse["state"], "unverified")
+            self.assertIn("sparse overrides", sparse["note"])
+            self.assertIn("complete rule universe", sparse["note"])
+            self.assertEqual(
+                sparse["configured_erc_ignored"], ["pin_not_connected"])
+            self.assertEqual(sparse["effective_erc_ignored"], [])
 
+    def test_severity_report_rejects_invalid_configured_value(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw) / "probe.kicad_pro"
             project.write_text(json.dumps({
                 "erc": {"rule_severities": {"x": "silenced"}},
                 "board": {"design_settings": {"rule_severities": {"y": "error"}}},
             }), encoding="utf-8")
             bad_value = verify.severity_report(project)
             self.assertEqual(bad_value["state"], "unverified")
-            self.assertIn("not a KiCad severity", bad_value["note"])
+            self.assertIn("non-KiCad severity", bad_value["note"])
+
+    def test_severity_report_accepts_complete_version_bound_resolution(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw) / "probe.kicad_pro"
+            project.write_text(json.dumps({
+                "erc": {"rule_severities": {"pin_not_connected": "ignore"}},
+                "board": {"design_settings": {
+                    "rule_severities": {"invalid_outline": "error"}
+                }},
+            }), encoding="utf-8")
+            result = verify.severity_report(project, {
+                "complete": True,
+                "kicad_version": "10.0.5",
+                "erc": {
+                    "pin_not_connected": "ignore",
+                    "pin_not_driven": "warning",
+                },
+                "drc": {
+                    "invalid_outline": "error",
+                    "clearance": "error",
+                    "footprint_type_mismatch": "ignore",
+                },
+            })
+            self.assertEqual(result["state"], "verified")
+            self.assertEqual(result["kicad_version"], "10.0.5")
+            self.assertEqual(result["effective_erc_entries"], 2)
+            self.assertEqual(
+                result["effective_drc_ignored"], ["footprint_type_mismatch"])
+
+    def test_severity_report_rejects_incomplete_or_conflicting_resolution(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw) / "probe.kicad_pro"
+            project.write_text(json.dumps({
+                "erc": {"rule_severities": {"pin_not_connected": "ignore"}},
+                "board": {"design_settings": {
+                    "rule_severities": {"invalid_outline": "error"}
+                }},
+            }), encoding="utf-8")
+
+            incomplete = verify.severity_report(project, {
+                "complete": False,
+                "kicad_version": "10.0.5",
+                "erc": {"pin_not_connected": "ignore"},
+                "drc": {"invalid_outline": "error"},
+            })
+            self.assertEqual(incomplete["state"], "unverified")
+            self.assertIn("complete is not true", incomplete["note"])
+
+            conflict = verify.severity_report(project, {
+                "complete": True,
+                "kicad_version": "10.0.5",
+                "erc": {"pin_not_connected": "warning"},
+                "drc": {"clearance": "error"},
+            })
+            self.assertEqual(conflict["state"], "unverified")
+            self.assertIn("conflicts with configured", conflict["note"])
+            self.assertIn("omits configured rule", conflict["note"])
 
 
 if __name__ == "__main__":
