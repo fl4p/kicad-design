@@ -75,12 +75,15 @@ without weakening neighboring workflows:
     snapshots; mutate a footprint contour and require the snapshot digest to change.
 12. Parity compatibility uses a real same-stem annotated negative control; the footprint-error
     summary alone is not claimed as proof that parity executed.
-13. Snapshot v2 dispatch covers complete segment, rectangle, arc, circle, polygon, Bézier and text
-    geometry for direct and footprint-hosted board graphics and fails closed on unsupported classes.
-    Mutate Bézier controls and polygon holes while preserving endpoints and require both snapshot
-    and identity digests to change.
+13. Snapshot v5 dispatch covers complete segment, rectangle, arc, circle, polygon, Bézier and text
+    geometry for direct and footprint-hosted board graphics, enforces exact fields per KiCad object
+    kind and fails closed on unsupported classes. Mutate Bézier controls and polygon holes while
+    preserving endpoints and require both snapshot and identity digests to change. Add a field from
+    another graphic kind or remove `IsLocked` and require validation to fail. Swap two distinct
+    object UUID associations independently for pads, routes and zones and require each swap to fail
+    at the exact UUID-to-semantic binding.
 14. Snapshot schema is validated at every worker boundary and carried through seed/candidate report,
-    compatibility cell and route manifest. Promotion stays disabled until full v2 requalification.
+    compatibility cell and route manifest. Promotion stays disabled until full v5 requalification.
 
 Look for neighboring claims introduced with the fix, especially board-only workflows, global
 library resolution, project-variable overrides and external construction models.
@@ -142,8 +145,8 @@ Confirm these, but do not report them as new unless the current text understates
   be re-verified before use with the installed version.
 - `scripts/README.md` leaves `transform_pin()` unverified until calibrated against KiCad for the
   project's supported transform cells.
-- Autoroute promotion is disabled for all cells pending snapshot-v2 and parity-negative-control
-  requalification. A cell must not be re-enabled with the invalidated pre-v2 evidence.
+- Autoroute promotion is disabled for all cells pending snapshot-v5 and parity-negative-control
+  requalification. A cell must not be re-enabled with the invalidated pre-v5 evidence.
 - `FOOTPRINTS.md` intentionally supplies no authoritative numeric IPC-2221C verdict. A project must
   provide the binding current standard and complete derivation.
 
