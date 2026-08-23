@@ -289,98 +289,50 @@ considered next to the verdict, so a scan of nothing cannot masquerade as a scan
 
 ## A slow generator: profile by OUTCOME, and measure reuse before you cache
 
-**Scope: this is for a generator or router you OWN and can instrument.** If the slow stage is an
-external tool — FreeRouting, a fab DRC, a solver — only the last two paragraphs apply; you cannot
-bucket a return value or key a cache inside someone else's binary, and the lever there is inputs,
-staging and parallel runs instead. Evidence below is one 4-layer, 169-connection board whose
-`--full` went from never finishing a second round in 44 minutes to 2 min 58 s, byte-identical
-`.kicad_pcb` throughout. Treat the numbers as a worked example, not as thresholds.
+**Scope: a generator or router you OWN and can instrument.** For an external tool — FreeRouting, a
+fab DRC, a solver — you cannot bucket a return value or key a cache inside someone else's binary;
+the levers there are inputs, staging and parallel runs, and only the artefact-hash and
+load-bearing-omission rules at the end of this section apply.
 
-**Ship the instrumentation resident, and write it in before you need it.** The question "why did
-this take so long?" must be answerable from an ordinary run. If the answer requires a second,
-instrumented run, then at the moment the question is asked nobody has the data, the expensive run
-has already been paid for once, and the usual outcome is a guess presented as a cause. A generator
-you own should therefore print, on every run:
+- **Ship the instrumentation resident, default-on, and write it in before you need it.** "Why did
+  this take so long?" must be answerable from an ordinary run; a second instrumented run means the
+  data is missing exactly when the question is asked. Print wall time per coarse phase (placement,
+  routing, zone fill, canonicalisation, save) and search/retry counts bucketed by OUTCOME with mean
+  and share of total — in stdout and in the returned stats. Keep phases coarse and aligned with
+  actionable decisions, and check callers before wrapping an entry point: recursion and retries
+  double-count. Legitimate opt-outs, provided rather than argued away: timers inside functions
+  called millions of times, timing-perturbed concurrent or deadline code, and byte-reproducible
+  artefacts, which must exclude wall times by construction.
+- **Report timings as measurements, never impressions.** A duration recalled from waiting is not a
+  measurement and invites diagnosing a phase that was never the cost.
+- **Slice by outcome or phase, not only by function.** Success and failure share the same stacks,
+  so a function profiler cannot show which outcome pays; one timer bucketed on the return value
+  can. Measured: 96 % of one router's runtime was in FAILED searches, while the profiler-suggested
+  index rewrite was worth only 1.12x end to end.
+- **Measure reuse before you cache — under the cache's own lifetime.** Global duplicate counts
+  overestimate cacheability; count hits that survive the proposed invalidation boundary. Measured:
+  a cache invalidating correctly on every mutation scored 1142 invalidations against 14 hits and no
+  speedup; keying the one varying dependency instead of clearing on it made the same cache 1.53x.
+  Weigh churn against reuse distance, whether the key names EVERY correctness dependency, hit, miss
+  and key-construction cost, and whether superseded generations are bounded. Do not cache when the
+  dependency cannot be completely named or reliably invalidated, when an end-to-end benchmark shows
+  no material win, or when an algorithmic change removes the repetition instead.
+- **Verify SERVED hits, not stored ones.** The one cache failure that matters is serving a verdict
+  the current state no longer supports. Add a diagnostic mode that recomputes on the hit and raises
+  on disagreement — insertion-time checks recompute what was just computed and can never fail — and
+  calibrate it by storing a negated verdict and watching it fire.
+- **An artefact hash does not verify the mechanism.** A byte-identical A/B is a strong whole-file
+  regression oracle, yet a deliberately unsound cache key still produced a byte-identical file
+  because the unsound branch never changed a verdict in the tested runs. Hash the complete intended
+  artefact after confirming the compared run succeeded — see *Making a `pcbnew` layout
+  reproducible* above and `SKILL.md`'s reproducibility check, which this does not replace.
+- **If an omission is load-bearing, say so at the omission.** An invalidation removed because its
+  dependency moved into the cache key looks exactly like a lost one; a later reader will restore
+  it and silently give back the speedup. Note it where the code is missing, not at the
+  compensating mechanism — for surprising, load-bearing absences only.
 
-- **wall time per coarse phase** — placement, routing, zone fill, canonicalisation, save; and
-- **search or retry counts bucketed by OUTCOME**, with mean and share of total.
-
-Both belong in the returned stats as well as in stdout, so a report consumer can compare runs
-without re-instrumenting. Default it **on**: a `perf_counter` pair costs ~54 ns, so a few hundred
-coarse-boundary timers are tens of microseconds against operations running for tenths of a second,
-and an opt-in flag guarantees instrumentation is off exactly when it is wanted.
-
-Default-on is not the same as always-on, and three cases justify a deliberate opt-out: a timer
-inside a function called millions of times, where the per-call cost stops being negligible; a
-deadline-driven or concurrent algorithm that timing itself perturbs; and **byte-reproducible
-output**, where wall times printed into a canonical artefact destroy reproducibility unless they
-are explicitly excluded from it. Keep timings out of the canonical artefact by construction, and
-provide the opt-out rather than arguing nobody needs it.
-
-Keep the phases **coarse and aligned with the decisions they inform**: a breakdown finer than the
-choices a reader could act on is noise. And when you wrap an entry point in a timer, check the
-callers first — a recursive or retried call double-counts, and a bucket that silently sums a
-sub-search into its parent will misattribute the very asymmetry you are hunting.
-
-Report timings as measurements, never as impressions. "Roughly ten minutes" recalled from waiting
-on a job is not a measurement, and stating it as one invites a diagnosis of a phase that was never
-the cost.
-
-**Slice the profile by outcome or phase, not only by function.** A function-level sampler put the
-spatial index at about half the run, which reads as "make the index faster" — and rewriting it,
-benchmarked against 40 000 recorded real queries, was worth **1.12x on whole-generator runtime**.
-One `perf_counter` around the top-level routing call, bucketed by return value, said something the
-function profile structurally could not, because both outcomes share the same stacks:
-
-```
-routed  n=138    4.9s    mean=0.04s
-FAILED  n=411  128.3s    mean=0.31s     <- 96% of the 133.2 s inside route()
-```
-
-Nearly all the time went to searches that **fail**. In this bounded candidate search a success
-stopped at the first candidate that cleared, while an expensive failure usually exhausted the
-candidate families — not always, since some calls returned early. Your generator will have a
-different asymmetry; the transferable part is that aggregate function attribution hides which
-*outcome* pays, and one timer keyed on the result exposes it.
-
-**Measure reuse before you cache, and measure it under the cache's own lifetime.** Reading the
-source suggested 20–35 % duplicated work; counting measured **85.9 %** (22 887 753 repeats of
-26 638 958 clearance tests). That gap is worth one instrumented run — but a global duplicate count
-is *not* the number that decides it, and the same board proves why. A first cache invalidated
-correctly on every mutation and scored **1142 invalidations against 14 hits, no measurable
-speedup**. Cache utility is temporal locality relative to the invalidation boundary, so count hits
-that would **survive the proposed lifetime**; global duplication overestimates cacheability.
-
-**Then decide keying versus invalidation as a trade-off.** Naming the one varying dependency in the
-key, instead of clearing on it, took that cache from 14 hits to 116 and 1.53x — measured
-instrumented-build against instrumented-build, 138.6 s to 90.4 s user; the same design with the
-counters stripped runs 86.4 s. Weigh at least: churn rate against reuse distance, whether the key
-names *every* correctness dependency, hit and miss cost, key construction cost, and whether
-superseded generations are bounded. Keying on a monotonically rising revision, for instance, leaves
-every old generation resident but unreachable — memory grows per edit unless eviction bounds it,
-where a clear would have been simpler and cheaper.
-
-**Do not cache at all** when the correctness dependency cannot be completely named or reliably
-invalidated, when an end-to-end benchmark including cache overhead shows no material win, or when
-an algorithmic change removes the repeated work instead of memoising it.
-
-**Verify served hits, not stored ones.** A cache can only get one thing wrong that matters:
-*serving* a verdict the current state no longer supports. So add a diagnostic mode that recomputes
-on the **hit** and raises on disagreement — checking at insertion recomputes what you just computed
-and can never fail. Calibrate it by storing a negated verdict and watching it fire.
-
-**An artefact hash will not do that job for you.** Comparing a byte-identical output before and
-after a change is an excellent whole-file regression oracle and far stronger than comparing
-violation counts — but it establishes that *the artefact of the two tested runs is identical*, not
-that the mechanism producing it is correct. On this board an A/B with a deliberately **unsound**
-cache key produced a byte-identical file, because the unsound branch was never exercised in a
-verdict-changing way. Hash the complete intended artefact, after confirming the compared run
-actually succeeded — see *Making a `pcbnew` layout reproducible* above and `SKILL.md`'s
-reproducibility check for the preconditions, which this does not replace.
-
-**Finally: if an omission is load-bearing, say so at the omission.** Removing an invalidation
-because its dependency moved into the cache key leaves a site that looks exactly like one where the
-invalidation was *lost*. Here a second reader restored it, reinstating the version already measured
-as useless and silently giving back the speedup. Note it where the code is missing, not 500 lines
-away at the compensating mechanism — this is for surprising, load-bearing absences that a
-conventional invariant says should be there, not for ordinary deletions.
+The complete measured case (one 4-layer, 169-connection board, `--full` 44 min → 2 min 58 s,
+byte-identical `.kicad_pcb` throughout, with the duplicate counts, hit rates and A/B numbers) is
+preserved in this file's history at commit `1a4ce0a` and in the knowledge-base note
+`~/dev/kb/tooling/pcbnew-generator-outcome-profiling.md`. Treat its numbers as one board's
+asymmetry, not as thresholds.
