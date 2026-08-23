@@ -128,8 +128,9 @@ transfer. An input-manifest digest stored beside an unhashed output does not pre
 
 ## Use the autorouting boundary
 
-Classify routing ownership in [`../PCB.md`](../PCB.md) before invoking these tools. Keep critical
-geometry generator/manual-owned. Use exploratory mode for placement and congestion evidence, and
+Classify routing ownership in [`../PCB.md`](../PCB.md) and follow the workflow contract in
+[`../AUTOROUTING.md`](../AUTOROUTING.md) before invoking these tools. Keep critical geometry
+generator/manual-owned. Use exploratory mode for placement and congestion evidence, and
 allow only declared routine scope to cross the promotion boundary.
 
 ### Explore without promotion

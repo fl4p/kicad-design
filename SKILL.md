@@ -17,7 +17,8 @@ Read only the companions required by the task:
 |---|---|
 | [`SCHEMATIC.md`](SCHEMATIC.md) | the task captures, generates, edits, reviews, or declares completion of a schematic, or begins PCB work from one |
 | [`SETUP.md`](SETUP.md) | the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires a datasheet, reference design, eval-board documentation, current part status, inventory, stock, or distributor data |
-| [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or autorouting |
+| [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or routing ownership and completion |
+| [`AUTOROUTING.md`](AUTOROUTING.md) | the project opts into external autorouting: Freerouting candidates, route manifests, promotion |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |
 | [`RELEASE.md`](RELEASE.md) | running board verification, inspecting severity maps, exporting fabrication data, or deciding release readiness |
@@ -27,8 +28,8 @@ Read only the companions required by the task:
 
 Prefer the helpers in [`scripts/`](scripts/README.md) when they fit the project's existing
 toolchain instead of reimplementing netlist parsing, library geometry, reproducibility, or
-ERC/DRC invocation. Use the autoroute helpers only after the project opts into the external-routing
-workflow in [`PCB.md`](PCB.md).
+ERC/DRC invocation. Use the autoroute helpers only after the project opts in under
+[`PCB.md`](PCB.md)'s routing-ownership policy, following [`AUTOROUTING.md`](AUTOROUTING.md).
 
 Run the device-evidence and sourcing preflight when the task selects or substitutes a component;
 designs or reviews circuitry, placement, or layout around a critical component; validates
