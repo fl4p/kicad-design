@@ -457,6 +457,16 @@ class VerifyReportTests(unittest.TestCase):
             self.assertEqual(incomplete["state"], "unverified")
             self.assertIn("complete is not true", incomplete["note"])
 
+            extra_field = verify.severity_report(project, {
+                "complete": True,
+                "kicad_version": "10.0.5",
+                "erc": {"pin_not_connected": "ignore"},
+                "drc": {"invalid_outline": "error"},
+                "evidence": "not validated by this interface",
+            })
+            self.assertEqual(extra_field["state"], "unverified")
+            self.assertIn("exact contract", extra_field["note"])
+
             conflict = verify.severity_report(project, {
                 "complete": True,
                 "kicad_version": "10.0.5",

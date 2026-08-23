@@ -568,6 +568,12 @@ def severity_report(kicad_pro, effective_rule_maps=None):
             resolved_drc = {}
             version = None
         else:
+            expected_resolution_fields = {
+                "complete", "kicad_version", "erc", "drc",
+            }
+            if set(effective_rule_maps) != expected_resolution_fields:
+                resolution_errors.append(
+                    "resolution fields differ from the exact contract")
             if effective_rule_maps.get("complete") is not True:
                 resolution_errors.append("complete is not true")
             version = effective_rule_maps.get("kicad_version")
@@ -593,7 +599,8 @@ def severity_report(kicad_pro, effective_rule_maps=None):
                 resolution_errors.append(
                     "%s effective map has invalid entries: %s"
                     % (label, ", ".join("%s=%r" % kv for kv in
-                                       sorted(invalid.items())[:4])))
+                                       sorted(invalid.items(),
+                                              key=lambda item: repr(item[0]))[:4])))
 
         for label, configured, resolved in (
                 ("ERC", erc, resolved_erc), ("DRC", drc, resolved_drc)):
