@@ -107,11 +107,11 @@ Resolve ignored checks from two sources:
 2. `.kicad_pro` states sparse configured overrides and provides a cross-check; even a nonempty map
    does not enumerate KiCad defaults or the complete rule universe.
 
-`severity_report()` therefore returns `UNVERIFIED` for a project file by itself. It can return
-`VERIFIED` only when passed an explicitly complete, version-bound effective ERC/DRC resolution; it
-validates that resolution's shape and checks every explicit project override against it. The caller
-must preserve the compatibility-cell evidence proving that the supplied rule universe is complete.
-A missing or merely nonempty sparse map is never proof that no defaults are ignored.
+`severity_report()` therefore returns `UNVERIFIED` for project maps and for caller-supplied
+`effective_rule_maps`. A dict that calls itself complete cannot bind the executed KiCad version,
+authoritative rule inventory, compatibility evidence, or generated report. A future `VERIFIED` path
+must consume those artifacts from a compatibility-qualified resolver. A missing or merely nonempty
+sparse map is never proof that no defaults are ignored.
 
 ### Prove reproducibility with `kicad_repro.py`
 
@@ -189,11 +189,21 @@ unchanged, qualify a fresh seed, preserve protected routes, filter additions by 
 apply accepted additions to another fresh seed, and rerun DRC, connectivity, parity, and project
 audits.
 
-The v2 semantic snapshot includes direct board drawings plus every footprint graphic with
+Treat every KiCad-Python subprocess as an untrusted serialization boundary. Require a freshly
+written, exact-version envelope with a per-invocation nonce; exact mode and schema; digests of every
+input and emitted board/DSN artifact; and a fully revalidated semantic snapshot. Route-applicator
+summaries must bind the requested board and canonical route digest to the live output-board digest.
+Identity-map envelopes must bind that board digest and recompute the UUID-map digest, item count,
+and object-kind coverage. Reject stale files, extra fields, duplicate UUIDs, and bare JSON objects
+even when the worker exits zero.
+
+The v3 semantic snapshot includes direct board drawings plus every footprint graphic with
 transformed, shape-dispatched geometry, layer, width/fill, lock state, footprint attributes and UUID
 identity. Segment, rectangle, arc, circle, polygon and Bézier dispatch records their complete
-geometry; text records size, thickness, angle, justification, font/style and mirroring. Unknown or
-unreadable direct or footprint-hosted graphic mechanisms fail closed. Keep the snapshot schema in
+geometry and binds saved stroke type plus hatch width/spacing by UUID; text records size, thickness,
+angle, justification, font/style, line spacing, keep-upright state and mirroring. Unknown or
+unreadable direct or footprint-hosted graphic mechanisms, or mismatches between the saved file and
+pcbnew's object inventory, fail closed. Keep the snapshot schema in
 the seed/candidate report, compatibility cell and route manifest: footprint-hosted `Edge.Cuts` must
 change the digest when opened, curved, moved, mirrored or replaced.
 
@@ -262,7 +272,7 @@ bound below the project root.
 
 - `transform_pin()` remains unverified until calibrated against KiCad on the project and supported
   transform cells.
-- Autoroute promotion is currently disabled for every compatibility cell because snapshot v2 and
+- Autoroute promotion is currently disabled for every compatibility cell because snapshot v3 and
   the parity negative control have not completed the full DSN/SES/promotion requalification. Do not
   re-enable a cell until new dated, digest-bound evidence covers those mechanisms.
 - Snapshot adapters can prove semantic reproduction without byte identity. Do not claim the latter

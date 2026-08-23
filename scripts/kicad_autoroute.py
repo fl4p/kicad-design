@@ -25,11 +25,14 @@ MANIFEST_SCHEMA = "kicad-route-manifest-v3"
 MANIFEST_SCHEMA_V2 = "kicad-route-manifest-v4"
 SEED_ATTESTATION_SCHEMA = "kicad-autoroute-seed-attestation-v1"
 REPORT_SCHEMA = "kicad-route-candidate-report-v2"
-SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
+SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v3"
 COMPATIBILITY_SCHEMA = "kicad-autoroute-compatibility-v2"
 DRC_BASELINE_SCHEMA = "kicad-drc-baseline-v1"
 BACKEND_ID = "freerouting-2.3.0-temurin-25.0.4+7"
 ROUTE_APPLICATOR_VERSION = "2"
+PCB_WORKER_SCHEMA = "kicad-route-pcb-worker-v1"
+ROUTE_APPLY_WORKER_SCHEMA = "kicad-route-apply-worker-v1"
+IDENTITY_WORKER_SCHEMA = "kicad-route-identity-worker-v1"
 PROMOTION_CHECKS = frozenset(
     {
         "source_unchanged",

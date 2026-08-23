@@ -410,7 +410,7 @@ class VerifyReportTests(unittest.TestCase):
             self.assertEqual(bad_value["state"], "unverified")
             self.assertIn("non-KiCad severity", bad_value["note"])
 
-    def test_severity_report_accepts_complete_version_bound_resolution(self):
+    def test_severity_report_rejects_self_attested_effective_resolution(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw) / "probe.kicad_pro"
             project.write_text(json.dumps({
@@ -432,13 +432,13 @@ class VerifyReportTests(unittest.TestCase):
                     "footprint_type_mismatch": "ignore",
                 },
             })
-            self.assertEqual(result["state"], "verified")
-            self.assertEqual(result["kicad_version"], "10.0.5")
-            self.assertEqual(result["effective_erc_entries"], 2)
-            self.assertEqual(
-                result["effective_drc_ignored"], ["footprint_type_mismatch"])
+            self.assertEqual(result["state"], "unverified")
+            self.assertIsNone(result["kicad_version"])
+            self.assertEqual(result["effective_erc_entries"], 0)
+            self.assertEqual(result["effective_drc_ignored"], [])
+            self.assertIn("untrusted self-attestation", result["note"])
 
-    def test_severity_report_rejects_incomplete_or_conflicting_resolution(self):
+    def test_severity_report_rejects_arbitrary_resolution_versions_and_shapes(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw) / "probe.kicad_pro"
             project.write_text(json.dumps({
@@ -448,34 +448,18 @@ class VerifyReportTests(unittest.TestCase):
                 }},
             }), encoding="utf-8")
 
-            incomplete = verify.severity_report(project, {
-                "complete": False,
-                "kicad_version": "10.0.5",
+            invented = verify.severity_report(project, {
+                "complete": True,
+                "kicad_version": "definitely-not-a-KiCad-version",
                 "erc": {"pin_not_connected": "ignore"},
                 "drc": {"invalid_outline": "error"},
             })
-            self.assertEqual(incomplete["state"], "unverified")
-            self.assertIn("complete is not true", incomplete["note"])
+            self.assertEqual(invented["state"], "unverified")
+            self.assertIn("untrusted self-attestation", invented["note"])
 
-            extra_field = verify.severity_report(project, {
-                "complete": True,
-                "kicad_version": "10.0.5",
-                "erc": {"pin_not_connected": "ignore"},
-                "drc": {"invalid_outline": "error"},
-                "evidence": "not validated by this interface",
-            })
-            self.assertEqual(extra_field["state"], "unverified")
-            self.assertIn("exact contract", extra_field["note"])
-
-            conflict = verify.severity_report(project, {
-                "complete": True,
-                "kicad_version": "10.0.5",
-                "erc": {"pin_not_connected": "warning"},
-                "drc": {"clearance": "error"},
-            })
-            self.assertEqual(conflict["state"], "unverified")
-            self.assertIn("conflicts with configured", conflict["note"])
-            self.assertIn("omits configured rule", conflict["note"])
+            malformed = verify.severity_report(project, "complete")
+            self.assertEqual(malformed["state"], "unverified")
+            self.assertIn("untrusted self-attestation", malformed["note"])
 
 
 if __name__ == "__main__":

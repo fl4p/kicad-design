@@ -31,6 +31,45 @@ def segment(net="N", locked=False, start=(0, 0), end=(10, 0), width=200_000):
     }
 
 
+def semantic_snapshot():
+    board = {
+        "copper_layer_count": 0,
+        "copper_layers": [],
+        "enabled_layers": [],
+    }
+    routes = []
+    locked = []
+    nonrouting_items = {
+        "board": board, "footprints": [], "zones": [], "drawings": []
+    }
+    return {
+        "schema": route.SNAPSHOT_SCHEMA,
+        "board": board,
+        "netclasses": {"class_names": [], "net_to_class": {}},
+        "routing": {
+            "items": routes,
+            "locked_items": locked,
+            "summary": {
+                "count": 0,
+                "by_kind": {},
+                "by_net": {},
+                "total_track_length_mm": 0.0,
+                "sha256": route._json_digest(routes),
+                "locked_count": 0,
+                "locked_sha256": route._json_digest(locked),
+            },
+        },
+        "nonrouting_sha256": route._json_digest(nonrouting_items),
+        "nonrouting_point_quantum_nm": 10,
+        "nonrouting_category_sha256": {
+            key: route._json_digest(value)
+            for key, value in nonrouting_items.items()
+        },
+        "nonrouting_items": nonrouting_items,
+        "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
+    }
+
+
 class RouteCandidateTests(unittest.TestCase):
     @staticmethod
     def exploratory_args(board: Path, report: Path) -> list[str]:
@@ -415,23 +454,7 @@ class RouteCandidateTests(unittest.TestCase):
         self.assertEqual(route._nonrouting_point(Point()), [16_775_000, 65_380_000])
 
     def test_semantic_snapshot_schema_is_exact_at_worker_boundary(self):
-        nonrouting_items = {
-            "board": {}, "footprints": [], "zones": [], "drawings": []
-        }
-        snapshot = {
-            "schema": route.SNAPSHOT_SCHEMA,
-            "board": {},
-            "netclasses": {},
-            "routing": {},
-            "nonrouting_sha256": route._json_digest(nonrouting_items),
-            "nonrouting_point_quantum_nm": 10,
-            "nonrouting_category_sha256": {
-                key: route._json_digest(value)
-                for key, value in nonrouting_items.items()
-            },
-            "nonrouting_items": nonrouting_items,
-            "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
-        }
+        snapshot = semantic_snapshot()
         self.assertIs(
             route._validate_semantic_snapshot(snapshot, "test"), snapshot
         )
@@ -440,34 +463,195 @@ class RouteCandidateTests(unittest.TestCase):
             route._validate_semantic_snapshot(snapshot, "test")
         snapshot["nonrouting_point_quantum_nm"] = 10
         snapshot["board"] = {"forged": True}
-        with self.assertRaisesRegex(route.RouteReportError, "board summary"):
+        with self.assertRaisesRegex(route.RouteReportError, "board.*fields"):
             route._validate_semantic_snapshot(snapshot, "test")
-        snapshot["board"] = {}
+        snapshot = semantic_snapshot()
         snapshot["schema"] = "kicad-route-semantic-snapshot-v1"
         with self.assertRaisesRegex(route.RouteReportError, "schema"):
             route._validate_semantic_snapshot(snapshot, "test")
 
     def test_semantic_snapshot_boundary_recomputes_digests_and_counts(self):
-        nonrouting_items = {
-            "board": {}, "footprints": [], "zones": [], "drawings": []
-        }
-        snapshot = {
-            "schema": route.SNAPSHOT_SCHEMA,
-            "board": {},
-            "netclasses": {},
-            "routing": {},
-            "nonrouting_sha256": route._json_digest(nonrouting_items),
-            "nonrouting_point_quantum_nm": 10,
-            "nonrouting_category_sha256": {
-                key: route._json_digest(value)
-                for key, value in nonrouting_items.items()
-            },
-            "nonrouting_items": nonrouting_items,
-            "nonrouting_counts": {"footprints": 0, "zones": 0, "drawings": 0},
-        }
+        snapshot = semantic_snapshot()
         snapshot["nonrouting_items"]["footprints"].append({"uuid": "forged"})
         with self.assertRaisesRegex(route.RouteReportError, "digest"):
             route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_boundary_rejects_forged_routing_summary(self):
+        snapshot = semantic_snapshot()
+        item = segment(locked=True)
+        snapshot["routing"]["items"] = [item]
+        snapshot["routing"]["locked_items"] = [item]
+        with self.assertRaisesRegex(route.RouteReportError, "summary"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+        snapshot = semantic_snapshot()
+        snapshot["routing"]["locked_items"] = [segment(locked=True)]
+        with self.assertRaisesRegex(route.RouteReportError, "locked_items"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_boundary_preserves_zero_width_for_drc(self):
+        snapshot = semantic_snapshot()
+        item = segment(width=0)
+        snapshot["routing"] = {
+            "items": [item],
+            "locked_items": [],
+            "summary": {
+                "count": 1,
+                "by_kind": {"segment": 1},
+                "by_net": {"N": 1},
+                "total_track_length_mm": 0.00001,
+                "sha256": route._json_digest([item]),
+                "locked_count": 0,
+                "locked_sha256": route._json_digest([]),
+            },
+        }
+        self.assertIs(
+            route._validate_semantic_snapshot(snapshot, "test"), snapshot
+        )
+
+        snapshot["routing"]["summary"]["locked_count"] = False
+        with self.assertRaisesRegex(route.RouteReportError, "locked_count"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_boundary_rejects_forged_netclasses(self):
+        snapshot = semantic_snapshot()
+        snapshot["netclasses"] = {
+            "class_names": ["Default"],
+            "net_to_class": {"N": "Invented"},
+        }
+        with self.assertRaisesRegex(route.RouteReportError, "net_to_class"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+        snapshot = semantic_snapshot()
+        snapshot["netclasses"]["forged"] = True
+        with self.assertRaisesRegex(route.RouteReportError, "unsupported fields"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_pcb_worker_requires_fresh_output(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            board = workspace / "x.kicad_pcb"
+            board.write_text("seed\n", encoding="utf-8")
+            output = workspace / "snapshot.json"
+            output.write_text("{}\n", encoding="utf-8")
+            run = {"returncode": 0, "stdout": "", "stderr": ""}
+            with mock.patch.object(route, "_run", return_value=run):
+                with self.assertRaisesRegex(
+                    route.RouteReportError, "did not freshly write"
+                ):
+                    route._worker_call(
+                        Path("python3"), "snapshot", [board], output,
+                        workspace, "10.0.5",
+                    )
+
+    def test_pcb_worker_envelope_is_bound_to_request_and_input_digest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            board = workspace / "x.kicad_pcb"
+            board.write_text("seed\n", encoding="utf-8")
+            output = workspace / "snapshot.json"
+
+            def produce(_command, *, cwd, timeout, env):
+                self.assertEqual(cwd, workspace)
+                self.assertEqual(timeout, 180)
+                output.write_text(json.dumps({
+                    "schema": route.PCB_WORKER_SCHEMA,
+                    "request_id": env["KICAD_ROUTE_WORKER_REQUEST_ID"],
+                    "mode": "snapshot",
+                    "pcbnew_version": "10.0.5",
+                    "inputs": {"board_sha256": "0" * 64},
+                    "outputs": {},
+                    "snapshot": semantic_snapshot(),
+                }), encoding="utf-8")
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+
+            with mock.patch.object(route, "_run", side_effect=produce):
+                with self.assertRaisesRegex(
+                    route.RouteReportError, "input digests"
+                ):
+                    route._worker_call(
+                        Path("python3"), "snapshot", [board], output,
+                        workspace, "10.0.5",
+                    )
+
+    def test_identity_envelope_recomputes_digest_count_and_kind_coverage(self):
+        identities = {
+            "fp-uuid": "footprint:R1",
+            "pad-uuid": "pad:R1:1:GND:0:0",
+        }
+        value = {
+            "schema": route.IDENTITY_WORKER_SCHEMA,
+            "request_id": "a" * 48,
+            "pcbnew_version": "10.0.5",
+            "board_sha256": "b" * 64,
+            "identity_map": identities,
+            "identity_count": 2,
+            "identity_kinds": {"footprint": 1, "pad": 1},
+            "identity_sha256": route.canonical_json_sha256(identities),
+        }
+        self.assertEqual(
+            route._validate_identity_envelope(
+                value,
+                request_id="a" * 48,
+                pcbnew_version="10.0.5",
+                board_sha256="b" * 64,
+                where="test",
+            ),
+            identities,
+        )
+        value["identity_count"] = 1
+        with self.assertRaisesRegex(route.RouteReportError, "count"):
+            route._validate_identity_envelope(
+                value,
+                request_id="a" * 48,
+                pcbnew_version="10.0.5",
+                board_sha256="b" * 64,
+                where="test",
+            )
+
+    def test_route_apply_summary_is_exact_and_digest_bound(self):
+        routes = [{
+            "kind": "segment",
+            "net": "N",
+            "width_nm": 200_000,
+            "layer": "F.Cu",
+            "start_nm": [0, 0],
+            "end_nm": [1_000_000, 0],
+        }]
+        routes_sha = route.canonical_json_sha256(routes)
+        value = {
+            "schema": route.ROUTE_APPLY_WORKER_SCHEMA,
+            "request_id": "c" * 48,
+            "pcbnew_version": "10.0.5",
+            "input_board_sha256": "d" * 64,
+            "input_routes_sha256": routes_sha,
+            "segments": 1,
+            "vias": 0,
+            "routes_sha256": routes_sha,
+            "applied_routes_after_reload_sha256": "e" * 64,
+            "output_board_sha256": "f" * 64,
+        }
+        self.assertIs(
+            route._validate_route_apply_summary(
+                value,
+                request_id="c" * 48,
+                pcbnew_version="10.0.5",
+                input_board_sha256="d" * 64,
+                routes=routes,
+                output_board_sha256="f" * 64,
+            ),
+            value,
+        )
+        value["input_routes_sha256"] = "0" * 64
+        with self.assertRaisesRegex(route.RouteReportError, "requested inputs"):
+            route._validate_route_apply_summary(
+                value,
+                request_id="c" * 48,
+                pcbnew_version="10.0.5",
+                input_board_sha256="d" * 64,
+                routes=routes,
+                output_board_sha256="f" * 64,
+            )
 
     def test_footprint_graphic_mutation_changes_nonrouting_snapshot(self):
         class Point:
@@ -513,6 +697,12 @@ class RouteCandidateTests(unittest.TestCase):
             def GetFillMode(self):
                 return 0
 
+            def GetHatchLineWidth(self):
+                return 0
+
+            def GetHatchLineSpacing(self):
+                return 0
+
             def IsLocked(self):
                 return True
 
@@ -554,12 +744,16 @@ class RouteCandidateTests(unittest.TestCase):
 
         graphic = Graphic()
         footprint = Footprint(graphic)
-        before = route._footprint_item(footprint)
+        before = route._footprint_item(
+            footprint, {"graphic-uuid": {"stroke_type": "solid"}}, set()
+        )
         self.assertEqual(before["graphics"][0]["uuid"], "graphic-uuid")
         self.assertEqual(before["attributes"], 2)
 
         graphic.end.x += 500_000
-        after = route._footprint_item(footprint)
+        after = route._footprint_item(
+            footprint, {"graphic-uuid": {"stroke_type": "solid"}}, set()
+        )
         self.assertNotEqual(
             route._json_digest(before), route._json_digest(after)
         )
@@ -597,6 +791,12 @@ class RouteCandidateTests(unittest.TestCase):
             def GetFillMode(self):
                 return 0
 
+            def GetHatchLineWidth(self):
+                return 0
+
+            def GetHatchLineSpacing(self):
+                return 0
+
             def GetWidth(self):
                 return 50_000
 
@@ -631,10 +831,46 @@ class RouteCandidateTests(unittest.TestCase):
             def GetDrawings(self):
                 return []
 
-        identities = manifest.identity_map(Board(), mock.Mock())
+        identities = manifest.identity_map(
+            Board(), mock.Mock(),
+            persisted_graphics={"graphic-uuid": {"stroke_type": "solid"}},
+        )
         self.assertIn("graphic-uuid", identities)
         self.assertIn("footprint-graphic:", identities["graphic-uuid"])
         self.assertIn('"parent_reference":"MH1"', identities["graphic-uuid"])
+
+    def test_identity_map_rejects_duplicate_board_uuids(self):
+        class Kiid:
+            def AsString(self):
+                return "duplicate-uuid"
+
+        class Footprint:
+            m_Uuid = Kiid()
+
+            def GetReference(self):
+                return "R1"
+
+            def Pads(self):
+                return []
+
+            def GraphicalItems(self):
+                return []
+
+        class Board:
+            def GetFootprints(self):
+                return [Footprint(), Footprint()]
+
+            def GetTracks(self):
+                return []
+
+            def Zones(self):
+                return []
+
+            def GetDrawings(self):
+                return []
+
+        with self.assertRaisesRegex(route.AutorouteError, "occurs more than once"):
+            manifest.identity_map(Board(), mock.Mock(), persisted_graphics={})
 
     def test_bezier_control_mutation_changes_complete_geometry(self):
         class Point:
@@ -654,6 +890,12 @@ class RouteCandidateTests(unittest.TestCase):
                 return 50_000
 
             def GetFillMode(self):
+                return 0
+
+            def GetHatchLineWidth(self):
+                return 0
+
+            def GetHatchLineSpacing(self):
                 return 0
 
             def GetLayer(self):
@@ -679,14 +921,19 @@ class RouteCandidateTests(unittest.TestCase):
 
         curve = Bezier()
         convert = lambda p: [p.x, p.y]
-        before = graphics.complete_graphic_geometry(curve, convert)
+        persisted = {"stroke_type": "solid"}
+        before = graphics.complete_graphic_geometry(
+            curve, convert, persistence=persisted
+        )
         before_identity = manifest._drawing_identity(
-            curve, require_complete=True
+            curve, require_complete=True, persistence=persisted
         )
         curve.c1.y += 500_000
-        after = graphics.complete_graphic_geometry(curve, convert)
+        after = graphics.complete_graphic_geometry(
+            curve, convert, persistence=persisted
+        )
         after_identity = manifest._drawing_identity(
-            curve, require_complete=True
+            curve, require_complete=True, persistence=persisted
         )
         self.assertNotEqual(before, after)
         self.assertNotEqual(before_identity, after_identity)
@@ -747,6 +994,12 @@ class RouteCandidateTests(unittest.TestCase):
             def GetFillMode(self):
                 return 1
 
+            def GetHatchLineWidth(self):
+                return 0
+
+            def GetHatchLineSpacing(self):
+                return 0
+
             def GetLineStyle(self):
                 return 0
 
@@ -793,17 +1046,83 @@ class RouteCandidateTests(unittest.TestCase):
             def GetTextStyleName(self):
                 return "default"
 
+            def GetLineSpacing(self):
+                return 1.25
+
+            def IsKeepUpright(self):
+                return False
+
         convert = lambda point: [point.x, point.y]
         polygon = Polygon()
-        before = graphics.complete_graphic_geometry(polygon, convert)
+        persisted = {"stroke_type": "dash"}
+        before = graphics.complete_graphic_geometry(
+            polygon, convert, persistence=persisted
+        )
         polygon.poly.hole.points[1].x = 5
-        after = graphics.complete_graphic_geometry(polygon, convert)
+        after = graphics.complete_graphic_geometry(
+            polygon, convert, persistence=persisted
+        )
         self.assertNotEqual(before, after)
         text = graphics.complete_graphic_geometry(Text(), convert)["text_geometry"]
         self.assertEqual(text["horizontal_justify"], -1)
         self.assertEqual(text["font_name"], "KiCad Font")
         self.assertTrue(text["mirrored"])
         self.assertTrue(text["knockout"])
+        self.assertEqual(text["line_spacing"], 1.25)
+        self.assertFalse(text["keep_upright"])
+
+    def test_saved_graphic_stroke_type_is_bound_by_uuid(self):
+        template = """\
+(kicad_pcb
+  (gr_line (start 0 0) (end 1 1)
+    (stroke (width 0.1) (type {direct_style}))
+    (layer \"Edge.Cuts\") (uuid direct-uuid))
+  (footprint \"Test:Part\"
+    (layer \"F.Cu\") (at 0 0)
+    (fp_curve (pts (xy 0 0) (xy 1 1) (xy 2 1) (xy 3 0))
+      (stroke (width 0.1) (type {footprint_style}))
+      (fill none) (layer \"Edge.Cuts\") (uuid footprint-uuid))))
+"""
+        with tempfile.TemporaryDirectory() as raw:
+            board = Path(raw) / "probe.kicad_pcb"
+            board.write_text(
+                template.format(
+                    direct_style="default", footprint_style="solid"
+                ),
+                encoding="utf-8",
+            )
+            before = graphics.graphic_persistence(board)
+            self.assertEqual(before, {
+                "direct-uuid": {"stroke_type": "default"},
+                "footprint-uuid": {"stroke_type": "solid"},
+            })
+            board.write_text(
+                template.format(
+                    direct_style="dash", footprint_style="solid"
+                ),
+                encoding="utf-8",
+            )
+            after = graphics.graphic_persistence(board)
+            self.assertEqual(after["direct-uuid"]["stroke_type"], "dash")
+            self.assertNotEqual(before, after)
+
+    def test_saved_graphic_stroke_parser_fails_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            board = Path(raw) / "probe.kicad_pcb"
+            board.write_text(
+                "(kicad_pcb (gr_line (stroke (type solid)) "
+                "(uuid duplicate)) (gr_arc (stroke (type dash)) "
+                "(uuid duplicate)))\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(graphics.GraphicError, "duplicate"):
+                graphics.graphic_persistence(board)
+            board.write_text(
+                "(kicad_pcb (gr_line (uuid missing-stroke)))\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(graphics.GraphicError, "stroke"):
+                graphics.graphic_persistence(board)
 
     def test_unknown_graphic_shape_fails_closed(self):
         class Unknown:
@@ -811,7 +1130,10 @@ class RouteCandidateTests(unittest.TestCase):
                 return 99
 
         with self.assertRaisesRegex(graphics.GraphicError, "unsupported"):
-            graphics.complete_graphic_geometry(Unknown(), lambda point: point)
+            graphics.complete_graphic_geometry(
+                Unknown(), lambda point: point,
+                persistence={"stroke_type": "solid"},
+            )
 
     def test_project_audit_commands_are_argv_not_shell(self):
         with tempfile.TemporaryDirectory() as raw:

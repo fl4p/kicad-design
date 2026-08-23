@@ -22,7 +22,7 @@ import sys
 
 CONFIG_SCHEMA = "kicad-autoroute-config-v2"
 MANIFEST_SCHEMA = "kicad-route-manifest-v4"
-SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v2"
+SNAPSHOT_SCHEMA = "kicad-route-semantic-snapshot-v3"
 SEED_ATTESTATION_SCHEMA = "kicad-autoroute-seed-attestation-v1"
 RESET_SCHEMA = "kicad-autoroute-route-reset-v1"
 REPORT_SCHEMA = "kicad-autoroute-apply-report-v1"

@@ -8,6 +8,9 @@ identity (exact or explicitly quantized).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 
 class GraphicError(ValueError):
     """A graphic cannot be serialized completely enough to guard geometry."""
@@ -22,6 +25,13 @@ _SHAPES = {
     5: "bezier",
 }
 
+_DIRECT_SHAPE_NODES = {
+    "gr_line", "gr_rect", "gr_arc", "gr_circle", "gr_poly", "gr_curve",
+}
+_FOOTPRINT_SHAPE_NODES = {
+    "fp_line", "fp_rect", "fp_arc", "fp_circle", "fp_poly", "fp_curve",
+}
+
 
 def _call(item, name):
     if not hasattr(item, name):
@@ -32,6 +42,124 @@ def _call(item, name):
         raise GraphicError(
             "%s.%s failed: %s" % (type(item).__name__, name, exc)
         ) from exc
+
+
+def _sexpr_tokens(text):
+    tokens = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+        elif char in "()":
+            tokens.append(char)
+            index += 1
+        elif char == '"':
+            start = index
+            index += 1
+            escaped = False
+            while index < len(text):
+                current = text[index]
+                index += 1
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == '"':
+                    break
+            else:
+                raise GraphicError("unterminated string in KiCad board")
+            tokens.append(text[start:index])
+        else:
+            start = index
+            while (index < len(text) and not text[index].isspace()
+                   and text[index] not in "()"):
+                index += 1
+            tokens.append(text[start:index])
+    return tokens
+
+
+def _parse_sexpr(text):
+    root = []
+    stack = []
+    current = root
+    for token in _sexpr_tokens(text):
+        if token == "(":
+            child = []
+            current.append(child)
+            stack.append(current)
+            current = child
+        elif token == ")":
+            if not stack:
+                raise GraphicError("unbalanced ')' in KiCad board")
+            current = stack.pop()
+        else:
+            current.append(token)
+    if stack:
+        raise GraphicError("unbalanced '(' in KiCad board")
+    if len(root) != 1 or not isinstance(root[0], list):
+        raise GraphicError("KiCad board has no single root expression")
+    return root[0]
+
+
+def _children(node, head):
+    return [
+        child for child in node[1:]
+        if isinstance(child, list) and child and child[0] == head
+    ]
+
+
+def _atom(node, head, where):
+    matches = _children(node, head)
+    if len(matches) != 1 or len(matches[0]) != 2:
+        raise GraphicError("%s has no exact %s atom" % (where, head))
+    value = matches[0][1]
+    if not isinstance(value, str):
+        raise GraphicError("%s %s atom is invalid" % (where, head))
+    if value.startswith('"'):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise GraphicError("%s %s string is invalid" % (where, head)) from exc
+    return str(value)
+
+
+def _shape_persistence(node, where):
+    uuid = _atom(node, "uuid", where)
+    strokes = _children(node, "stroke")
+    if len(strokes) != 1:
+        raise GraphicError("%s %s has no exact stroke" % (where, uuid))
+    return uuid, {"stroke_type": _atom(strokes[0], "type", where + " stroke")}
+
+
+def graphic_persistence(path):
+    """Bind saved stroke semantics to PCB_SHAPE UUIDs without SWIG pointers."""
+    path = Path(path)
+    try:
+        root = _parse_sexpr(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise GraphicError("cannot read KiCad board %s: %s" % (path, exc)) from exc
+    if not root or root[0] != "kicad_pcb":
+        raise GraphicError("%s is not a KiCad PCB S-expression" % path)
+    result = {}
+
+    def add(node, where):
+        uuid, value = _shape_persistence(node, where)
+        if uuid in result:
+            raise GraphicError("duplicate persisted graphic UUID %s" % uuid)
+        result[uuid] = value
+
+    for index, node in enumerate(root[1:]):
+        if not isinstance(node, list) or not node:
+            continue
+        if node[0] in _DIRECT_SHAPE_NODES:
+            add(node, "direct graphic %d" % index)
+        elif node[0] == "footprint":
+            for child_index, child in enumerate(node[1:]):
+                if (isinstance(child, list) and child
+                        and child[0] in _FOOTPRINT_SHAPE_NODES):
+                    add(child, "footprint graphic %d:%d" % (index, child_index))
+    return result
 
 
 def _point(item, name, convert):
@@ -98,8 +226,12 @@ def _polygon(item, convert):
     return outlines
 
 
-def shape_geometry(item, convert):
+def shape_geometry(item, convert, persistence):
     """Return complete, shape-dispatched geometry for a KiCad PCB_SHAPE."""
+    if not isinstance(persistence, dict) or set(persistence) != {"stroke_type"}:
+        raise GraphicError("graphic has no exact persisted stroke binding")
+    if not isinstance(persistence["stroke_type"], str) or not persistence["stroke_type"]:
+        raise GraphicError("graphic persisted stroke type is invalid")
     shape = int(_call(item, "GetShape"))
     kind = _SHAPES.get(shape)
     if kind is None:
@@ -108,7 +240,10 @@ def shape_geometry(item, convert):
         "shape": shape,
         "shape_kind": kind,
         "width_nm": int(_call(item, "GetWidth")),
+        "stroke_type": persistence["stroke_type"],
         "fill_mode": int(_call(item, "GetFillMode")),
+        "hatch_line_width_nm": int(_call(item, "GetHatchLineWidth")),
+        "hatch_line_spacing_nm": int(_call(item, "GetHatchLineSpacing")),
     }
     if kind == "segment":
         ends = sorted((_point(item, "GetStart", convert),
@@ -171,14 +306,16 @@ def text_geometry(item, convert):
         "knockout": bool(_call(item, "IsKnockout")),
         "font_name": str(_call(item, "GetFontName")),
         "style_name": str(_call(item, "GetTextStyleName")),
+        "line_spacing": round(float(_call(item, "GetLineSpacing")), 9),
+        "keep_upright": bool(_call(item, "IsKeepUpright")),
     }
 
 
-def complete_graphic_geometry(item, convert):
+def complete_graphic_geometry(item, convert, *, persistence=None):
     """Serialize every supported geometric mechanism or fail closed."""
     data = {}
     if hasattr(item, "GetShape"):
-        data["shape_geometry"] = shape_geometry(item, convert)
+        data["shape_geometry"] = shape_geometry(item, convert, persistence)
     if hasattr(item, "GetText"):
         data["text_geometry"] = text_geometry(item, convert)
     if not data:

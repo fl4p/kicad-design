@@ -22,9 +22,9 @@ False PASSes this exists to close
     you know least, while KiCad's built-in defaults are fully in force.
 
     So :func:`severity_report` treats the project's sparse maps as configured
-    overrides, never as a complete rule universe. It returns ``UNVERIFIED``
-    unless the caller also supplies a complete, version-bound resolution of
-    the effective ERC and DRC maps.
+    overrides, never as a complete rule universe. It always returns
+    ``UNVERIFIED`` until a compatibility-qualified resolver can bind the
+    actual KiCad version, authoritative rule inventory, and report evidence.
 
 3.  **A requested parity check may not run.** KiCad 10 can print that it
     failed to fetch the schematic netlist, still write an all-zero DRC report,
@@ -434,11 +434,11 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
 
 
 def severity_report(kicad_pro, effective_rule_maps=None):
-    """Report configured overrides and, when supplied, effective severities.
+    """Report configured overrides without accepting self-attested evidence.
 
     Returns a dict::
 
-        {"state": "verified" | "unverified",
+        {"state": "unverified",
          "configured_erc_ignored": [...],
          "configured_drc_ignored": [...],
          "configured_erc_entries": int,
@@ -450,13 +450,12 @@ def severity_report(kicad_pro, effective_rule_maps=None):
          "kicad_version": str | None,
          "note": str}
 
-    ``.kicad_pro`` rule maps are sparse overrides even when nonempty, so the
-    project file alone can never make this report ``verified``. To establish
-    that state, pass ``effective_rule_maps`` with ``complete is True``, a
-    nonempty ``kicad_version``, and nonempty ``erc`` and ``drc`` maps resolved
-    for that exact KiCad compatibility cell. This function validates that
-    attestation and checks it against explicit project overrides; the caller
-    remains responsible for proving that its rule universe is complete.
+    ``.kicad_pro`` rule maps are sparse overrides even when nonempty. A plain
+    caller-supplied object cannot prove its own completeness, KiCad identity,
+    rule inventory, or provenance, so ``effective_rule_maps`` is retained only
+    as a fail-closed compatibility argument and can never make this report
+    ``verified``. A future verified path must consume evidence produced by a
+    compatibility-qualified resolver rather than a self-asserted dict.
 
     :data:`KNOWN_STOCK_IGNORES` is a starting list, not an authority.
     """
@@ -554,86 +553,21 @@ def severity_report(kicad_pro, effective_rule_maps=None):
             "defaults and the complete rule universe are unresolved. A "
             "nonempty sparse map is not a complete effective map, and an "
             "empty configured-ignore list means 'unknown', not 'nothing "
-            "ignored'. Supply a complete version-bound effective-rule "
-            "resolution. Stock defaults known to sit at ignore include: %s "
+            "ignored'. Use a compatibility-qualified effective-rule resolver "
+            "that binds the actual KiCad version, authoritative inventory, "
+            "and report evidence. Stock defaults known to sit at ignore include: %s "
             "(verify against your KiCad version)."
             % ((" (absent/empty for " + ", ".join(missing) + ")")
                if missing else "",
                ", ".join(KNOWN_STOCK_IGNORES)))
     else:
-        resolution_errors = []
-        if not isinstance(effective_rule_maps, dict):
-            resolution_errors.append("resolution is not an object")
-            resolved_erc = {}
-            resolved_drc = {}
-            version = None
-        else:
-            expected_resolution_fields = {
-                "complete", "kicad_version", "erc", "drc",
-            }
-            if set(effective_rule_maps) != expected_resolution_fields:
-                resolution_errors.append(
-                    "resolution fields differ from the exact contract")
-            if effective_rule_maps.get("complete") is not True:
-                resolution_errors.append("complete is not true")
-            version = effective_rule_maps.get("kicad_version")
-            if not isinstance(version, str) or not version.strip():
-                resolution_errors.append("kicad_version is missing")
-                version = None
-            resolved_erc = effective_rule_maps.get("erc")
-            resolved_drc = effective_rule_maps.get("drc")
-            if not isinstance(resolved_erc, dict) or not resolved_erc:
-                resolution_errors.append("ERC effective map is absent/empty")
-                resolved_erc = {}
-            if not isinstance(resolved_drc, dict) or not resolved_drc:
-                resolution_errors.append("DRC effective map is absent/empty")
-                resolved_drc = {}
-
-        legal_effective = {"error", "warning", "ignore", "exclusion"}
-        for label, resolved in (("ERC", resolved_erc),
-                                ("DRC", resolved_drc)):
-            invalid = {k: v for k, v in resolved.items()
-                       if (not isinstance(k, str) or not isinstance(v, str)
-                           or v not in legal_effective)}
-            if invalid:
-                resolution_errors.append(
-                    "%s effective map has invalid entries: %s"
-                    % (label, ", ".join("%s=%r" % kv for kv in
-                                       sorted(invalid.items(),
-                                              key=lambda item: repr(item[0]))[:4])))
-
-        for label, configured, resolved in (
-                ("ERC", erc, resolved_erc), ("DRC", drc, resolved_drc)):
-            for rule, configured_value in configured.items():
-                if rule not in resolved:
-                    resolution_errors.append(
-                        "%s effective map omits configured rule %s"
-                        % (label, rule))
-                elif (configured_value != "unset"
-                      and resolved[rule] != configured_value):
-                    resolution_errors.append(
-                        "%s effective %s=%s conflicts with configured %s"
-                        % (label, rule, resolved[rule], configured_value))
-
-        if resolution_errors:
-            out["state"] = "unverified"
-            out["note"] = (
-                "effective-rule resolution is invalid: %s"
-                % "; ".join(resolution_errors))
-        else:
-            out.update({
-                "effective_erc_entries": len(resolved_erc),
-                "effective_drc_entries": len(resolved_drc),
-                "effective_erc_ignored": sorted(
-                    k for k, v in resolved_erc.items() if v == "ignore"),
-                "effective_drc_ignored": sorted(
-                    k for k, v in resolved_drc.items() if v == "ignore"),
-                "kicad_version": version.strip(),
-            })
-            out["state"] = "verified"
-            out["note"] = (
-                "complete effective maps supplied for KiCad %s and checked "
-                "against configured project overrides" % version.strip())
+        out["state"] = "unverified"
+        out["note"] = (
+            "caller-supplied effective_rule_maps is untrusted self-attestation; "
+            "it is not bound to the executed KiCad CLI version, an authoritative "
+            "rule inventory, compatibility evidence, or the generated report. "
+            "This interface therefore cannot establish effective severities."
+        )
     return out
 
 

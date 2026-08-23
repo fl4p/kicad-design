@@ -12,12 +12,21 @@ import argparse
 import collections
 import json
 from pathlib import Path
+import re
 import sys
 
 try:
-    from kicad_graphics import GraphicError, complete_graphic_geometry
+    from kicad_graphics import (
+        GraphicError,
+        complete_graphic_geometry,
+        graphic_persistence,
+    )
 except ImportError:  # imported as scripts.kicad_route_manifest
-    from .kicad_graphics import GraphicError, complete_graphic_geometry
+    from .kicad_graphics import (
+        GraphicError,
+        complete_graphic_geometry,
+        graphic_persistence,
+    )
 
 from kicad_autoroute import (
     AutorouteError,
@@ -26,6 +35,8 @@ from kicad_autoroute import (
     MANIFEST_SCHEMA,
     MANIFEST_SCHEMA_V2,
     SNAPSHOT_SCHEMA,
+    ROUTE_APPLY_WORKER_SCHEMA,
+    IDENTITY_WORKER_SCHEMA,
     canonical_json_sha256,
     canonical_routes,
     config_path,
@@ -57,7 +68,7 @@ def _point(value) -> list[int]:
     return [int(value.x), int(value.y)]
 
 
-def _drawing_identity(drawing, *, require_complete=False) -> dict:
+def _drawing_identity(drawing, *, require_complete=False, persistence=None) -> dict:
     values = {"kind": type(drawing).__name__, "layer": int(drawing.GetLayer())}
     for name in ("GetStart", "GetEnd", "GetPosition"):
         if hasattr(drawing, name):
@@ -83,7 +94,7 @@ def _drawing_identity(drawing, *, require_complete=False) -> dict:
     if require_complete:
         try:
             values["complete_geometry"] = complete_graphic_geometry(
-                drawing, _point
+                drawing, _point, persistence=persistence
             )
         except GraphicError as exc:
             raise AutorouteError(
@@ -207,33 +218,71 @@ def apply_manifest(
     return apply_routes(board, manifest["routes"], pcbnew)
 
 
-def identity_map(board, pcbnew) -> dict[str, str]:
+def identity_map(board, pcbnew, *, persisted_graphics=None) -> dict[str, str]:
     """Map KiCad DRC UUIDs to stable board-semantic identities."""
+    if persisted_graphics is None:
+        try:
+            persisted_graphics = graphic_persistence(
+                Path(str(board.GetFileName())).resolve()
+            )
+        except GraphicError as exc:
+            raise AutorouteError(
+                "cannot bind saved board graphic semantics: %s" % exc
+            ) from exc
+    if not isinstance(persisted_graphics, dict):
+        raise AutorouteError("persisted board graphics are not an object")
+    used_persistence = set()
     out = {}
+
+    def add(item, identity):
+        uuid = _uuid(item)
+        if uuid in out:
+            raise AutorouteError(
+                "board identity UUID %s occurs more than once" % uuid
+            )
+        out[uuid] = identity
+
     for fp in board.GetFootprints():
         ref = str(fp.GetReference())
-        out[_uuid(fp)] = f"footprint:{ref}"
+        add(fp, f"footprint:{ref}")
         for pad in fp.Pads():
             pos = _point(pad.GetPosition())
             identity = (
                 f"pad:{ref}:{pad.GetNumber()}:{pad.GetNetname()}:"
                 f"{pos[0]}:{pos[1]}"
             )
-            out[_uuid(pad)] = identity
+            add(pad, identity)
         for graphic in fp.GraphicalItems():
-            values = _drawing_identity(graphic, require_complete=True)
+            uuid = _uuid(graphic)
+            persistence = None
+            if hasattr(graphic, "GetShape"):
+                if uuid not in persisted_graphics:
+                    raise AutorouteError(
+                        "board graphic %s has no saved stroke binding" % uuid
+                    )
+                persistence = persisted_graphics[uuid]
+                used_persistence.add(uuid)
+            values = _drawing_identity(
+                graphic, require_complete=True, persistence=persistence
+            )
             values.update({
                 "parent_reference": ref,
                 "parent_uuid": _uuid(fp),
                 "parent_attributes": int(fp.GetAttributes()),
             })
-            out[_uuid(graphic)] = "footprint-graphic:" + json.dumps(
-                values, sort_keys=True, separators=(",", ":")
+            add(
+                graphic,
+                "footprint-graphic:" + json.dumps(
+                    values, sort_keys=True, separators=(",", ":")
+                ),
             )
     for item in board.GetTracks():
         route = _board_route(item, board, pcbnew)
-        out[_uuid(item)] = "route:" + json.dumps(
-            route, sort_keys=True, separators=(",", ":")
+        add(
+            item,
+            "route:" + json.dumps(
+                route, sort_keys=True, separators=(",", ":")
+            ),
         )
     for zone in board.Zones():
         corners = sorted(
@@ -248,13 +297,36 @@ def identity_map(board, pcbnew) -> dict[str, str]:
             "priority": int(zone.GetAssignedPriority()),
             "corners_nm": corners,
         }
-        out[_uuid(zone)] = "zone:" + json.dumps(
-            identity, sort_keys=True, separators=(",", ":")
+        add(
+            zone,
+            "zone:" + json.dumps(
+                identity, sort_keys=True, separators=(",", ":")
+            ),
         )
     for drawing in board.GetDrawings():
-        values = _drawing_identity(drawing, require_complete=True)
-        out[_uuid(drawing)] = "drawing:" + json.dumps(
-            values, sort_keys=True, separators=(",", ":")
+        uuid = _uuid(drawing)
+        persistence = None
+        if hasattr(drawing, "GetShape"):
+            if uuid not in persisted_graphics:
+                raise AutorouteError(
+                    "board graphic %s has no saved stroke binding" % uuid
+                )
+            persistence = persisted_graphics[uuid]
+            used_persistence.add(uuid)
+        values = _drawing_identity(
+            drawing, require_complete=True, persistence=persistence
+        )
+        add(
+            drawing,
+            "drawing:" + json.dumps(
+                values, sort_keys=True, separators=(",", ":")
+            ),
+        )
+    if used_persistence != set(persisted_graphics):
+        missing = sorted(set(persisted_graphics) - used_persistence)
+        raise AutorouteError(
+            "saved board graphics are not completely represented by pcbnew: %s"
+            % ", ".join(missing[:4])
         )
     return out
 
@@ -277,6 +349,8 @@ def _worker_apply(args) -> int:
     board_path = Path(args.board).resolve()
     output = Path(args.output).resolve()
     routes = json.loads(Path(args.routes).read_text(encoding="utf-8"))
+    input_board_sha256 = sha256_path(board_path)
+    input_routes_sha256 = canonical_json_sha256(canonical_routes(routes))
     board = pcbnew.LoadBoard(str(board_path))
     result = apply_routes(board, routes, pcbnew)
     if args.refill_zones:
@@ -288,12 +362,32 @@ def _worker_apply(args) -> int:
         raise AutorouteError(f"KiCad could not save {output}")
     check = pcbnew.LoadBoard(str(output))
     allowed_nets = {route["net"] for route in routes}
-    result["applied_routes_after_reload_sha256"] = canonical_json_sha256(
-        extract_routes(check, pcbnew, allowed_nets=allowed_nets)
-    )
-    result["board_sha256"] = sha256_path(output)
+    result.update({
+        "schema": ROUTE_APPLY_WORKER_SCHEMA,
+        "request_id": args.request_id,
+        "pcbnew_version": pcbnew.GetBuildVersion(),
+        "input_board_sha256": input_board_sha256,
+        "input_routes_sha256": input_routes_sha256,
+        "applied_routes_after_reload_sha256": canonical_json_sha256(
+            extract_routes(check, pcbnew, allowed_nets=allowed_nets)
+        ),
+        "output_board_sha256": sha256_path(output),
+    })
     if args.identity_map:
-        write_json_atomic(args.identity_map, identity_map(check, pcbnew))
+        identities = identity_map(check, pcbnew)
+        kinds = collections.Counter(
+            value.split(":", 1)[0] for value in identities.values()
+        )
+        write_json_atomic(args.identity_map, {
+            "schema": IDENTITY_WORKER_SCHEMA,
+            "request_id": args.request_id,
+            "pcbnew_version": pcbnew.GetBuildVersion(),
+            "board_sha256": sha256_path(output),
+            "identity_map": identities,
+            "identity_count": len(identities),
+            "identity_kinds": dict(sorted(kinds.items())),
+            "identity_sha256": canonical_json_sha256(identities),
+        })
     write_json_atomic(args.summary, result)
     _ = app
     return 0
@@ -301,8 +395,22 @@ def _worker_apply(args) -> int:
 
 def _worker_identity(args) -> int:
     pcbnew, app = _init_pcbnew()
-    board = pcbnew.LoadBoard(str(Path(args.board).resolve()))
-    write_json_atomic(args.output, identity_map(board, pcbnew))
+    board_path = Path(args.board).resolve()
+    board = pcbnew.LoadBoard(str(board_path))
+    identities = identity_map(board, pcbnew)
+    kinds = collections.Counter(
+        value.split(":", 1)[0] for value in identities.values()
+    )
+    write_json_atomic(args.output, {
+        "schema": IDENTITY_WORKER_SCHEMA,
+        "request_id": args.request_id,
+        "pcbnew_version": pcbnew.GetBuildVersion(),
+        "board_sha256": sha256_path(board_path),
+        "identity_map": identities,
+        "identity_count": len(identities),
+        "identity_kinds": dict(sorted(kinds.items())),
+        "identity_sha256": canonical_json_sha256(identities),
+    })
     _ = app
     return 0
 
@@ -442,6 +550,13 @@ def _promote(args) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
+    def request_id(value):
+        if not re.fullmatch(r"[0-9a-f]{48}", value or ""):
+            raise argparse.ArgumentTypeError(
+                "request id must be 48 lowercase hexadecimal characters"
+            )
+        return value
+
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     apply = sub.add_parser("apply")
@@ -451,9 +566,11 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--summary", required=True)
     apply.add_argument("--identity-map")
     apply.add_argument("--refill-zones", action="store_true")
+    apply.add_argument("--request-id", required=True, type=request_id)
     identity = sub.add_parser("identity")
     identity.add_argument("--board", required=True)
     identity.add_argument("--output", required=True)
+    identity.add_argument("--request-id", required=True, type=request_id)
     promote = sub.add_parser("promote")
     promote.add_argument("--seed", required=True)
     promote.add_argument("--candidate-board", required=True)

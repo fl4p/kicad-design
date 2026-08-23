@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,9 @@ try:
         SNAPSHOT_SCHEMA,
         COMPATIBILITY_SCHEMA,
         ROUTE_APPLICATOR_VERSION,
+        PCB_WORKER_SCHEMA,
+        ROUTE_APPLY_WORKER_SCHEMA,
+        IDENTITY_WORKER_SCHEMA,
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
@@ -56,7 +60,11 @@ try:
         verify_project_styles,
     )
     from kicad_repro import digest
-    from kicad_graphics import GraphicError, complete_graphic_geometry
+    from kicad_graphics import (
+        GraphicError,
+        complete_graphic_geometry,
+        graphic_persistence,
+    )
     from kicad_verify import (
         VerifyError,
         find_kicad_cli,
@@ -72,6 +80,9 @@ except ImportError:  # imported as scripts.kicad_route_candidate
         SNAPSHOT_SCHEMA,
         COMPATIBILITY_SCHEMA,
         ROUTE_APPLICATOR_VERSION,
+        PCB_WORKER_SCHEMA,
+        ROUTE_APPLY_WORKER_SCHEMA,
+        IDENTITY_WORKER_SCHEMA,
         build_input_bundle,
         build_v2_input_bundle,
         canonical_json_sha256,
@@ -89,7 +100,11 @@ except ImportError:  # imported as scripts.kicad_route_candidate
         verify_project_styles,
     )
     from .kicad_repro import digest
-    from .kicad_graphics import GraphicError, complete_graphic_geometry
+    from .kicad_graphics import (
+        GraphicError,
+        complete_graphic_geometry,
+        graphic_persistence,
+    )
     from .kicad_verify import (
         VerifyError,
         find_kicad_cli,
@@ -116,6 +131,181 @@ class RouteReportError(RuntimeError):
     """The candidate workflow could not produce a trustworthy report."""
 
 
+def _require_exact_fields(value, fields, where):
+    if not isinstance(value, dict) or set(value) != set(fields):
+        present = sorted(value) if isinstance(value, dict) else type(value).__name__
+        raise RouteReportError(
+            "%s has unsupported fields: %s" % (where, present)
+        )
+
+
+def _require_int(value, where, *, minimum=None):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RouteReportError("%s is not an integer" % where)
+    if minimum is not None and value < minimum:
+        raise RouteReportError("%s is below %d" % (where, minimum))
+
+
+def _require_point(value, where):
+    if not isinstance(value, list) or len(value) != 2:
+        raise RouteReportError("%s is not a two-coordinate point" % where)
+    for index, coordinate in enumerate(value):
+        _require_int(coordinate, "%s[%d]" % (where, index))
+
+
+def _validate_route_item(item, where):
+    if not isinstance(item, dict):
+        raise RouteReportError("%s is not an object" % where)
+    kind = item.get("kind")
+    common = {"kind", "net", "locked", "width_nm"}
+    fields = {
+        "segment": common | {
+            "layer", "start_nm", "end_nm", "length_nm",
+        },
+        "arc": common | {
+            "layer", "start_nm", "mid_nm", "end_nm", "length_nm",
+        },
+        "via": common | {
+            "position_nm", "top_layer", "bottom_layer", "drill_nm",
+            "via_type",
+        },
+    }.get(kind)
+    if fields is None:
+        raise RouteReportError("%s has unsupported kind %r" % (where, kind))
+    _require_exact_fields(item, fields, where)
+    if not isinstance(item["net"], str):
+        raise RouteReportError("%s net is not a string" % where)
+    if not isinstance(item["locked"], bool):
+        raise RouteReportError("%s locked is not a boolean" % where)
+    # Snapshot validation proves shape and derivation, not DRC cleanliness.
+    # KiCad can load and report a zero-width track; preserve it so DRC can
+    # reject the board instead of making the serialization boundary unusable.
+    _require_int(item["width_nm"], "%s width_nm" % where, minimum=0)
+    if kind in {"segment", "arc"}:
+        if not isinstance(item["layer"], str) or not item["layer"]:
+            raise RouteReportError("%s layer is invalid" % where)
+        _require_point(item["start_nm"], "%s start_nm" % where)
+        _require_point(item["end_nm"], "%s end_nm" % where)
+        if item["start_nm"] > item["end_nm"]:
+            raise RouteReportError("%s endpoints are not canonical" % where)
+        _require_int(item["length_nm"], "%s length_nm" % where, minimum=0)
+        if kind == "arc":
+            _require_point(item["mid_nm"], "%s mid_nm" % where)
+    else:
+        _require_point(item["position_nm"], "%s position_nm" % where)
+        for key in ("top_layer", "bottom_layer"):
+            if not isinstance(item[key], str) or not item[key]:
+                raise RouteReportError("%s %s is invalid" % (where, key))
+        _require_int(item["drill_nm"], "%s drill_nm" % where, minimum=1)
+        _require_int(item["via_type"], "%s via_type" % where, minimum=0)
+
+
+def _validate_board_summary(board, where):
+    _require_exact_fields(
+        board,
+        {"copper_layer_count", "copper_layers", "enabled_layers"},
+        where,
+    )
+    _require_int(board["copper_layer_count"], where + " copper_layer_count", minimum=0)
+    copper_layers = board["copper_layers"]
+    if (not isinstance(copper_layers, list)
+            or any(not isinstance(value, str) or not value for value in copper_layers)
+            or len(copper_layers) != len(set(copper_layers))):
+        raise RouteReportError("%s copper_layers is invalid" % where)
+    if board["copper_layer_count"] != len(copper_layers):
+        raise RouteReportError("%s copper layer count does not match names" % where)
+    enabled_layers = board["enabled_layers"]
+    if not isinstance(enabled_layers, list):
+        raise RouteReportError("%s enabled_layers is not a list" % where)
+    for index, layer in enumerate(enabled_layers):
+        _require_int(layer, "%s enabled_layers[%d]" % (where, index), minimum=0)
+    if enabled_layers != sorted(set(enabled_layers)):
+        raise RouteReportError("%s enabled_layers is not canonical" % where)
+
+
+def _validate_netclasses(netclasses, where):
+    _require_exact_fields(netclasses, {"class_names", "net_to_class"}, where)
+    class_names = netclasses["class_names"]
+    if (not isinstance(class_names, list)
+            or any(not isinstance(value, str) or not value for value in class_names)
+            or class_names != sorted(set(class_names))):
+        raise RouteReportError("%s class_names is not canonical" % where)
+    net_to_class = netclasses["net_to_class"]
+    if not isinstance(net_to_class, dict):
+        raise RouteReportError("%s net_to_class is not an object" % where)
+    if list(net_to_class) != sorted(net_to_class):
+        raise RouteReportError("%s net_to_class is not canonical" % where)
+    for net, class_name in net_to_class.items():
+        if (not isinstance(net, str) or not net
+                or not isinstance(class_name, str)
+                or class_name not in class_names):
+            raise RouteReportError("%s net_to_class entry is invalid" % where)
+
+
+def _validate_routing(routing, where):
+    _require_exact_fields(routing, {"items", "locked_items", "summary"}, where)
+    items = routing["items"]
+    locked_items = routing["locked_items"]
+    if not isinstance(items, list) or not isinstance(locked_items, list):
+        raise RouteReportError("%s route collections are not lists" % where)
+    for index, item in enumerate(items):
+        _validate_route_item(item, "%s items[%d]" % (where, index))
+    canonical = sorted(
+        items,
+        key=lambda value: json.dumps(
+            value, sort_keys=True, separators=(",", ":")
+        ),
+    )
+    if items != canonical:
+        raise RouteReportError("%s items are not canonical" % where)
+    expected_locked = [item for item in items if item["locked"]]
+    if locked_items != expected_locked:
+        raise RouteReportError("%s locked_items does not match items" % where)
+
+    summary = routing["summary"]
+    _require_exact_fields(
+        summary,
+        {
+            "count", "by_kind", "by_net", "total_track_length_mm",
+            "sha256", "locked_count", "locked_sha256",
+        },
+        where + " summary",
+    )
+    _require_int(summary["count"], where + " summary count", minimum=0)
+    _require_int(
+        summary["locked_count"], where + " summary locked_count", minimum=0
+    )
+    if not isinstance(summary["total_track_length_mm"], float):
+        raise RouteReportError(
+            "%s summary total_track_length_mm is not a float" % where
+        )
+    for key in ("by_kind", "by_net"):
+        values = summary[key]
+        if (not isinstance(values, dict)
+                or any(not isinstance(name, str) for name in values)
+                or any(isinstance(count, bool) or not isinstance(count, int)
+                       or count <= 0 for count in values.values())):
+            raise RouteReportError("%s summary %s is invalid" % (where, key))
+    expected_summary = {
+        "count": len(items),
+        "by_kind": dict(sorted(collections.Counter(
+            item["kind"] for item in items
+        ).items())),
+        "by_net": dict(sorted(collections.Counter(
+            item["net"] for item in items
+        ).items())),
+        "total_track_length_mm": round(
+            sum(item.get("length_nm", 0) for item in items) / 1_000_000.0,
+            6,
+        ),
+        "sha256": _json_digest(items),
+        "locked_count": len(expected_locked),
+        "locked_sha256": _json_digest(expected_locked),
+    }
+    if summary != expected_summary:
+        raise RouteReportError("%s summary does not match route items" % where)
+
+
 def _validate_semantic_snapshot(snapshot, where):
     """Validate the worker boundary before any snapshot field is trusted."""
     required = {
@@ -137,15 +327,32 @@ def _validate_semantic_snapshot(snapshot, where):
                 "nonrouting_items", "nonrouting_counts"):
         if not isinstance(snapshot[key], dict):
             raise RouteReportError("%s semantic snapshot %s is not an object" % (where, key))
+    _validate_board_summary(snapshot["board"], where + " semantic snapshot board")
+    _validate_netclasses(
+        snapshot["netclasses"], where + " semantic snapshot netclasses"
+    )
+    _validate_routing(snapshot["routing"], where + " semantic snapshot routing")
     if snapshot["nonrouting_point_quantum_nm"] != NONROUTING_POINT_QUANTUM_NM:
         raise RouteReportError(
             "%s semantic snapshot point quantum is unsupported" % where
+        )
+    if set(snapshot["nonrouting_items"]) != {
+            "board", "footprints", "zones", "drawings"}:
+        raise RouteReportError(
+            "%s semantic snapshot nonrouting items have unsupported fields"
+            % where
         )
     if snapshot["board"] != snapshot["nonrouting_items"].get("board"):
         raise RouteReportError(
             "%s semantic snapshot board summary differs from nonrouting items"
             % where
         )
+    for key in ("footprints", "zones", "drawings"):
+        if not isinstance(snapshot["nonrouting_items"][key], list):
+            raise RouteReportError(
+                "%s semantic snapshot nonrouting %s is not a list"
+                % (where, key)
+            )
     if not re.fullmatch(r"[0-9a-f]{64}", str(snapshot["nonrouting_sha256"])):
         raise RouteReportError("%s semantic snapshot digest is invalid" % where)
     categories = snapshot["nonrouting_category_sha256"]
@@ -167,6 +374,17 @@ def _validate_semantic_snapshot(snapshot, where):
             % where
         )
     counts = snapshot["nonrouting_counts"]
+    if set(counts) != {"footprints", "zones", "drawings"}:
+        raise RouteReportError(
+            "%s semantic snapshot nonrouting counts have unsupported fields"
+            % where
+        )
+    for key, value in counts.items():
+        _require_int(
+            value,
+            "%s semantic snapshot nonrouting count %s" % (where, key),
+            minimum=0,
+        )
     expected_counts = {
         key: len(snapshot["nonrouting_items"][key])
         for key in ("footprints", "zones", "drawings")
@@ -981,13 +1199,50 @@ def _project_edge_clearance_um(project: Path | None) -> int | None:
     return int(round(float(value) * 1000.0))
 
 
+def _file_stamp(path: Path):
+    """Return a rewrite-sensitive stamp without treating existence as freshness."""
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    if not path.is_file():
+        return ("not-file", stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns)
+    return (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _require_fresh_file(path: Path, before, where: str):
+    after = _file_stamp(path)
+    if after is None or after == before:
+        raise RouteReportError("%s did not freshly write %s" % (where, path))
+    return after
+
+
 def _worker_call(
     kicad_python: Path,
     mode: str,
     args: list[Path],
     snapshot_path: Path,
     workspace: Path,
+    expected_pcbnew_version: str,
 ) -> dict:
+    expected_lengths = {"export": 2, "import": 2, "snapshot": 1}
+    if mode not in expected_lengths or len(args) != expected_lengths[mode]:
+        raise RouteReportError("unsupported PCB worker request %r" % mode)
+    board = args[0]
+    expected_inputs = {"board_sha256": digest(board)}
+    if mode == "import":
+        expected_inputs["ses_sha256"] = digest(args[1])
+
+    watched_outputs = {"envelope": snapshot_path}
+    if mode == "export":
+        watched_outputs["DSN"] = args[1]
+    elif mode == "import":
+        watched_outputs["board"] = board
+        watched_outputs["raw import"] = board.with_name(
+            board.stem + "-raw-import" + board.suffix
+        )
+    before = {name: _file_stamp(path) for name, path in watched_outputs.items()}
+    request_id = secrets.token_hex(24)
     cmd = [
         str(kicad_python),
         str(Path(__file__).resolve()),
@@ -998,15 +1253,16 @@ def _worker_call(
     ]
     worker_env = os.environ.copy()
     worker_env["KICAD_ROUTE_WORKER_ROOT"] = str(workspace.resolve())
+    worker_env["KICAD_ROUTE_WORKER_REQUEST_ID"] = request_id
     run = _run(cmd, cwd=workspace, timeout=180, env=worker_env)
     if run["returncode"] != 0:
         raise RouteReportError(
             "KiCad %s worker failed (rc=%d)\nstdout:\n%s\nstderr:\n%s"
             % (mode, run["returncode"], run["stdout"][-3000:], run["stderr"][-3000:])
         )
-    if not snapshot_path.is_file():
-        raise RouteReportError(
-            "KiCad %s worker exited 0 but did not write %s" % (mode, snapshot_path)
+    for name, path in watched_outputs.items():
+        _require_fresh_file(
+            path, before[name], "KiCad %s worker %s" % (mode, name)
         )
     try:
         result = json.loads(_read_utf8(snapshot_path))
@@ -1014,6 +1270,77 @@ def _worker_call(
         raise RouteReportError(
             "KiCad %s worker wrote invalid JSON: %s" % (mode, exc)
         ) from exc
+    common = {
+        "schema", "request_id", "mode", "pcbnew_version", "inputs",
+        "outputs", "snapshot",
+    }
+    extras = {
+        "snapshot": set(),
+        "export": {"export_ok"},
+        "import": {"import_ok", "zones_refilled", "raw_import"},
+    }
+    if not isinstance(result, dict) or set(result) != common | extras[mode]:
+        fields = sorted(result) if isinstance(result, dict) else type(result).__name__
+        raise RouteReportError(
+            "KiCad %s worker envelope has unsupported fields: %s"
+            % (mode, fields)
+        )
+    if result["schema"] != PCB_WORKER_SCHEMA:
+        raise RouteReportError("KiCad %s worker schema is unsupported" % mode)
+    if result["request_id"] != request_id:
+        raise RouteReportError(
+            "KiCad %s worker output is stale or belongs to another request" % mode
+        )
+    if result["mode"] != mode:
+        raise RouteReportError("KiCad worker returned the wrong mode")
+    if result["pcbnew_version"] != expected_pcbnew_version:
+        raise RouteReportError(
+            "KiCad %s worker used pcbnew %r; expected %r"
+            % (mode, result["pcbnew_version"], expected_pcbnew_version)
+        )
+    if result["inputs"] != expected_inputs:
+        raise RouteReportError(
+            "KiCad %s worker input digests do not match the request" % mode
+        )
+    if mode in {"snapshot", "export"} and digest(board) != expected_inputs["board_sha256"]:
+        raise RouteReportError("KiCad %s worker changed its input board" % mode)
+    if mode == "import" and digest(args[1]) != expected_inputs["ses_sha256"]:
+        raise RouteReportError("KiCad import worker input SES changed during the call")
+    _validate_semantic_snapshot(result["snapshot"], "KiCad %s worker" % mode)
+
+    if mode == "snapshot":
+        expected_outputs = {}
+    elif mode == "export":
+        if result["export_ok"] is not True:
+            raise RouteReportError("KiCad export worker did not attest success")
+        dsn = args[1]
+        expected_outputs = {
+            "dsn_sha256": digest(dsn),
+            "dsn_bytes": dsn.stat().st_size,
+        }
+        if expected_outputs["dsn_bytes"] <= 0:
+            raise RouteReportError("KiCad export worker wrote an empty DSN")
+    else:
+        if result["import_ok"] is not True or result["zones_refilled"] is not True:
+            raise RouteReportError(
+                "KiCad import worker did not attest import and zone refill"
+            )
+        raw_path = watched_outputs["raw import"]
+        expected_raw = {"path": str(raw_path.resolve()), "sha256": digest(raw_path)}
+        if result["raw_import"] != expected_raw:
+            raise RouteReportError("KiCad import worker raw-board binding differs")
+        expected_outputs = {
+            "board_sha256": digest(board),
+            "board_bytes": board.stat().st_size,
+            "raw_import_sha256": digest(raw_path),
+            "raw_import_bytes": raw_path.stat().st_size,
+        }
+        if expected_outputs["board_bytes"] <= 0 or expected_outputs["raw_import_bytes"] <= 0:
+            raise RouteReportError("KiCad import worker wrote an empty board artifact")
+    if result["outputs"] != expected_outputs:
+        raise RouteReportError(
+            "KiCad %s worker output digests do not match live artifacts" % mode
+        )
     result["worker_log"] = _log_record(run)
     return result
 
@@ -1025,6 +1352,7 @@ def _attest_v2_adapter_seed(
     supplied_seed: Path,
     supplied_snapshot: dict,
     kicad_python: Path,
+    pcbnew_version: str,
     workspace: Path,
 ) -> dict:
     """Re-run the pinned adapter and prove the reviewed seed is its output."""
@@ -1101,6 +1429,7 @@ def _attest_v2_adapter_seed(
         [generated_board],
         workspace / "adapter-attested-seed-semantic.json",
         workspace,
+        pcbnew_version,
     )
     generated_snapshot = _validate_semantic_snapshot(
         generated_snapshot_result.get("snapshot"),
@@ -1186,9 +1515,83 @@ def _run_json_drc(
     }
 
 
-def _identity_map(
-    kicad_python: Path, board: Path, output: Path, workspace: Path
+def _validate_identity_envelope(
+    value,
+    *,
+    request_id: str,
+    pcbnew_version: str,
+    board_sha256: str,
+    where: str,
 ) -> dict[str, str]:
+    required = {
+        "schema", "request_id", "pcbnew_version", "board_sha256",
+        "identity_map", "identity_count", "identity_kinds", "identity_sha256",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        fields = sorted(value) if isinstance(value, dict) else type(value).__name__
+        raise RouteReportError("%s envelope has unsupported fields: %s" % (where, fields))
+    if value["schema"] != IDENTITY_WORKER_SCHEMA:
+        raise RouteReportError("%s schema is unsupported" % where)
+    if value["request_id"] != request_id:
+        raise RouteReportError("%s is stale or belongs to another request" % where)
+    if value["pcbnew_version"] != pcbnew_version:
+        raise RouteReportError("%s used an unexpected pcbnew version" % where)
+    if value["board_sha256"] != board_sha256:
+        raise RouteReportError("%s is not bound to the live board" % where)
+    identities = value["identity_map"]
+    if (
+        not isinstance(identities, dict)
+        or not identities
+        or any(not isinstance(key, str) or not key for key in identities)
+        or any(
+            not isinstance(item, str)
+            or ":" not in item
+            or not item.split(":", 1)[1]
+            for item in identities.values()
+        )
+    ):
+        raise RouteReportError("%s identity map is empty or malformed" % where)
+    kinds = collections.Counter(
+        item.split(":", 1)[0] for item in identities.values()
+    )
+    allowed_kinds = {
+        "footprint", "pad", "footprint-graphic", "route", "zone", "drawing",
+    }
+    if not set(kinds) <= allowed_kinds:
+        raise RouteReportError("%s identity map has unsupported object kinds" % where)
+    if (
+        not isinstance(value["identity_count"], int)
+        or isinstance(value["identity_count"], bool)
+        or value["identity_count"] != len(identities)
+    ):
+        raise RouteReportError("%s identity count does not match its map" % where)
+    if (
+        not isinstance(value["identity_kinds"], dict)
+        or any(
+            not isinstance(key, str)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or count <= 0
+            for key, count in value["identity_kinds"].items()
+        )
+        or value["identity_kinds"] != dict(sorted(kinds.items()))
+    ):
+        raise RouteReportError("%s identity kind coverage does not match its map" % where)
+    if value["identity_sha256"] != canonical_json_sha256(identities):
+        raise RouteReportError("%s identity digest does not match its map" % where)
+    return identities
+
+
+def _identity_map(
+    kicad_python: Path,
+    board: Path,
+    output: Path,
+    workspace: Path,
+    pcbnew_version: str,
+) -> dict[str, str]:
+    request_id = secrets.token_hex(24)
+    before = _file_stamp(output)
+    board_sha256 = digest(board)
     command = [
         str(kicad_python),
         str(Path(__file__).with_name("kicad_route_manifest.py").resolve()),
@@ -1197,20 +1600,29 @@ def _identity_map(
         str(board),
         "--output",
         str(output),
+        "--request-id",
+        request_id,
     ]
     run = _run(command, cwd=workspace, timeout=180)
-    if run["returncode"] != 0 or not output.is_file():
+    if run["returncode"] != 0:
         raise RouteReportError(
             "KiCad identity-map worker failed (rc=%d): %s"
             % (run["returncode"], run["stderr"][-3000:])
         )
+    _require_fresh_file(output, before, "KiCad identity-map worker")
+    if digest(board) != board_sha256:
+        raise RouteReportError("identity-map worker changed its input board")
     try:
         value = json.loads(_read_utf8(output))
     except json.JSONDecodeError as exc:
         raise RouteReportError("identity map is invalid JSON: %s" % exc) from exc
-    if not isinstance(value, dict) or not value:
-        raise RouteReportError("identity map is empty")
-    return value
+    return _validate_identity_envelope(
+        value,
+        request_id=request_id,
+        pcbnew_version=pcbnew_version,
+        board_sha256=board_sha256,
+        where="KiCad identity-map worker",
+    )
 
 
 def _expand_audit_tokens(tokens: list[str], *, board: Path, workspace: Path, config_dir: Path) -> list[str]:
@@ -1304,11 +1716,64 @@ def _run_structured_audits(
     }
 
 
+def _validate_route_apply_summary(
+    result,
+    *,
+    request_id: str,
+    pcbnew_version: str,
+    input_board_sha256: str,
+    routes: list[dict],
+    output_board_sha256: str,
+):
+    required = {
+        "schema", "request_id", "pcbnew_version", "input_board_sha256",
+        "input_routes_sha256", "segments", "vias", "routes_sha256",
+        "applied_routes_after_reload_sha256", "output_board_sha256",
+    }
+    if not isinstance(result, dict) or set(result) != required:
+        fields = sorted(result) if isinstance(result, dict) else type(result).__name__
+        raise RouteReportError(
+            "route applicator summary has unsupported fields: %s" % fields
+        )
+    expected_counts = collections.Counter(item.get("kind") for item in routes)
+    if set(expected_counts) - {"segment", "via"}:
+        raise RouteReportError("route applicator request has unsupported route kinds")
+    input_routes_sha256 = canonical_json_sha256(routes)
+    if (
+        result["schema"] != ROUTE_APPLY_WORKER_SCHEMA
+        or result["request_id"] != request_id
+        or result["pcbnew_version"] != pcbnew_version
+        or result["input_board_sha256"] != input_board_sha256
+        or result["input_routes_sha256"] != input_routes_sha256
+        or result["routes_sha256"] != input_routes_sha256
+        or result["segments"] != expected_counts["segment"]
+        or result["vias"] != expected_counts["via"]
+    ):
+        raise RouteReportError(
+            "route applicator summary is stale or differs from requested inputs"
+        )
+    if any(
+        not isinstance(result[key], int) or isinstance(result[key], bool)
+        for key in ("segments", "vias")
+    ):
+        raise RouteReportError("route applicator counts are malformed")
+    if not re.fullmatch(
+        r"[0-9a-f]{64}", str(result["applied_routes_after_reload_sha256"])
+    ):
+        raise RouteReportError("route applicator reload digest is malformed")
+    if result["output_board_sha256"] != output_board_sha256:
+        raise RouteReportError(
+            "route applicator summary is not bound to the live output board"
+        )
+    return result
+
+
 def _apply_filtered_routes(
     kicad_python: Path,
     seed_copies: dict[str, Path],
     workspace: Path,
     routes: list[dict],
+    pcbnew_version: str,
     *,
     label: str = "filtered-candidate",
 ) -> tuple[Path, dict]:
@@ -1320,6 +1785,13 @@ def _apply_filtered_routes(
     summary_path = workspace / f"{label}-apply.json"
     identity_path = workspace / f"{label}-identity.json"
     _write_json_atomic(routes_path, routes)
+    request_id = secrets.token_hex(24)
+    input_board_sha256 = digest(board)
+    before = {
+        "board": _file_stamp(board),
+        "summary": _file_stamp(summary_path),
+        "identity": _file_stamp(identity_path),
+    }
     command = [
         str(kicad_python),
         str(Path(__file__).with_name("kicad_route_manifest.py").resolve()),
@@ -1335,15 +1807,42 @@ def _apply_filtered_routes(
         "--identity-map",
         str(identity_path),
         "--refill-zones",
+        "--request-id",
+        request_id,
     ]
     run = _run(command, cwd=workspace, timeout=300)
-    if run["returncode"] != 0 or not summary_path.is_file():
+    if run["returncode"] != 0:
         raise RouteReportError(
             "filtered candidate application failed (rc=%d): %s"
             % (run["returncode"], run["stderr"][-3000:])
         )
-    result = json.loads(_read_utf8(summary_path))
-    result["identity_map"] = json.loads(_read_utf8(identity_path))
+    _require_fresh_file(board, before["board"], "route applicator board output")
+    _require_fresh_file(summary_path, before["summary"], "route applicator summary")
+    _require_fresh_file(identity_path, before["identity"], "route applicator identity map")
+    try:
+        result = json.loads(_read_utf8(summary_path))
+        identity_envelope = json.loads(_read_utf8(identity_path))
+    except json.JSONDecodeError as exc:
+        raise RouteReportError(
+            "route applicator emitted invalid JSON: %s" % exc
+        ) from exc
+
+    output_board_sha256 = digest(board)
+    _validate_route_apply_summary(
+        result,
+        request_id=request_id,
+        pcbnew_version=pcbnew_version,
+        input_board_sha256=input_board_sha256,
+        routes=routes,
+        output_board_sha256=output_board_sha256,
+    )
+    result["identity_map"] = _validate_identity_envelope(
+        identity_envelope,
+        request_id=request_id,
+        pcbnew_version=pcbnew_version,
+        board_sha256=output_board_sha256,
+        where="route applicator identity worker",
+    )
     result["worker_log"] = _log_record(run)
     return board, result
 
@@ -1899,6 +2398,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 [seed],
                 workspace / "supplied-seed-attestation-semantic.json",
                 workspace,
+                pcbnew_version,
             )
             supplied_snapshot = _validate_semantic_snapshot(
                 supplied_snapshot_result.get("snapshot"),
@@ -1910,6 +2410,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 supplied_seed=seed,
                 supplied_snapshot=supplied_snapshot,
                 kicad_python=kicad_python,
+                pcbnew_version=pcbnew_version,
                 workspace=workspace,
             )
 
@@ -1919,6 +2420,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             [seed, dsn],
             export_snapshot_path,
             workspace,
+            pcbnew_version,
         )
         if not export_result.get("export_ok") or not dsn.is_file() or dsn.stat().st_size == 0:
             raise RouteReportError("KiCad did not produce a non-empty DSN")
@@ -1997,6 +2499,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 copied,
                 workspace,
                 [],
+                pcbnew_version,
                 label="qualified-seed",
             )
             initial["seed"]["qualification_roundtrip"] = {
@@ -2033,6 +2536,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 qualified_seed,
                 workspace / "seed-identity.json",
                 workspace,
+                pcbnew_version,
             )
             seed_json_drc = _run_json_drc(
                 qualified_seed,
@@ -2361,6 +2865,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
             [candidate_board, ses],
             import_snapshot_path,
             workspace,
+            pcbnew_version,
         )
         if not import_result.get("import_ok"):
             raise RouteReportError("KiCad reported SES import failure")
@@ -2392,12 +2897,14 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 copied,
                 workspace,
                 filtered_result["routes"],
+                pcbnew_version,
             )
             control_board, control_apply = _apply_filtered_routes(
                 kicad_python,
                 copied,
                 workspace,
                 [],
+                pcbnew_version,
                 label="control-roundtrip",
             )
             control_nonrouting_sha = nonrouting_projection_sha256(control_board)
@@ -2417,6 +2924,7 @@ def run_report(args: argparse.Namespace) -> tuple[dict, int]:
                 [candidate_board],
                 workspace / "filtered-semantic.json",
                 workspace,
+                pcbnew_version,
             )
             candidate_snapshot = _validate_semantic_snapshot(
                 filtered_snapshot_result.get("snapshot"),
@@ -2845,13 +3353,18 @@ def _pad_item(pad) -> dict:
     }
 
 
-def _footprint_item(fp) -> dict:
+def _footprint_item(fp, persisted_graphics=None, used_persistence=None) -> dict:
     pads = sorted(
         (_pad_item(pad) for pad in fp.Pads()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     graphics = sorted(
-        (_drawing_item(item, require_complete=True)
+        (_drawing_item(
+            item,
+            require_complete=True,
+            persisted_graphics=persisted_graphics,
+            used_persistence=used_persistence,
+        )
          for item in fp.GraphicalItems()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
@@ -2896,7 +3409,13 @@ def _zone_item(zone) -> dict:
     }
 
 
-def _drawing_item(item, *, require_complete=False) -> dict:
+def _drawing_item(
+    item,
+    *,
+    require_complete=False,
+    persisted_graphics=None,
+    used_persistence=None,
+) -> dict:
     data = {
         "uuid": _item_uuid(item),
         "kind": type(item).__name__,
@@ -2922,9 +3441,19 @@ def _drawing_item(item, *, require_complete=False) -> dict:
             (data["GetStart"], data["GetEnd"])
         )
     if require_complete:
+        persistence = None
+        if hasattr(item, "GetShape"):
+            uuid = data["uuid"]
+            if not isinstance(persisted_graphics, dict) or uuid not in persisted_graphics:
+                raise RouteReportError(
+                    "board graphic %s has no saved stroke binding" % uuid
+                )
+            persistence = persisted_graphics[uuid]
+            if used_persistence is not None:
+                used_persistence.add(uuid)
         try:
             data["complete_geometry"] = complete_graphic_geometry(
-                item, _nonrouting_point
+                item, _nonrouting_point, persistence=persistence
             )
         except GraphicError as exc:
             raise RouteReportError(
@@ -2935,11 +3464,20 @@ def _drawing_item(item, *, require_complete=False) -> dict:
 
 
 def _semantic_snapshot(board, pcbnew) -> dict:
+    board_path = Path(str(board.GetFileName())).resolve()
+    try:
+        persisted_graphics = graphic_persistence(board_path)
+    except GraphicError as exc:
+        raise RouteReportError(
+            "cannot bind saved board graphic semantics: %s" % exc
+        ) from exc
+    used_persistence = set()
     routes = [_route_item(item, board, pcbnew) for item in board.GetTracks()]
     routes.sort(key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")))
     locked = [x for x in routes if x["locked"]]
     footprints = sorted(
-        (_footprint_item(fp) for fp in board.GetFootprints()),
+        (_footprint_item(fp, persisted_graphics, used_persistence)
+         for fp in board.GetFootprints()),
         key=lambda x: (x["reference"], json.dumps(x, sort_keys=True)),
     )
     zones = sorted(
@@ -2947,9 +3485,20 @@ def _semantic_snapshot(board, pcbnew) -> dict:
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
     drawings = sorted(
-        (_drawing_item(d, require_complete=True) for d in board.GetDrawings()),
+        (_drawing_item(
+            d,
+            require_complete=True,
+            persisted_graphics=persisted_graphics,
+            used_persistence=used_persistence,
+        ) for d in board.GetDrawings()),
         key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")),
     )
+    if used_persistence != set(persisted_graphics):
+        missing = sorted(set(persisted_graphics) - used_persistence)
+        raise RouteReportError(
+            "saved board graphics are not completely represented by pcbnew: %s"
+            % ", ".join(missing[:4])
+        )
     nets = {}
     class_names = set(str(x) for x in board.GetAllNetClasses().keys())
     for net in board.GetNetInfo().NetsByName().values():
@@ -3067,6 +3616,11 @@ def _pcb_worker(argv: list[str]) -> int:
         raise RouteReportError(
             "internal PCB worker requires an orchestrator workspace boundary"
         )
+    request_id = os.environ.get("KICAD_ROUTE_WORKER_REQUEST_ID")
+    if not request_id or not re.fullmatch(r"[0-9a-f]{48}", request_id):
+        raise RouteReportError(
+            "internal PCB worker requires a fresh orchestrator request id"
+        )
     worker_root = Path(worker_root_raw).resolve()
     for raw_path in argv[1:]:
         path = Path(raw_path).resolve()
@@ -3084,6 +3638,7 @@ def _pcb_worker(argv: list[str]) -> int:
     _ = app
     if mode == "export" and len(argv) == 4:
         board_path, dsn_path, snapshot_path = map(Path, argv[1:])
+        inputs = {"board_sha256": digest(board_path)}
         board, manager, project = _load_board_with_project(board_path, pcbnew)
         _ = (manager, project)
         # The source board remains untouched, but every existing scratch route
@@ -3096,8 +3651,15 @@ def _pcb_worker(argv: list[str]) -> int:
         _write_json_atomic(
             snapshot_path,
             {
+                "schema": PCB_WORKER_SCHEMA,
+                "request_id": request_id,
                 "mode": mode,
                 "pcbnew_version": pcbnew.GetBuildVersion(),
+                "inputs": inputs,
+                "outputs": {
+                    "dsn_sha256": digest(dsn_path) if ok else None,
+                    "dsn_bytes": dsn_path.stat().st_size if ok else 0,
+                },
                 "export_ok": ok,
                 "snapshot": snapshot,
             },
@@ -3105,6 +3667,10 @@ def _pcb_worker(argv: list[str]) -> int:
         return 0 if ok else 2
     if mode == "import" and len(argv) == 4:
         board_path, ses_path, snapshot_path = map(Path, argv[1:])
+        inputs = {
+            "board_sha256": digest(board_path),
+            "ses_sha256": digest(ses_path),
+        }
         board, manager, project = _load_board_with_project(board_path, pcbnew)
         ok = bool(pcbnew.ImportSpecctraSES(board, str(ses_path)))
         raw_import = None
@@ -3134,8 +3700,22 @@ def _pcb_worker(argv: list[str]) -> int:
         _write_json_atomic(
             snapshot_path,
             {
+                "schema": PCB_WORKER_SCHEMA,
+                "request_id": request_id,
                 "mode": mode,
                 "pcbnew_version": pcbnew.GetBuildVersion(),
+                "inputs": inputs,
+                "outputs": {
+                    "board_sha256": digest(board_path) if ok else None,
+                    "board_bytes": board_path.stat().st_size if ok else 0,
+                    "raw_import_sha256": (
+                        raw_import["sha256"] if raw_import is not None else None
+                    ),
+                    "raw_import_bytes": (
+                        Path(raw_import["path"]).stat().st_size
+                        if raw_import is not None else 0
+                    ),
+                },
                 "import_ok": ok,
                 "zones_refilled": bool(ok),
                 "raw_import": raw_import,
@@ -3145,14 +3725,19 @@ def _pcb_worker(argv: list[str]) -> int:
         return 0 if ok else 2
     if mode == "snapshot" and len(argv) == 3:
         board_path, snapshot_path = map(Path, argv[1:])
+        inputs = {"board_sha256": digest(board_path)}
         board, manager, project = _load_board_with_project(board_path, pcbnew)
         _ = (manager, project)
         snapshot = _semantic_snapshot(board, pcbnew)
         _write_json_atomic(
             snapshot_path,
             {
+                "schema": PCB_WORKER_SCHEMA,
+                "request_id": request_id,
                 "mode": mode,
                 "pcbnew_version": pcbnew.GetBuildVersion(),
+                "inputs": inputs,
+                "outputs": {},
                 "snapshot": snapshot,
             },
         )
