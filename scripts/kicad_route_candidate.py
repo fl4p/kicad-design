@@ -128,6 +128,9 @@ NONROUTING_POINT_QUANTUM_NM = 10
 # applies only to the pre-router fixed-copper geometry comparison; post-import
 # locked routing remains exact at KiCad's native nanometre values.
 DSN_LOCKED_POINT_QUANTUM_NM = 1000
+UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 
 
 class RouteReportError(RuntimeError):
@@ -160,7 +163,7 @@ def _validate_route_item(item, where):
     if not isinstance(item, dict):
         raise RouteReportError("%s is not an object" % where)
     kind = item.get("kind")
-    common = {"kind", "net", "locked", "width_nm"}
+    common = {"uuid", "kind", "net", "locked", "width_nm"}
     fields = {
         "segment": common | {
             "layer", "start_nm", "end_nm", "length_nm",
@@ -176,6 +179,7 @@ def _validate_route_item(item, where):
     if fields is None:
         raise RouteReportError("%s has unsupported kind %r" % (where, kind))
     _require_exact_fields(item, fields, where)
+    _require_uuid(item["uuid"], where + " uuid")
     if not isinstance(item["net"], str):
         raise RouteReportError("%s net is not a string" % where)
     if not isinstance(item["locked"], bool):
@@ -314,6 +318,11 @@ def _require_string(value, where, *, nonempty=False):
         raise RouteReportError("%s is not a valid string" % where)
 
 
+def _require_uuid(value, where):
+    if not isinstance(value, str) or not UUID_PATTERN.fullmatch(value):
+        raise RouteReportError("%s is not a KiCad UUID" % where)
+
+
 def _require_float(value, where):
     if (isinstance(value, bool) or not isinstance(value, float)
             or not math.isfinite(value)):
@@ -450,23 +459,27 @@ def _validate_complete_geometry(value, where):
 
 
 def _validate_drawing(value, where):
-    required = {"uuid", "kind", "layers", "complete_geometry"}
-    optional = {
-        "GetPosition", "GetStart", "GetEnd", "GetWidth", "GetShape",
-        "GetText", "GetTextSize", "GetTextAngleDegrees", "IsLocked",
+    if not isinstance(value, dict):
+        raise RouteReportError("%s is not an object" % where)
+    common = {"uuid", "kind", "layers", "complete_geometry", "IsLocked"}
+    kind_fields = {
+        "PCB_SHAPE": {
+            "GetPosition", "GetStart", "GetEnd", "GetWidth", "GetShape",
+        },
+        "PCB_TEXT": {
+            "GetPosition", "GetText", "GetTextSize", "GetTextAngleDegrees",
+        },
     }
-    if not isinstance(value, dict) or not required <= set(value):
-        raise RouteReportError("%s lacks required fields" % where)
-    if set(value) - required - optional:
-        raise RouteReportError("%s has unsupported fields" % where)
-    _require_string(value["uuid"], where + " uuid", nonempty=True)
+    expected_fields = kind_fields.get(value.get("kind"))
+    if expected_fields is None:
+        raise RouteReportError("%s kind is unsupported" % where)
+    _require_exact_fields(value, common | expected_fields, where)
+    _require_uuid(value["uuid"], where + " uuid")
     _require_string(value["kind"], where + " kind", nonempty=True)
     expected_geometry = {
         "PCB_SHAPE": {"shape_geometry"},
         "PCB_TEXT": {"text_geometry"},
     }.get(value["kind"])
-    if expected_geometry is None:
-        raise RouteReportError("%s kind is unsupported" % where)
     _require_layers(value["layers"], where + " layers")
     _validate_complete_geometry(value["complete_geometry"], where + " geometry")
     if set(value["complete_geometry"]) != expected_geometry:
@@ -481,7 +494,7 @@ def _validate_drawing(value, where):
         _require_string(value["GetText"], where + " GetText")
     if "GetTextAngleDegrees" in value:
         _require_float(value["GetTextAngleDegrees"], where + " GetTextAngleDegrees")
-    if "IsLocked" in value and not isinstance(value["IsLocked"], bool):
+    if not isinstance(value["IsLocked"], bool):
         raise RouteReportError("%s IsLocked is not a boolean" % where)
     if "GetStart" in value and "GetEnd" in value and value["GetStart"] > value["GetEnd"]:
         raise RouteReportError("%s raw endpoints are not canonical" % where)
@@ -504,11 +517,12 @@ def _validate_pad(value, where):
     _require_exact_fields(
         value,
         {
-            "number", "net", "position_nm", "size_nm", "drill_nm", "shape",
-            "orientation_deg", "layers", "locked",
+            "uuid", "number", "net", "position_nm", "size_nm", "drill_nm",
+            "shape", "orientation_deg", "layers", "locked",
         },
         where,
     )
+    _require_uuid(value["uuid"], where + " uuid")
     _require_string(value["number"], where + " number")
     _require_string(value["net"], where + " net")
     for key in ("position_nm", "size_nm", "drill_nm"):
@@ -529,8 +543,8 @@ def _validate_footprint(value, where):
         },
         where,
     )
-    for key in ("uuid", "reference"):
-        _require_string(value[key], "%s %s" % (where, key), nonempty=True)
+    _require_uuid(value["uuid"], where + " uuid")
+    _require_string(value["reference"], where + " reference", nonempty=True)
     _require_string(value["fpid"], where + " fpid")
     _require_point(value["position_nm"], where + " position_nm")
     _require_float(value["orientation_deg"], where + " orientation_deg")
@@ -557,11 +571,12 @@ def _validate_zone(value, where):
     _require_exact_fields(
         value,
         {
-            "name", "net", "layers", "priority", "rule_area", "locked",
-            "min_thickness_nm", "corners_nm",
+            "uuid", "name", "net", "layers", "priority", "rule_area",
+            "locked", "min_thickness_nm", "corners_nm",
         },
         where,
     )
+    _require_uuid(value["uuid"], where + " uuid")
     _require_string(value["name"], where + " name")
     _require_string(value["net"], where + " net")
     _require_layers(value["layers"], where + " layers")
@@ -598,7 +613,14 @@ def _identity_semantics(snapshot):
         }
         add("footprint", own, footprint["uuid"])
         for pad in footprint["pads"]:
-            add("pad", {"parent_reference": footprint["reference"], "pad": pad})
+            add(
+                "pad",
+                {
+                    "parent_reference": footprint["reference"],
+                    "pad": {key: value for key, value in pad.items() if key != "uuid"},
+                },
+                pad["uuid"],
+            )
         for graphic in footprint["graphics"]:
             add(
                 "footprint-graphic",
@@ -613,9 +635,17 @@ def _identity_semantics(snapshot):
                 graphic["uuid"],
             )
     for route in snapshot["routing"]["items"]:
-        add("route", route)
+        add(
+            "route",
+            {key: value for key, value in route.items() if key != "uuid"},
+            route["uuid"],
+        )
     for zone in snapshot["nonrouting_items"]["zones"]:
-        add("zone", zone)
+        add(
+            "zone",
+            {key: value for key, value in zone.items() if key != "uuid"},
+            zone["uuid"],
+        )
     for drawing in snapshot["nonrouting_items"]["drawings"]:
         add(
             "drawing",
@@ -629,15 +659,12 @@ def _validate_identities(snapshot, where):
     identities = snapshot["identities"]
     if not isinstance(identities, dict):
         raise RouteReportError("%s identities is not an object" % where)
-    uuid_pattern = re.compile(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    )
     allowed = {
         "footprint", "pad", "footprint-graphic", "route", "zone", "drawing",
     }
     actual = []
     for uuid, entry in identities.items():
-        if not isinstance(uuid, str) or not uuid_pattern.fullmatch(uuid):
+        if not isinstance(uuid, str) or not UUID_PATTERN.fullmatch(uuid):
             raise RouteReportError("%s identity UUID %r is invalid" % (where, uuid))
         _require_exact_fields(entry, {"kind", "semantic"}, where + " identity " + uuid)
         if entry["kind"] not in allowed or not isinstance(entry["semantic"], dict):
@@ -2326,6 +2353,7 @@ def _route_geometry_items(snapshot: dict) -> list[dict]:
         # rounded differently by a harmless DSN/SES round trip.
         item.pop("locked", None)
         item.pop("length_nm", None)
+        item.pop("uuid", None)
         items.append(item)
     return items
 
@@ -2449,8 +2477,14 @@ def _layer_scope_report(delta: dict, allowed_layers: list[str]) -> dict:
 
 
 def _locked_route_report(seed: dict, candidate: dict) -> dict:
-    before = _counter(seed["routing"]["locked_items"])
-    after = _counter(candidate["routing"]["locked_items"])
+    def without_uuid(items):
+        return [
+            {key: value for key, value in item.items() if key != "uuid"}
+            for item in items
+        ]
+
+    before = _counter(without_uuid(seed["routing"]["locked_items"]))
+    after = _counter(without_uuid(candidate["routing"]["locked_items"]))
     missing = before - after
     added = after - before
     return {
@@ -3743,6 +3777,7 @@ def _item_uuid(item) -> str:
 
 def _route_item(item, board, pcbnew) -> dict:
     common = {
+        "uuid": _item_uuid(item),
         "net": str(item.GetNetname()),
         "locked": bool(item.IsLocked()),
     }
@@ -3800,6 +3835,7 @@ def _route_item(item, board, pcbnew) -> dict:
 
 def _pad_item(pad) -> dict:
     return {
+        "uuid": _item_uuid(pad),
         "number": str(pad.GetNumber()),
         "net": str(pad.GetNetname()),
         "position_nm": _nonrouting_point(pad.GetPosition()),
@@ -3873,7 +3909,13 @@ def _footprint_item(
                 identities,
                 pad,
                 "pad",
-                {"parent_reference": data["reference"], "pad": pad_data},
+                {
+                    "parent_reference": data["reference"],
+                    "pad": {
+                        key: value for key, value in pad_data.items()
+                        if key != "uuid"
+                    },
+                },
             )
         for graphic_data, graphic in graphic_pairs:
             _record_identity(
@@ -3902,6 +3944,7 @@ def _zone_item(zone) -> dict:
         for i in range(zone.GetNumCorners())
     )
     return {
+        "uuid": _item_uuid(zone),
         "name": str(zone.GetZoneName()),
         "net": str(zone.GetNetname()),
         "layers": _layers(zone),
@@ -3986,7 +4029,12 @@ def _semantic_snapshot(board, pcbnew, *, persisted_graphics=None) -> dict:
     )
     routes = [pair[0] for pair in route_pairs]
     for route_data, route_item in route_pairs:
-        _record_identity(identities, route_item, "route", route_data)
+        _record_identity(
+            identities,
+            route_item,
+            "route",
+            {key: value for key, value in route_data.items() if key != "uuid"},
+        )
     locked = [x for x in routes if x["locked"]]
     footprint_pairs = sorted(
         ((_footprint_item(
@@ -4005,7 +4053,12 @@ def _semantic_snapshot(board, pcbnew, *, persisted_graphics=None) -> dict:
     )
     zones = [pair[0] for pair in zone_pairs]
     for zone_data, zone_item in zone_pairs:
-        _record_identity(identities, zone_item, "zone", zone_data)
+        _record_identity(
+            identities,
+            zone_item,
+            "zone",
+            {key: value for key, value in zone_data.items() if key != "uuid"},
+        )
     drawing_pairs = sorted(
         ((_drawing_item(
             d,

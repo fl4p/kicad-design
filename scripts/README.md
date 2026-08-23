@@ -194,23 +194,24 @@ written, exact-version envelope with a per-invocation nonce; exact mode and sche
 input and emitted board/DSN artifact; and a fully revalidated semantic snapshot. Route-applicator
 summaries must bind the requested board and canonical route digest to the live output-board digest.
 Identity-map envelopes must bind that board digest and recompute the UUID-map digest, item count,
-and object-kind coverage. Independently recompute the selected-net route digest from a fresh v4
+and object-kind coverage. Independently recompute the selected-net route digest from a fresh v5
 output snapshot, and require every identity UUID/value to equal that snapshot's schema-validated
 object semantics. Reject stale files, extra fields, duplicate UUIDs, and bare JSON objects even when
 the worker exits zero.
 
-The v4 semantic snapshot includes direct board drawings plus every footprint graphic with
+The v5 semantic snapshot includes direct board drawings plus every footprint graphic with
 transformed, shape-dispatched geometry, layer, width/fill, lock state, footprint attributes and UUID
 identity. Segment, rectangle, arc, circle, polygon and Bézier dispatch records their complete
 geometry and binds saved stroke type plus hatch width/spacing by UUID; text records size, thickness,
 angle, justification, font/style, line spacing, keep-upright state and mirroring. Unknown or
 unreadable direct or footprint-hosted graphic mechanisms, or mismatches between the saved file and
-pcbnew's object inventory, fail closed. It validates every non-routing object schema and binds the
-complete UUID identity map back to those validated semantics. Keep the snapshot schema in
+pcbnew's object inventory, fail closed. It validates exact object-kind field sets, records the UUID
+on every pad/route/zone, and binds the complete UUID identity map back to those validated semantics.
+Keep the snapshot schema in
 the seed/candidate report, compatibility cell and route manifest: footprint-hosted `Edge.Cuts` must
-change the digest when opened, curved, moved, mirrored or replaced. Snapshot v4 also changes the
+change the digest when opened, curved, moved, mirrored or replaced. Snapshot v5 uses the
 structured DRC identity representation and requires the v2 baseline schema; regenerate and review
-tracked seed baselines rather than comparing v4 output to an older identity baseline.
+tracked seed baselines rather than comparing v5 output to a v1 identity baseline.
 
 Interpret exit zero as “the report completed.” Require the report's promotable verdict and all
 promotion checks; use `--fail-on-findings` when rejection must also fail the process.
@@ -277,7 +278,7 @@ bound below the project root.
 
 - `transform_pin()` remains unverified until calibrated against KiCad on the project and supported
   transform cells.
-- Autoroute promotion is currently disabled for every compatibility cell because snapshot v4 and
+- Autoroute promotion is currently disabled for every compatibility cell because snapshot v5 and
   the parity negative control have not completed the full DSN/SES/promotion requalification. Do not
   re-enable a cell until new dated, digest-bound evidence covers those mechanisms.
 - Snapshot adapters can prove semantic reproduction without byte identity. Do not claim the latter

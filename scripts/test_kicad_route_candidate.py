@@ -18,8 +18,16 @@ import kicad_route_manifest as manifest
 import kicad_graphics as graphics
 
 
-def segment(net="N", locked=False, start=(0, 0), end=(10, 0), width=200_000):
+def segment(
+    net="N",
+    locked=False,
+    start=(0, 0),
+    end=(10, 0),
+    width=200_000,
+    uuid="11111111-1111-4111-8111-111111111111",
+):
     return {
+        "uuid": uuid,
         "kind": "segment",
         "net": net,
         "locked": locked,
@@ -522,9 +530,14 @@ class RouteCandidateTests(unittest.TestCase):
                 "locked_sha256": route._json_digest([]),
             },
         }
-        uuid = "22222222-2222-4222-8222-222222222222"
+        uuid = item["uuid"]
         snapshot["identities"] = {
-            uuid: {"kind": "route", "semantic": item}
+            uuid: {
+                "kind": "route",
+                "semantic": {
+                    key: value for key, value in item.items() if key != "uuid"
+                },
+            }
         }
         self.assertIs(
             route._validate_semantic_snapshot(snapshot, "test"), snapshot
@@ -565,10 +578,121 @@ class RouteCandidateTests(unittest.TestCase):
             },
         }
         snapshot["identities"] = {
-            "not-a-uuid": {"kind": "route", "semantic": item}
+            "not-a-uuid": {
+                "kind": "route",
+                "semantic": {
+                    key: value for key, value in item.items() if key != "uuid"
+                },
+            }
         }
         with self.assertRaisesRegex(route.RouteReportError, "identity UUID"):
             route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_semantic_snapshot_rejects_route_uuid_semantic_swap(self):
+        snapshot = semantic_snapshot()
+        first = segment(
+            start=(0, 0), end=(10, 0),
+            uuid="11111111-1111-4111-8111-111111111111",
+        )
+        second = segment(
+            start=(0, 20), end=(10, 20),
+            uuid="22222222-2222-4222-8222-222222222222",
+        )
+        items = sorted(
+            [first, second],
+            key=lambda item: json.dumps(
+                item, sort_keys=True, separators=(",", ":")
+            ),
+        )
+        snapshot["routing"] = {
+            "items": items,
+            "locked_items": [],
+            "summary": {
+                "count": 2,
+                "by_kind": {"segment": 2},
+                "by_net": {"N": 2},
+                "total_track_length_mm": 0.00002,
+                "sha256": route._json_digest(items),
+                "locked_count": 0,
+                "locked_sha256": route._json_digest([]),
+            },
+        }
+        snapshot["identities"] = {
+            item["uuid"]: {
+                "kind": "route",
+                "semantic": {
+                    key: value for key, value in item.items() if key != "uuid"
+                },
+            }
+            for item in items
+        }
+        self.assertIs(
+            route._validate_semantic_snapshot(snapshot, "test"), snapshot
+        )
+        first_uuid, second_uuid = sorted(snapshot["identities"])
+        snapshot["identities"][first_uuid], snapshot["identities"][second_uuid] = (
+            snapshot["identities"][second_uuid],
+            snapshot["identities"][first_uuid],
+        )
+        with self.assertRaisesRegex(route.RouteReportError, "differs"):
+            route._validate_semantic_snapshot(snapshot, "test")
+
+    def test_drawing_schema_is_exact_per_kicad_kind(self):
+        drawing = {
+            "uuid": "33333333-3333-4333-8333-333333333333",
+            "kind": "PCB_SHAPE",
+            "layers": [44],
+            "GetPosition": [0, 0],
+            "GetStart": [0, 0],
+            "GetEnd": [1_000_000, 0],
+            "GetWidth": 100_000,
+            "GetShape": 0,
+            "IsLocked": False,
+            "complete_geometry": {
+                "shape_geometry": {
+                    "shape": 0,
+                    "shape_kind": "segment",
+                    "width_nm": 100_000,
+                    "stroke_type": "solid",
+                    "fill_mode": 0,
+                    "hatch_line_width_nm": 0,
+                    "hatch_line_spacing_nm": 0,
+                    "start_nm": [0, 0],
+                    "end_nm": [1_000_000, 0],
+                }
+            },
+        }
+        route._validate_drawing(drawing, "test drawing")
+        drawing["GetText"] = "impossible"
+        with self.assertRaisesRegex(route.RouteReportError, "unsupported fields"):
+            route._validate_drawing(drawing, "test drawing")
+        drawing.pop("GetText")
+        drawing.pop("IsLocked")
+        with self.assertRaisesRegex(route.RouteReportError, "unsupported fields"):
+            route._validate_drawing(drawing, "test drawing")
+
+    def test_identity_semantics_bind_pad_route_and_zone_uuids(self):
+        snapshot = semantic_snapshot()
+        pad_uuid = "44444444-4444-4444-8444-444444444444"
+        route_uuid = "55555555-5555-4555-8555-555555555555"
+        zone_uuid = "66666666-6666-4666-8666-666666666666"
+        snapshot["nonrouting_items"]["footprints"] = [{
+            "uuid": "77777777-7777-4777-8777-777777777777",
+            "reference": "R1",
+            "attributes": 0,
+            "pads": [{"uuid": pad_uuid, "number": "1"}],
+            "graphics": [],
+        }]
+        snapshot["routing"]["items"] = [
+            segment(uuid=route_uuid)
+        ]
+        snapshot["nonrouting_items"]["zones"] = [{
+            "uuid": zone_uuid, "name": "GND",
+        }]
+        _expected, known = route._identity_semantics(snapshot)
+        self.assertEqual(
+            {pad_uuid, route_uuid, zone_uuid} - set(known), set()
+        )
 
     def test_pcb_worker_requires_fresh_output(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -670,7 +794,12 @@ class RouteCandidateTests(unittest.TestCase):
         }
         uuid = "11111111-1111-4111-8111-111111111111"
         snapshot["identities"] = {
-            uuid: {"kind": "route", "semantic": item}
+            uuid: {
+                "kind": "route",
+                "semantic": {
+                    key: value for key, value in item.items() if key != "uuid"
+                },
+            }
         }
         identities = route.identity_map_from_snapshot(snapshot)
         value = {
@@ -910,6 +1039,9 @@ class RouteCandidateTests(unittest.TestCase):
 
             def GetLayer(self):
                 return 44
+
+            def GetPosition(self):
+                return Point()
 
             def GetStart(self):
                 return Point()
