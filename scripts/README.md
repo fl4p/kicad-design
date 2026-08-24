@@ -11,6 +11,7 @@ Run command examples from the skill repository root unless a section says otherw
 - [Choose the helper](#choose-the-helper)
 - [Apply the common contracts](#apply-the-common-contracts)
 - [Use verification helpers](#use-verification-helpers)
+- [Run an incremental footprint swap](#run-an-incremental-footprint-swap)
 - [Use the autorouting boundary](#use-the-autorouting-boundary)
 - [Onboard a project](#onboard-a-project)
 - [Respect the limitations](#respect-the-limitations)
@@ -23,6 +24,7 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_netlist.py` | parse KiCad netlists across supported pretty-print formats and reject empty or inconsistent exports |
 | `kicad_symlib.py` | resolve inherited symbols, common unit 0, body styles, and pin transforms |
 | `kicad_verify.py` | run ERC/DRC safely and resolve ignored checks from reports plus project configuration |
+| `kicad_footprint_swap.py` | orchestrate a deadline-bound, adapter-owned multi-target footprint migration and recoverable promotion |
 | `kicad_repro.py` | bind reproducibility evidence to outputs actually produced and detect replacement after verification |
 | `kicad_autoroute.py` | load strict autoroute configuration and shared route/report contracts |
 | `kicad_autoroute_tools.py` | verify or explicitly install the pinned Freerouting/JRE toolchain |
@@ -30,8 +32,9 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_route_manifest.py` | promote a reviewed candidate through explicit digest approval |
 | `kicad_autoroute_scaffold.py` | generate and verify project-owned autoroute configuration, adapters, applicators, and audits |
 
-Use `--help` on the argparse CLIs: `kicad_repro.py`, `kicad_autoroute_tools.py`,
-`kicad_route_candidate.py`, `kicad_route_manifest.py`, and `kicad_autoroute_scaffold.py`.
+Use `--help` on the argparse CLIs: `kicad_repro.py`, `kicad_footprint_swap.py`,
+`kicad_autoroute_tools.py`, `kicad_route_candidate.py`, `kicad_route_manifest.py`, and
+`kicad_autoroute_scaffold.py`.
 The remaining modules expose a small positional diagnostic or are import-only:
 
 ```sh
@@ -125,6 +128,39 @@ branch, cache key, or physical model is correct on another input.
 For release, inventory every produced file in a canonical receipt with path, type, size and SHA-256;
 bind authorization to the receipt digest and call `verify_unchanged_since()` immediately before
 transfer. An input-manifest digest stored beside an unhashed output does not prevent replacement.
+
+## Run an incremental footprint swap
+
+`kicad_footprint_swap.py` requires Python 3.9 or newer and owns the project-level deadline,
+typed adapter boundary, target set, concurrent-input rehash, journal, rollback/recovery, and
+aggregate report. Board physics and KiCad
+mutation stay in a project adapter:
+
+```sh
+python3 scripts/kicad_footprint_swap.py \
+  --spec project/footprint-swap.json \
+  --time-budget 180             # dry-run
+python3 scripts/kicad_footprint_swap.py \
+  --spec project/footprint-swap.json \
+  --time-budget 180 --apply
+```
+
+The adapter receives `--request` and `--result` paths and returns schema
+`kicad-footprint-swap-adapter-result-v1`. It must stage every target inside the transaction
+directory, bind original identities and staged SHA-256 values, and return the strict neutral evidence
+schema `kicad-footprint-swap-evidence-v1`. Each target's evidence binds its staged board digest to
+zero-error ERC, accepted classified DRC findings, semantic zone settlement,
+provisional-versus-DRC-saved equality, and named project audits. Audit commands are argv arrays; a reusable fast-mode receipt may attest an
+immutable calibration fixture/mechanism, but every candidate still receives a fresh complete scan.
+
+Promotion is multi-file crash-*recoverable*, not filesystem-atomic. The durable journal records
+intent and completion for each same-filesystem replace; startup either clears a committed journal or
+rolls an incomplete transaction back only from recognized original/staged digests. The aggregate
+report is itself a journaled promotion. The tool snapshots every declared authority input before
+running the adapter, rechecks it before promotion, normalizes and separates reserved paths, and
+refuses active board, schematic, project, or transaction locks. Missing
+adapter authority, stale calibration evidence, timeout, unrelated semantic changes, and unsupported
+local conflicts are non-promoting results.
 
 ## Use the autorouting boundary
 
