@@ -84,6 +84,77 @@ class VerifyDrcTests(unittest.TestCase):
 
     @mock.patch.object(verify, "_verify_parity_context")
     @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
+    def test_explicit_no_refill_json_save_and_timeout_are_propagated(
+            self, _find, _context):
+        with tempfile.TemporaryDirectory() as raw:
+            board = self._board(raw)
+            report = Path(raw) / "drc.json"
+
+            def produce(cmd, report_path, timeout=None):
+                self.assertNotIn("--refill-zones", cmd)
+                self.assertIn("--save-board", cmd)
+                self.assertEqual(timeout, 7.5)
+                Path(report_path).write_text(json.dumps({
+                    "violations": [],
+                    "unconnected_items": [],
+                    "schematic_parity": [],
+                }), encoding="utf-8")
+                return 0, "", ""
+
+            with mock.patch.object(verify, "_run_producing", side_effect=produce):
+                rc, counts = verify.run_drc(
+                    board,
+                    report=report,
+                    refill=False,
+                    save_board=True,
+                    output_format="json",
+                    timeout=7.5,
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(counts, {
+                "drc violations": 0,
+                "unconnected pads": 0,
+                "footprint errors": 0,
+            })
+            _context.assert_called_once_with(board, "kicad-cli", timeout=7.5)
+
+    def test_json_findings_and_ignored_checks_are_normalized(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "drc.json"
+            report.write_text(json.dumps({
+                "violations": [{
+                    "type": "silk_overlap", "severity": "warning",
+                    "description": "Silkscreen overlap", "items": [{"uuid": "abc"}],
+                }],
+                "unconnected_items": [],
+                "schematic_parity": [{
+                    "severity": "error", "description": "Field mismatch",
+                    "items": [{"uuid": "def"}],
+                }],
+                "ignored_checks": [{"key": "footprint_filter", "description": "Footprint filters"}],
+            }), encoding="utf-8")
+            findings = verify.normalized_findings_from_json_report(report, "drc")
+            self.assertEqual([item["category"] for item in findings], [
+                "violations", "schematic_parity",
+            ])
+            self.assertEqual(findings[0]["type"], "silk_overlap")
+            self.assertRegex(findings[0]["payload_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(verify.ignored_checks_from_report(report), [
+                "Footprint filters",
+            ])
+
+    def test_json_findings_reject_nonobject_entries(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "drc.json"
+            report.write_text(json.dumps({
+                "violations": ["bad"], "unconnected_items": [],
+                "schematic_parity": [], "ignored_checks": [],
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(verify.VerifyError, "not an object"):
+                verify.normalized_findings_from_json_report(report, "drc")
+
+    @mock.patch.object(verify, "_verify_parity_context")
+    @mock.patch.object(verify, "find_kicad_cli", return_value="kicad-cli")
     def test_release_board_snapshot_rejects_changed_semantics_despite_clean_drc(
             self, _find, _context):
         with tempfile.TemporaryDirectory() as raw:
@@ -328,6 +399,13 @@ class VerifyReportTests(unittest.TestCase):
             with mock.patch.object(verify, "_run", return_value=(0, "", "")):
                 with self.assertRaisesRegex(verify.VerifyError, "mtime unchanged"):
                     verify._run_producing(["kicad-cli", "pcb"], report)
+
+    def test_subprocess_timeout_fails_closed(self):
+        with mock.patch.object(
+                verify.subprocess, "run",
+                side_effect=verify.subprocess.TimeoutExpired(["kicad-cli"], 0.1)):
+            with self.assertRaisesRegex(verify.VerifyError, "deadline"):
+                verify._run(["kicad-cli", "pcb"], timeout=0.1)
 
     def test_run_producing_accepts_current_rewrite(self):
         with tempfile.TemporaryDirectory() as raw:

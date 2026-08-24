@@ -42,6 +42,7 @@ was supposed to catch them fires never.
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
 import re
@@ -59,6 +60,10 @@ __all__ = [
     "find_kicad_cli",
     "run_erc",
     "run_drc",
+    "counts_from_report",
+    "counts_from_json_report",
+    "ignored_checks_from_report",
+    "normalized_findings_from_json_report",
     "severity_report",
     "KNOWN_STOCK_IGNORES",
 ]
@@ -230,6 +235,85 @@ def _counts_from_report(path, kind=None):
     return found
 
 
+def _json_report(path):
+    p = Path(path)
+    if not p.exists():
+        raise VerifyError("report %s was not written" % p)
+    try:
+        root = json.loads(_read_utf8(p, VerifyError))
+    except json.JSONDecodeError as exc:
+        raise VerifyError("%s is not valid JSON: %s" % (p, exc)) from exc
+    if not isinstance(root, dict):
+        raise VerifyError("%s JSON report root is not an object" % p)
+    return p, root
+
+
+def normalized_findings_from_json_report(path, kind):
+    """Return stable, category-preserving KiCad JSON findings.
+
+    The raw item payload is represented by a canonical SHA-256 so callers can
+    compare baseline and candidate reports without depending on dict ordering.
+    Ignored checks remain a separate report-level category rather than being
+    mistaken for zero findings.
+    """
+    p, root = _json_report(path)
+    fields = (["violations", "unconnected_items", "schematic_parity"]
+              if kind == "drc" else ["violations"] if kind == "erc" else None)
+    if fields is None:
+        raise VerifyError("unknown JSON report kind %r" % kind)
+    findings = []
+    for category in fields:
+        values = root.get(category)
+        if not isinstance(values, list):
+            raise VerifyError("%s JSON report field %r is missing or not an array" %
+                              (p, category))
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                raise VerifyError("%s JSON report %s[%d] is not an object" %
+                                  (p, category, index))
+            payload = json.dumps(value, sort_keys=True,
+                                 separators=(",", ":")).encode("utf-8")
+            findings.append({
+                "category": category,
+                "index": index,
+                "type": value.get("type"),
+                "severity": value.get("severity"),
+                "description": value.get("description"),
+                "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            })
+    return findings
+
+
+def counts_from_report(path, kind):
+    return _counts_from_report(path, kind)
+
+
+def _counts_from_json_report(path, kind):
+    p, root = _json_report(path)
+    if kind == "drc":
+        fields = {
+            "drc violations": "violations",
+            "unconnected pads": "unconnected_items",
+            "footprint errors": "schematic_parity",
+        }
+    elif kind == "erc":
+        fields = {"erc messages": "violations"}
+    else:
+        raise VerifyError("unknown JSON report kind %r" % kind)
+    counts = {}
+    for label, field in fields.items():
+        value = root.get(field)
+        if not isinstance(value, list):
+            raise VerifyError("%s JSON report field %r is missing or not an array" %
+                              (p, field))
+        counts[label] = len(value)
+    return counts
+
+
+def counts_from_json_report(path, kind):
+    return _counts_from_json_report(path, kind)
+
+
 #: ERC writes "** Ignored checks:" and DRC writes "** Ignored checks **".
 #: Accept both; requiring the colon silently made every DRC report read as
 #: "no such section", i.e. UNKNOWN, which is the right failure but the wrong
@@ -252,7 +336,21 @@ def ignored_checks_from_report(path):
     p = Path(path)
     if not p.exists():
         raise VerifyError("report %s was not written" % p)
-    lines = _read_utf8(p, VerifyError).splitlines()
+    text = _read_utf8(p, VerifyError)
+    if text.lstrip().startswith("{"):
+        _parsed_path, root = _json_report(p)
+        ignored = root.get("ignored_checks")
+        if not isinstance(ignored, list):
+            raise VerifyError(
+                "%s JSON report field 'ignored_checks' is missing or not an array" % p)
+        out = []
+        for index, value in enumerate(ignored):
+            if not isinstance(value, dict) or not isinstance(value.get("description"), str):
+                raise VerifyError(
+                    "%s JSON ignored_checks[%d] lacks a description" % (p, index))
+            out.append(value["description"])
+        return out
+    lines = text.splitlines()
     idx = next((i for i, ln in enumerate(lines)
                 if _IGNORED_HDR.search(ln.rstrip())), None)
     if idx is None:
@@ -274,13 +372,24 @@ def ignored_checks_from_report(path):
     return out
 
 
-def _run(cmd):
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+def _run(cmd, timeout=None):
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise VerifyError(
+            "%s exceeded its verification deadline" %
+            (cmd[1] if len(cmd) > 1 else cmd[0])) from exc
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def _run_producing(cmd, report):
+def _run_producing(cmd, report, timeout=None):
     """Run `cmd`, requiring it to (re)write `report` during this call.
 
     Otherwise a stale zero-count report left by an earlier run is parsed and
@@ -288,7 +397,8 @@ def _run_producing(cmd, report):
     """
     rp = Path(report)
     before = rp.stat().st_mtime_ns if rp.exists() else None
-    rc, out, err = _run(cmd)
+    rc, out, err = (_run(cmd) if timeout is None else
+                    _run(cmd, timeout=timeout))
     if not rp.exists():
         raise VerifyError(
             "%s did not write %s -- nothing to parse, so this run is "
@@ -300,7 +410,8 @@ def _run_producing(cmd, report):
     return rc, out, err
 
 
-def run_erc(schematic, report="erc.rpt", cli=None):
+def run_erc(schematic, report="erc.rpt", cli=None, timeout=None,
+            output_format="text"):
     """ERC with --severity-all --exit-code-violations.
 
     Returns (rc, counts). Raises if the report is missing or unparseable.
@@ -310,16 +421,22 @@ def run_erc(schematic, report="erc.rpt", cli=None):
     cli = find_kicad_cli(cli)
     if not Path(schematic).exists():
         raise VerifyError("schematic %s does not exist" % schematic)
-    rc, _out, err = _run_producing(
-        [cli, "sch", "erc", "--severity-all", "--exit-code-violations",
-         "-o", str(report), str(schematic)], report)
-    counts = _counts_from_report(report, kind="erc")
+    if output_format not in {"text", "json"}:
+        raise VerifyError("unsupported ERC output format %r" % output_format)
+    cmd = [cli, "sch", "erc", "--severity-all", "--exit-code-violations"]
+    if output_format == "json":
+        cmd.extend(["--format", "json"])
+    cmd.extend(["-o", str(report), str(schematic)])
+    rc, _out, err = (_run_producing(cmd, report) if timeout is None else
+                     _run_producing(cmd, report, timeout=timeout))
+    counts = (_counts_from_report(report, kind="erc") if output_format == "text"
+              else _counts_from_json_report(report, kind="erc"))
     if rc not in (0, 5):
         raise VerifyError("kicad-cli sch erc failed (rc=%d): %s" % (rc, err[:400]))
     return rc, counts
 
 
-def _verify_parity_context(board, cli):
+def _verify_parity_context(board, cli, timeout=None):
     """Require and independently parse the schematic context used by parity.
 
     KiCad can return a clean DRC report and exit zero after failing to load the
@@ -339,10 +456,12 @@ def _verify_parity_context(board, cli):
 
     with tempfile.TemporaryDirectory(prefix="kicad-parity-") as raw:
         exported = Path(raw) / "parity.net"
-        rc, out, err = _run([
+        cmd = [
             cli, "sch", "export", "netlist", "--format", "kicadsexpr",
             "-o", str(exported), str(schematic),
-        ])
+        ]
+        rc, out, err = (_run(cmd) if timeout is None else
+                        _run(cmd, timeout=timeout))
         if rc != 0:
             raise VerifyError(
                 "could not export the fresh schematic netlist required for "
@@ -366,8 +485,9 @@ def _verify_parity_context(board, cli):
 
 
 def run_drc(board, report="drc.rpt", parity=True, cli=None,
-            expected_board_snapshot=None, board_snapshotter=None):
-    """DRC with zone refill, violation status, and fail-closed parity.
+            expected_board_snapshot=None, board_snapshotter=None,
+            refill=True, save_board=False, output_format="text", timeout=None):
+    """DRC with explicit refill/save controls and fail-closed parity.
 
     `parity` defaults True: footprint/symbol field mismatches are invisible
     without it, and they are how a schematic-only edit silently leaves the
@@ -392,17 +512,25 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
             "together; otherwise refill equality is UNVERIFIED")
     if board_snapshotter is not None and not callable(board_snapshotter):
         raise VerifyError("board_snapshotter must be callable")
+    if output_format not in {"text", "json"}:
+        raise VerifyError("unsupported DRC output format %r" % output_format)
+    if board_snapshotter is not None:
+        save_board = True
     cli = find_kicad_cli(cli)
     if parity:
-        _verify_parity_context(board, cli)
-    cmd = [cli, "pcb", "drc", "--severity-all", "--refill-zones",
-           "--exit-code-violations", "-o", str(report)]
-    if board_snapshotter is not None:
+        _verify_parity_context(board, cli, timeout=timeout)
+    cmd = [cli, "pcb", "drc", "--severity-all", "--exit-code-violations"]
+    if output_format == "json":
+        cmd.extend(["--format", "json"])
+    if refill:
+        cmd.append("--refill-zones")
+    if save_board:
         cmd.append("--save-board")
     if parity:
         cmd.append("--schematic-parity")
-    cmd.append(str(board))
-    rc, out, err = _run_producing(cmd, report)
+    cmd.extend(["-o", str(report), str(board)])
+    rc, out, err = (_run_producing(cmd, report) if timeout is None else
+                    _run_producing(cmd, report, timeout=timeout))
     diagnostics = ((out or "") + "\n" + (err or "") + "\n" +
                    _read_utf8(report, VerifyError))
     if parity and _PARITY_FAILURE.search(diagnostics):
@@ -422,7 +550,8 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
                 "differ from the provisional finalizer snapshot; reports and "
                 "exports are invalid until the scratch candidate is finalized "
                 "again")
-    counts = _counts_from_report(report, kind="drc")
+    counts = (_counts_from_report(report, kind="drc") if output_format == "text"
+              else _counts_from_json_report(report, kind="drc"))
     if parity and "footprint errors" not in counts:
         raise VerifyError(
             "%s is missing the required 'footprint errors' report-format "
