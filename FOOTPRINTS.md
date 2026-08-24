@@ -137,17 +137,18 @@ Parts grow for real reasons, such as voltage rating or fault power. Answer "does
 the footprint on a scratch copy and running DRC, not by measuring only the neighbours or directions
 that first look tight.
 
+For an accepted routed board, prefer the incremental transaction described in [`PCB.md`](PCB.md):
+
 ```sh
-K="${KICAD_CLI:-kicad-cli}"             # set KICAD_CLI when it is not on PATH
-cp board.kicad_pcb /tmp/t.kicad_pcb    # then swap the footprint via pcbnew,
-                                       # keeping position, rotation and pad nets
-"$K" pcb drc --format json --severity-all --exit-code-violations \
-    -o /tmp/drc.json /tmp/t.kicad_pcb
+python3 scripts/kicad_footprint_swap.py --spec project/footprint-swap.json
 ```
 
-Re-run independent geometry and thermal audits on the copy too. A larger package can improve
-terminal spacing while worsening courtyard, placement, or loop geometry. Remove any package
-exception that the new measured geometry no longer needs.
+Dry-run first. Map connected pads by pad-number **sets** because repeated pad numbers are valid;
+reject missing, extra, or ambiguous connected sets. Preserve accepted copper unless a refilled DRC
+finding requires an exact project-owned local delta. Re-run independent geometry, process, and
+thermal audits on the exact DRC-saved candidate. A larger package can improve terminal spacing while
+worsening courtyard, placement, via-in-pad, or loop geometry. Remove any package exception that the
+new measured geometry no longer needs.
 
 ## Enumerate placement candidates
 

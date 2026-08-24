@@ -26,6 +26,7 @@ pays only for what it needs:
 
 - [Gate detailed placement and routing on floorplan review](#gate-detailed-placement-and-routing-on-floorplan-review)
 - [Prove placement is route-ready and define completion](#prove-placement-is-route-ready-and-define-completion)
+- [Use the incremental footprint-swap path](#use-the-incremental-footprint-swap-path)
 - [Scope external autorouting](#scoped-external-autorouting-opt-in-when-native-routing-stalls)
 - [Record and share layout experience](#record-and-share-layout-experience)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
@@ -143,6 +144,27 @@ manifest-generated final, never the raw candidate or imported SES board. Require
 bound to the final artefact, review effective severities, exclusions and applicable board-only
 waivers, prove zero electrical unconnected items, and rerun project connectivity/geometry guards.
 Do not accept another agent's, autorouter's or wrapper's summary as the completion verdict.
+
+## Use the incremental footprint-swap path
+
+A package substitution on an accepted routed board does not authorize regeneration or whole-board
+routing. For a named, already-qualified land-pattern change:
+
+1. preserve the accepted board as the transaction base;
+2. replace only the named footprints and map connected pads by pad-number sets;
+3. refill before grading, because the old cached fill is not evidence about the new lands;
+4. apply only explicit project-owned placement or same-layer local route deltas when DRC proves they
+   are needed—no router fallback, new via, or layer transition;
+5. require the project's in-memory semantic-settle fill gate, then compare the provisional snapshot
+   with the DRC-saved board; and
+6. promote all variants and generator-owned overlays through one deadline-bound recoverable
+   transaction only after parity, DRC, and project audits pass.
+
+Use `scripts/kicad_footprint_swap.py --spec ...`; dry-run is the default. Generated boards require a
+typed project adapter that records the migration in source authority. A missing adapter, stale audit
+mechanism receipt, non-settling fill, unrelated semantic change, or local conflict without a declared
+delta is a quick refusal, not permission to broaden routing scope. See
+[`scripts/README.md`](scripts/README.md) for the transaction contract.
 
 ## Scoped external autorouting: opt in when native routing stalls
 
