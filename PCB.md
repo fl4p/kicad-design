@@ -27,6 +27,7 @@ pays only for what it needs:
 - [Gate detailed placement and routing on floorplan review](#gate-detailed-placement-and-routing-on-floorplan-review)
 - [Prove placement is route-ready and define completion](#prove-placement-is-route-ready-and-define-completion)
 - [Scope external autorouting](#scoped-external-autorouting-opt-in-when-native-routing-stalls)
+- [Record and share layout experience](#record-and-share-layout-experience)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
 - [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
 - [Declare the stackup](#the-stackup-is-part-of-the-design-not-a-fab-preference)
@@ -206,6 +207,42 @@ router pinning and configuration, fanout hazards, constraint serialization, proj
 diffing, backend choice, scaffold onboarding, and the candidate-and-promotion pipeline through
 the route manifest. Read it before invoking any `scripts/kicad_autoroute*` helper or promoting
 external routes.
+
+## Record and share layout experience
+
+For every non-trivial PCB layout phase, start or continue a project-local layout retrospective
+before detailed placement and routing. Use the project's existing engineering journal when it has
+one; otherwise create `PCB-LAYOUT-RETROSPECTIVE.md` beside the design documentation. Update it while
+working, not from memory at handoff, and keep board-specific facts separate from lessons that could
+change how another project is laid out.
+
+Record:
+
+- the board revision, layout objective, constraints, and final outcome;
+- the routing strategy and why it was chosen, including routing ownership, critical-first ordering,
+  layer and via policy, reserved corridors, zone ordering, and any external-router role;
+- start and stop timestamps plus measured elapsed wall-clock time for each material phase, such as
+  floorplanning, placement, critical routing, routine routing, zones and cleanup, verification, and
+  rework. Separate active work from known tool or approval waits when practical; do not replace
+  measurements with retrospective estimates;
+- failed or abandoned approaches, their observable symptoms, and what changed the outcome; and
+- genuinely reusable findings with the evidence that supports them. Do not generalize a result that
+  depends on an unrecorded board, toolchain, stackup, or constraint.
+
+At the end of the design phase, summarize the reusable findings in the retrospective. Before
+asserting a cross-project finding, check `~/dev/kb/INDEX.md` and read applicable notes. Apply the
+full `~/dev/kb/AGENTS.md` contract: create or update the canonical note when the finding
+generalizes, or use a pointer when canonical material belongs elsewhere. Do not duplicate canonical
+material merely to satisfy this step.
+
+When a finding can improve the KiCad design workflow, search
+<https://github.com/fl4p/kicad-design/issues> for an existing report, then prepare an issue or an
+update/comment containing the routing strategy, measured phase-time breakdown, failed approaches,
+outcome, verification scope, and reusable recommendation. Update the existing issue when it covers
+the same experience instead of opening a duplicate. Publishing to GitHub is an external side
+effect: obtain explicit authorization unless the user has already authorized it for the task, then
+publish the issue or update/comment and record its URL in the retrospective. If the phase produced
+no genuinely reusable finding, record that conclusion and do not create a noise issue.
 
 ## Place board annotations from board geometry
 
