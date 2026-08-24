@@ -8,6 +8,7 @@ in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 ## Contents
 
 - [Verify the land pattern, not the name](#verify-the-land-pattern-not-the-name)
+- [Qualify external spacing and lead fit](#qualify-external-spacing-and-lead-fit)
 - [Classify via-in-pad by process](#classify-via-in-pad-by-process)
 - [Treat copper, mask, and paste independently](#treat-copper-mask-and-paste-independently)
 - [Test package substitutions on a copy](#test-package-substitutions-on-a-copy)
@@ -27,6 +28,21 @@ instead of accepting a plausible library name.
 When creating a custom footprint, calibrate the generator against a known land pattern before
 using it for the new one. Require the emitted pad inventory and unioned geometry to match the
 datasheet, including repeated pad numbers and notched or merged same-net lands.
+
+## Qualify external spacing and lead fit
+
+Device-internal dielectric or isolation ratings do not qualify external package-pin, termination,
+pad, clearance or creepage geometry on the assembled PCB; derive those requirements separately.
+For PTH leads, compare the maximum lead envelope, including non-round geometry, with the minimum
+finished-hole opening after the applicable fabrication tolerance and required assembly allowance.
+Account for drill and plating variation only when the source dimension is pre-plate; do not
+subtract plating again from a specified finished-hole limit. Require insertion testing when
+drawings, tolerances, lead finish or the assembly process do not establish fit.
+
+Mark unresolved mechanical or interface footprints with machine-readable draft status and
+enumerate them in release evidence. Any such draft prevents revision `FINAL` and functional design
+release; a deliberately scoped experimental order remains subject to [`RELEASE.md`](RELEASE.md)'s
+waiver contract.
 
 ## Classify via-in-pad by process
 

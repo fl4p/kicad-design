@@ -126,6 +126,10 @@ are the physical locations.
 Do not claim that mirrored coordinates prove equal temperature. Airflow, board edges, slots,
 connector metal, chassis contacts, unequal copper connectivity and nearby sources can break the
 thermal mirror. Treat geometric symmetry as an input to the thermal argument, not its conclusion.
+Record mirrored pad position, component rotation and orientation, board side, package construction,
+copper and heat path, and airflow as separate matching conditions; equality in one does not
+establish another. In particular, equal-length paths on opposite board surfaces do not establish
+equal temperature or thermoelectric behavior.
 
 ## Design the whole heat path
 

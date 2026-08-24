@@ -28,6 +28,20 @@ electrical types, pin numbers, polarity and unit structure match the datasheet a
 footprint. Record the symbol source and the package-pin mapping. A temporary placeholder is allowed
 only in an explicitly named draft; it blocks capture completion and PCB implementation.
 
+## Capture controlled states and timing
+
+For muxes, relays, interlocks and actuators whose state combinations or transitions have material
+consequence, define the project-derived safe or least-harmful state, forbidden combinations and
+assertion/release ordering before capture. Cover startup, power loss, disconnected controls,
+invalid or simultaneous requests and interrupted transitions. When an invalid combination has
+material consequence, enforce exclusion in hardware; firmware sequencing may supplement but must
+not be the sole interlock.
+
+When timing or sequencing is load-bearing, keep an executable worst-case timing ledger using every
+applicable tolerance, temperature, leakage, threshold, rail-slew, propagation, drive and load
+limit. Identify dynamic behavior the schematic and CAD checks cannot establish, and carry each
+unknown forward as an explicit qualification gate rather than treating the ledger as proof.
+
 ## Capture-completion gate
 
 Do not report schematic capture complete until all of the following are true:

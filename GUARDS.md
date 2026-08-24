@@ -66,6 +66,11 @@ For each load-bearing check, record at least:
   paths, fitted/DNP and BOM flags, custom fields, or one-pad `unconnected-(...)` pseudo-nets. If a
   temporary router input deliberately filters one of these, compare the before/after inventory
   against an explicit allowlist and prove the authoritative saved board remained unchanged.
+- For intentionally sparse critical nets, derive the actual attachment inventory from the reparsed
+  artefact and compare it with a requirement-owned allowlist expressed by structural identities
+  such as refdes/pad relationships. Make every relied-upon absence—such as no vias, zones, test
+  points, branches or extra pins—an explicit artefact assertion over the relevant object classes.
+  A violation fails the dependent claim; an unreadable or incomplete subject makes it `UNVERIFIED`.
 - Make preconditions executable. An empty parse, zero candidates, a missing zone pair or an
   ambiguous mask is `UNVERIFIED`, never `PASS`. Report the number of subjects examined beside the
   verdict.

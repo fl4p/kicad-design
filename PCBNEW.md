@@ -22,8 +22,12 @@ venv:
 /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
 ```
 
-It prints a harmless `create wxApp before calling this` assert; ignore it. API traps met in
-practice, with the name that actually works — **re-probed on KiCad 10.0.5 on 2026-08-09**:
+Allow only the exact `assert "traits" failed in Get(): create wxApp before calling this` diagnostic
+for a recorded, qualified KiCad/bundled-Python/OS/architecture/invocation cell. Accept that run only
+when its exit status succeeds and every required artefact is freshly produced, parseable and passes
+its postconditions. Do not generalize this allowance to another assertion or toolchain cell. API
+traps met in practice, with the name that actually works — **re-probed on KiCad 10.0.5 on
+2026-08-09**:
 
 | you reach for | it does not exist | use |
 |---|---|---|
@@ -286,6 +290,11 @@ way", and was very nearly reported as "the larger part fits". Assert the box is
 non-degenerate before using it, and make a scan that examined **zero** candidates say so
 rather than falling through to silence. Cheap general fix: print the number of items
 considered next to the verdict, so a scan of nothing cannot masquerade as a scan that passed.
+
+For an owned deterministic router, bind route and task order, candidate ordering, cost weights,
+objective and tie-break rules as tracked generator inputs whenever they affect the emitted board.
+Report the actual objective achieved; fewer vias or segments is not proof of optimality without an
+exhaustive result or solver certificate.
 
 ## A slow generator: profile by OUTCOME, and measure reuse before you cache
 
