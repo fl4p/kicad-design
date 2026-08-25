@@ -1,13 +1,15 @@
 # Datasheet and sourcing preflight
 
-Read this reference before any task that depends on component selection; circuitry, placement, or
-layout around a critical component as defined in `SKILL.md`; a datasheet, reference design or
-evaluation board; current lifecycle status; or stock, inventory, or distributor data. Skip it only
-for purely graphical edits or file-format diagnoses that do not depend on device evidence.
+Read this reference before any task that will read a datasheet, schematic capture included; depends
+on component selection; designs or reviews circuitry, placement, or layout around a critical
+component as defined in `SKILL.md`; or needs reference-design, evaluation-board, lifecycle, stock,
+inventory, or distributor evidence. Skip it only for purely graphical edits or file-format diagnoses
+that do not depend on device evidence.
 
 ## Contents
 
 - [Run the preflight](#run-the-preflight)
+- [Select for lifecycle and reuse](#select-for-lifecycle-and-reuse)
 - [Check owned inventory](#check-owned-inventory)
 - [Use a source ladder](#use-a-source-ladder)
 - [Handle inventory and distributor APIs safely](#handle-inventory-and-distributor-apis-safely)
@@ -22,14 +24,17 @@ for purely graphical edits or file-format diagnoses that do not depend on device
 Establish what can be read before selecting or substituting a part or finalizing circuitry,
 placement, or layout around a critical component:
 
-1. Identify any user-declared inventory source and whether an already-authorized read-only
+1. When external search or fetching is required, load the sibling
+   [`online-research`](https://github.com/fl4p/online-research-skill) skill and read its `SKILL.md`
+   §0–1 plus `references/access.md` §1. Complete its mandatory browser gate before the first request;
+   routine single-source datasheet lookup uses that skill's lightweight tier.
+2. Identify any user-declared inventory source and whether an already-authorized read-only
    interface is available when procurement is in scope.
-2. Search the project's datasheet cache and other declared local sources.
-3. Identify the exact vendor product page and document URLs for the datasheet and relevant
+3. Search the project's datasheet cache and other declared local sources.
+4. Identify the exact vendor product page and document URLs for the datasheet and relevant
    reference-design or evaluation-board collateral; do not guess numeric asset IDs.
-4. Check whether required inventory or distributor credentials are present without printing their
+5. Check whether required inventory or distributor credentials are present without printing their
    values when procurement is in scope.
-5. Confirm that a real browser can launch when a vendor may require one.
 6. Confirm that PDF inspection tools are available.
 
 Example checks:
@@ -40,9 +45,6 @@ rg -i --files datasheets 2>/dev/null | rg -i '<part-family>'
 # Print matching variable NAMES only. Keep the match anchored so values cannot leak.
 env | sed -nE 's/^([A-Za-z0-9_]*(INVENTREE|DIGIKEY|MOUSER|ELEMENT14|FARNELL)[A-Za-z0-9_]*)=.*/\1=<set>/Ip'
 
-python3 -c "from playwright.sync_api import sync_playwright
-p=sync_playwright().start(); b=p.chromium.launch(channel='chrome'); print('chrome channel ok'); b.close(); p.stop()"
-
 missing=
 for tool in pdfinfo pdftotext pdftoppm; do
   command -v "$tool" >/dev/null 2>&1 || { echo "MISSING $tool"; missing=1; }
@@ -50,13 +52,41 @@ done
 [ -z "$missing" ]
 ```
 
-Do not reduce the browser check to importing its Python module; installed bindings do not prove
-that a browser binary or the requested channel can launch. Do not check several commands with one
-`command -v` invocation; shell behavior differs and can report success when only one resolves.
+Do not check several commands with one `command -v` invocation; shell behavior differs and can
+report success when only one resolves. The `online-research` browser gate owns browser-surface
+validation; do not replace it with an import or launch-only probe here.
 
 Treat reachability as a property of the exact URL, current IP, date, and client. A successful home
 page request does not prove that the document host works, and a failed home page does not prove the
 asset host is blocked.
+
+## Select for lifecycle and reuse
+
+Apply lifecycle as an eligibility gate before comparing stock or price:
+
+1. For a new selection or substitution, require current manufacturer evidence that the exact
+   ordering code is active or preferred for new designs. Disqualify obsolete, discontinued, and
+   end-of-life parts even when they are cheap, stocked by a distributor, or already owned.
+2. Treat NRND and last-time-buy parts as lifecycle risks rather than normal candidates. If no
+   qualifying active candidate exists, present the gap and ask the user instead of selecting one
+   implicitly.
+3. Establish a reuse envelope only from declared or plausible adjacent projects; do not buy unused
+   specifications for hypothetical universality. Compare useful supply and signal range,
+   temperature and qualification, package and assembly compatibility, standard interfaces,
+   footprint reuse, availability, and support-circuit reuse.
+4. Compare the reuse benefit against this project's unit price at the required quantity, area,
+   power, complexity, and load-bearing performance. Report absolute and percentage unit and
+   extended-cost deltas. Quantify electrical, thermal, mechanical, assembly, qualification, and
+   other engineering differences in their native units when meaningful and describe categorical
+   differences directly.
+5. Apply preferences in this order: mandatory project requirements and active lifecycle are gates;
+   preserve the project's performance and cost bounds; prefer useful cross-project reuse; prefer a
+   sufficiently available owned candidate; then minimize acquisition cost among otherwise
+   comparable choices. If a reuse penalty is not clearly small and no project threshold defines it,
+   report the tradeoff and ask before choosing.
+
+A stocked obsolete part may still be reported for an explicitly scoped maintenance reproduction of
+an existing assembly, but do not recommend it for a new design, redesign, or reusable platform.
 
 ## Check owned inventory
 
@@ -108,11 +138,12 @@ these evidence types rather than treating them as interchangeable fallback rungs
   product status or an explicit lifecycle, PDN, or EOL notice. Use other PCNs only for the claims
   they actually state. The vendor datasheet establishes technical suitability.
 
-Prefer an owned part only when the inventory record establishes its exact manufacturer, MPN, and
-package and the candidate satisfies every mandatory constraint with suitable condition and
-sufficient available-to-project quantity. Record the lookup outcome and selection rationale when
-the decision is made; inventory preference never compensates for missing engineering or lifecycle
-evidence.
+Apply the owned-part preference only after project fitness, active lifecycle, performance and cost
+bounds, and useful reuse have been evaluated. The inventory record must establish the exact
+manufacturer, MPN, and package, and the candidate must have suitable condition and sufficient
+available-to-project quantity. Record the lookup outcome and selection rationale when the decision
+is made; inventory preference never compensates for missing engineering, lifecycle, performance,
+cost, or reuse evidence.
 
 After checking exact replacements, sweep owned inventory by required function and classify each
 relevant result as an exact replacement, a requirement-preserving value or package change, a
@@ -139,10 +170,12 @@ inventory evidence types above. Escalate from the cheapest authoritative source:
    user guide, schematic, BOM, layout, and design files when available.
 3. **Distributor product API.** Use it to resolve exact MPNs, lifecycle, stock, and official
    datasheet links. Take electrical specifications from the PDF, not the catalogue row.
-4. **Vendor asset host.** Try the exact media/CDN host serving the document; web defenses are often
-   deployed per hostname.
-5. **Real browser.** Use it when a direct HTTP client is rejected or receives a challenge.
-6. **User-provided document.** Ask for the document when the available routes cannot establish the
+4. **Vendor asset host.** Resolve the exact media/CDN URL serving the document; web defenses are
+   often deployed per hostname.
+
+This orders evidence sources, not access attempts. Apply the `online-research` browser gate and
+exact-work ladder to each external URL; a browser is an access surface, not a lower-authority source.
+5. **User-provided document.** Ask for the document when the available routes cannot establish the
    needed evidence.
 
 Record the exact URL and route used. Label a mirror or footprint vendored from an existing board as
@@ -181,61 +214,22 @@ retain its result as historical-purchase evidence rather than current inventory.
 
 ## Escalate through web defenses
 
-Identify the response shape before choosing a workaround. Inspect status, headers, content type,
-body length, document magic, and HTML title. Do not maintain a permanent table of which vendors are
-"blocked"; those observations expire.
+Do not maintain an abbreviated WAF ladder here. Load the sibling `online-research` skill and follow
+its `SKILL.md` §1 access invariants and `references/access.md` §1 exact-work ladder. That contract is
+canonical for URL-provenance checks, app-shell versus block classification, browser-surface
+selection, presentation checks, CAPTCHA handoff, archive recovery, and access-control boundaries.
 
-Expect false-success responses:
+A block is a verdict earned only after every applicable rung is exhausted. Until then, do not call a
+source blocked or inaccessible, substitute an easier source or part, guess a load-bearing value, or
+ship the evidence gap as an unverified assumption. Status alone is not evidence: validate title,
+content type, document magic, byte count, and rendered content because false-success responses
+include empty 2xx bodies, denial HTML, JavaScript challenges, and viewer shells.
 
-- a 2xx with an empty body;
-- a 2xx HTML denial page;
-- a JavaScript challenge page with a normal-looking title or content length;
-- correct PDF headers followed by viewer HTML instead of the document body.
-
-Try these rungs in order:
-
-1. Direct request to the exact asset URL.
-2. Direct request with coherent, realistic browser headers when the service requires them.
-3. Real browser with a normal User-Agent.
-4. Browser navigation on the document's origin followed by an in-page fetch or genuine download.
-5. Dedicated persistent profile only when a service requires a one-time human challenge.
-
-Never use the user's live browser profile. Use a dedicated profile, keep it outside the repository,
-and work from a copy if a failed automated run could invalidate a human solve. Do not claim an
-unattended route when a CAPTCHA still requires a person.
-
-For programmatic browser download, prefer a genuine download event. A PDF tab can expose viewer
-HTML to response-body APIs even while displaying the actual PDF:
-
-```python
-from pathlib import Path
-from playwright.sync_api import sync_playwright
-
-pdf_url = "https://vendor.example/path/PART.pdf"
-output = Path("PART.pdf")
-
-with sync_playwright() as p:
-    context = p.chromium.launch_persistent_context(
-        "/tmp/kicad-datasheet-profile",
-        channel="chrome",
-        headless=True,
-        accept_downloads=True,
-        user_agent="<current normal Chrome user agent>",
-    )
-    try:
-        page = context.pages[0] if context.pages else context.new_page()
-        with page.expect_download(timeout=90_000) as pending:
-            page.evaluate("url => { window.location.href = url }", pdf_url)
-        pending.value.save_as(output)
-    finally:
-        context.close()
-```
-
-Configure the dedicated profile to open PDFs externally when the browser otherwise uses its viewer.
-If a cookie-authenticated service permits `context.request.get()`, prefer that simpler streaming
-path. If the defense checks the browser's network fingerprint, use same-origin browser navigation
-and in-page `fetch`; cross-origin page fetches are subject to CORS and may fail before returning a
-status.
+If a correctly presented CAPTCHA appears in a persistent user-visible browser, preserve that exact
+session, context, tab, URL, and cookies while the user solves it; do not close, navigate, refresh, or
+retry around it. A challenge in a session that cannot survive a user turn is an access failure, not
+fetched content. Correcting the User-Agent of a public page is permitted; defeating authentication,
+paywalls, CAPTCHAs, or rate limits is not.
 
 ## Validate every downloaded PDF
 
@@ -312,15 +306,17 @@ Then:
 
 Treat reference implementations as strong design evidence, not normative requirements. The current
 datasheet and errata establish device constraints; the project's requirements establish fitness.
-If no relevant vendor implementation is available, record the product page, search terms, and
-routes checked and mark the comparison `unverified`. Missing implementation collateral is blocking
-only when it leaves a load-bearing design claim unsupported.
+If no relevant vendor implementation is available after the canonical access ladder is exhausted,
+record the product page, search terms, and rung outcomes and mark the comparison `not performed —
+source unavailable`. Missing implementation collateral is blocking only when it leaves a
+load-bearing design claim unsupported.
 
 ## Fail closed
 
-When required evidence remains unavailable:
+When required evidence remains unavailable after every applicable `online-research` access rung is
+exhausted:
 
-- Name the part, exact URL, and routes attempted.
+- Name the part, exact URL, and outcome of each applicable rung.
 - Ask the user to supply the document or required access.
 - Do not quote specifications from memory.
 - Do not substitute a part because its datasheet was easier to fetch.

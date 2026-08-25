@@ -300,6 +300,11 @@ vias and layer changes. Centre-to-centre or hot-pad-to-pin Euclidean distance ca
 inductive return path and cannot prove that the capacitor is connected across the required
 two nodes.
 
+When the datasheet specifying a bypass value, pin, or return path is needed but the fetch fails or
+returns an empty/denial response, follow the canonical access-recovery contract linked from
+[`SETUP.md`](SETUP.md) §*Escalate through web defenses* before substituting a default — a 2xx with
+an empty body is a false-success shape, not absence.
+
 - Place the smallest/highest-frequency capacitor first and route its loop short and direct;
   keep bulk capacitors from displacing it.
 - Verify topology as well as distance. Two capacitors in series through a ground net do not

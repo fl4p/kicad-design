@@ -184,9 +184,15 @@ For every procured line, verify these as separate facts:
 
 - exact manufacturer ordering code and package;
 - required tolerance, voltage, temperature, dielectric, matching, or performance grade;
-- current lifecycle state;
+- current manufacturer lifecycle state, independently of distributor stock;
 - current stock or an explicitly accepted lead time;
 - datasheet revision supporting the design constants.
+
+For a new design or redesign, an obsolete, discontinued, or end-of-life BOM line blocks release;
+distributor stock, low price, or owned quantity does not waive that gate. Treat NRND and
+last-time-buy parts as lifecycle risks and require an explicit decision when no qualifying active
+replacement exists. An explicitly scoped maintenance reproduction may retain an incumbent obsolete
+part, but identify it as maintenance-only and never present it as a reusable selection.
 
 For each line selected, substituted, or procurement-validated during the task, preserve the
 inventory decision record made under [`SETUP.md`](SETUP.md). Record:

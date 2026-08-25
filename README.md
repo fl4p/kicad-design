@@ -23,6 +23,12 @@ guard detail it does not need:
 | `RELEASE.md` | DRC severity, fab output or release readiness |
 | `THERMALS.md` | dissipation, junction/ambient limits, heat paths, gradients, thermal pads/vias or validation |
 | `VARIANTS.md` | one generator must emit more than one board |
+| `MODELS.md` | choosing or delegating to an AI model/agent for schematic generation, review, or KiCad automation |
+
+Datasheet and sourcing work depends on the
+[`online-research`](https://github.com/fl4p/online-research-skill) skill. Install it beside this skill
+as `<skills-root>/online-research`; without that canonical access contract, external retrieval must
+stop rather than fall back to an abbreviated WAF procedure.
 
 Topics covered:
 

@@ -18,7 +18,10 @@ in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 
 Treat a stock footprint matching the vendor, pin count, and body dimensions as a candidate only.
 Compare its copper pad size, pad centres, orientation, pin-1 corner, mask, and paste against the
-selected part's recommended land pattern. Record the datasheet page and package code used.
+selected part's recommended land pattern. Record the datasheet page and package code used. If the
+datasheet fetch fails or returns an empty/denial response, follow the canonical access-recovery
+contract linked from [`SETUP.md`](SETUP.md) §*Escalate through web defenses* before accepting any
+pad/pin-1 value — a 2xx with an empty body is a false-success shape, not absence.
 
 **Example failure shape — same family and body, different land.** Parts sharing a vendor, pin count,
 body size, and package family can still use different pad centres or pin-1 orientation. The example

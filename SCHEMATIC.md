@@ -1,7 +1,8 @@
 # Schematic capture
 
 Use this companion whenever a task captures, generates, edits, reviews, or declares completion of a
-schematic, and before beginning PCB work from that schematic.
+schematic, and before beginning PCB work from that schematic. Before reading a datasheet or vendor
+collateral, run the preflight in [`SETUP.md`](SETUP.md); do not wait for the first failed fetch.
 
 ## Preserve component semantics
 
@@ -27,6 +28,11 @@ If no suitable symbol exists, create a custom symbol whose conventional graphic,
 electrical types, pin numbers, polarity and unit structure match the datasheet and intended
 footprint. Record the symbol source and the package-pin mapping. A temporary placeholder is allowed
 only in an explicitly named draft; it blocks capture completion and PCB implementation.
+
+If the datasheet fetch fails or returns an empty/denial response, do not record pinout or polarity
+as an unverified assumption — follow the canonical access-recovery contract linked from
+[`SETUP.md`](SETUP.md) §*Escalate through web defenses* (a 2xx with an empty body is a false-success
+shape, not absence).
 
 ## Capture controlled states and timing
 

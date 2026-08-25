@@ -16,7 +16,7 @@ Read only the companions required by the task:
 | file | read it when |
 |---|---|
 | [`SCHEMATIC.md`](SCHEMATIC.md) | the task captures, generates, edits, reviews, or declares completion of a schematic, or begins PCB work from one |
-| [`SETUP.md`](SETUP.md) | the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires a datasheet, reference design, eval-board documentation, current part status, inventory, stock, or distributor data |
+| [`SETUP.md`](SETUP.md) | before any task that will read a datasheet, schematic capture included; when the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires reference-design, eval-board, lifecycle, inventory, stock, or distributor evidence |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or routing ownership and completion |
 | [`AUTOROUTING.md`](AUTOROUTING.md) | the project opts into external autorouting: Freerouting candidates, route manifests, promotion |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
@@ -25,19 +25,20 @@ Read only the companions required by the task:
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing generators, validators, audits, or calibration harnesses |
 | [`THERMALS.md`](THERMALS.md) | heat, dissipation, temperature, gradients, thermal pads/vias, or temperature-dependent accuracy matter |
 | [`VARIANTS.md`](VARIANTS.md) | one generator must emit multiple boards without changing a qualified incumbent |
+| [`MODELS.md`](MODELS.md) | choosing or delegating to an AI model/agent for schematic generation, review, or KiCad automation |
 
 Prefer the helpers in [`scripts/`](scripts/README.md) when they fit the project's existing
 toolchain instead of reimplementing netlist parsing, library geometry, reproducibility, or
 ERC/DRC invocation. Use the autoroute helpers only after the project opts in under
 [`PCB.md`](PCB.md)'s routing-ownership policy, following [`AUTOROUTING.md`](AUTOROUTING.md).
 
-Run the device-evidence and sourcing preflight when the task selects or substitutes a component;
-designs or reviews circuitry, placement, or layout around a critical component; validates
-procurement; or needs datasheet, reference-circuit, or sourcing evidence. For this preflight, a
-component is critical when its support circuit, location, orientation, thermal path, return path, or
-routing materially controls an electrical, thermal, safety, mechanical, assembly, EMC, or
-routability requirement. Apply the same test during board floorplanning; the component need not be
-pre-labelled critical.
+Run the device-evidence and sourcing preflight before any task that will read a datasheet,
+schematic capture included; when the task selects or substitutes a component; designs or reviews
+circuitry, placement, or layout around a critical component; validates procurement; or needs
+reference-circuit or sourcing evidence. For this preflight, a component is critical when its support
+circuit, location, orientation, thermal path, return path, or routing materially controls an
+electrical, thermal, safety, mechanical, assembly, EMC, or routability requirement. Apply the same
+test during board floorplanning; the component need not be pre-labelled critical.
 
 Do not delay a purely graphical edit or local file-format diagnosis with unrelated inventory,
 network, or distributor checks. A fixed-part circuit or placement review needs device evidence, but
@@ -272,18 +273,36 @@ will overwrite the artefact it is verifying, including artefacts that are not ye
 
 ## Ground component decisions in current evidence
 
-Run [`SETUP.md`](SETUP.md) before relying on a datasheet or current sourcing information.
-Before broad-market search in a component-selection, substitution, or procurement-validation task:
+Run [`SETUP.md`](SETUP.md) before relying on a datasheet or current sourcing information. Before
+broad-market search in a component-selection, substitution, or procurement-validation task, apply
+the following gates and preferences.
+
+For every new selection or substitution, consider only components whose manufacturer lifecycle is
+active or preferred for new designs. Obsolete, discontinued, and end-of-life parts are disqualified
+regardless of price, distributor stock, or owned inventory. Treat NRND and last-time-buy parts as
+lifecycle risks; when no qualifying active candidate exists, stop and ask rather than silently
+normalizing that risk.
+
+Treat mandatory requirements and active lifecycle as eligibility gates. Among eligible candidates,
+first preserve this project's performance and cost bounds, then prefer useful reuse across
+plausible adjacent projects, then sufficient owned inventory, then lower acquisition cost among
+otherwise comparable choices. Compare supply and signal envelope, temperature and qualification,
+package and assembly process, interface and footprint commonality, availability, unit price at the
+required quantity, area, power, complexity, and load-bearing performance. Reuse may justify a
+modest, explicit penalty, but it must not materially degrade this project's performance or increase
+its cost. When the penalty is not clearly small and no project threshold defines it, report absolute
+and percentage unit and extended-cost deltas, quantify engineering differences in their native
+units or categories, and ask before selecting the reusable option.
 
 - Derive the mandatory electrical, mechanical, thermal, environmental, safety, compliance,
   assembly, lifecycle, package, and quantity constraints before evaluating candidates.
 - Check user-owned inventory and any declared order history under [`SETUP.md`](SETUP.md)'s
   owned-inventory contract: only user-declared, already-authorized read-only sources; never
   initiate authentication or request credentials; ask once per task and record the lookup outcome.
-- Prefer an owned part, and sweep inventory by required function after exact replacements, only
-  under that contract's evidence and classification rules; report topology-changing candidates
-  separately, and never let inventory preference compensate for missing engineering or lifecycle
-  evidence.
+- Apply owned-inventory preference only at the ranked step above, and sweep inventory by required
+  function after exact replacements, under that contract's evidence and classification rules;
+  report topology-changing candidates separately, and never let inventory preference compensate
+  for missing engineering, lifecycle, performance, cost, or reuse evidence.
 
 Then:
 
@@ -302,8 +321,9 @@ Then:
   passive tolerance, temperature, and ageing where they establish compliance or stress.
 - Distinguish recommended operation, characterized operation, and absolute maximum.
 - Validate models against datasheet tables and charts at every load-bearing operating point.
-- Verify exact orderable MPN, package, performance grade, lifecycle status, and stock as separate
-  questions. Follow [`RELEASE.md`](RELEASE.md) for BOM and sourcing evidence.
+- Verify exact orderable MPN, package, performance grade, manufacturer lifecycle status, and stock
+  as separate questions. Distributor availability does not override manufacturer lifecycle state.
+  Follow [`RELEASE.md`](RELEASE.md) for BOM and sourcing evidence.
 - Query value, voltage rating, dielectric, package, and other coupled constraints together. Sweep
   the BOM by predicate after fixing one instance of a defect class.
 - Compare every selected land pattern with the datasheet's pad size, pad centres, and pin-1 corner.
@@ -312,8 +332,9 @@ Then:
   printed callouts as datasheet values; label dimensions scaled from a picture as models.
 - Record the source and page/table beside each load-bearing constant.
 
-If the needed evidence remains inaccessible, stop and request the document. Do not substitute a
-part or quote a specification from memory merely to keep moving.
+If the needed evidence remains unavailable after the canonical access ladder linked from
+[`SETUP.md`](SETUP.md) is exhausted, stop and request the document. Do not substitute a part or quote
+a specification from memory merely to keep moving.
 
 ## Review and hand off
 
