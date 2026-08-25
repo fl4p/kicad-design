@@ -25,7 +25,6 @@ Read only the companions required by the task:
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing generators, validators, audits, or calibration harnesses |
 | [`THERMALS.md`](THERMALS.md) | heat, dissipation, temperature, gradients, thermal pads/vias, or temperature-dependent accuracy matter |
 | [`VARIANTS.md`](VARIANTS.md) | one generator must emit multiple boards without changing a qualified incumbent |
-| [`MODELS.md`](MODELS.md) | choosing or delegating to an AI model/agent for schematic generation, review, or KiCad automation |
 
 Prefer the helpers in [`scripts/`](scripts/README.md) when they fit the project's existing
 toolchain instead of reimplementing netlist parsing, library geometry, reproducibility, or
