@@ -108,6 +108,17 @@ drilled-hole and side-specific geometry:
   evidence of bad placement. Diagnose the cause rather than adding unsafe jumpers or lowering
   completion criteria.
 
+This audit is prose plus one executable backstop, and the backstop is not optional for
+generator-owned copper: after every generated or scripted routing pass, run
+`scripts/kicad_copper_collisions.py` on the saved board before rendering, interpreting DRC, or
+iterating the router. It fails closed on any two copper items of different nets whose effective
+shapes touch on a shared layer — the certain-short class that blind waypoint routing produces
+wholesale and that then surfaces as hundreds of interleaved `shorting_items`/`tracks_crossing` DRC
+findings. A nonzero result is not a cue to nudge waypoints: recurring collisions at the same pins
+or in the same channel are the congestion evidence above, so return to placement, corridor, or
+layer strategy. Do not substitute this check for DRC, and do not weaken its unevaluable path — an
+empty or unloadable board is a failed audit, not a clean one.
+
 Represent board-level routed slots and cutouts as closed `Edge.Cuts` contours under a declared
 mechanical authority. Direct board drawings are valid; an intentional board-only footprint is also
 valid when it owns a reusable local contour, is marked not-in-schematic, is protected from
@@ -223,6 +234,14 @@ unrouted set, or individual failures are no longer diagnosable. A board with mor
 routing-relevant nets is a useful prompt to consider it, not a threshold: remaining connection
 count, density, layer count, placement and constraint complexity matter more than net count. Do not
 invoke Freerouting solely because the board crosses that heuristic.
+
+One trigger is not optional to evaluate: after two failed full routing passes on the same board —
+each ending in cross-net shorts, crossings, or an unrouted remainder rather than a reviewable
+candidate — do not start a third native rewrite until you have either run the exploratory
+Freerouting scout or recorded in the layout retrospective why the scout is unsuitable here (with
+the placement or corridor change the next native pass will make instead). Rewriting the same
+routing plan a third time on momentum is the failure mode this rule exists to interrupt; the
+decision may go either way, but it must be a recorded decision, not a default.
 
 The operational workflow lives in [`AUTOROUTING.md`](AUTOROUTING.md): scout-first ordering,
 router pinning and configuration, fanout hazards, constraint serialization, project-file

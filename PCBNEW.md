@@ -56,6 +56,24 @@ bump — they are simply the next six that cost a round trip each:
 | `pcbnew.VIATYPE_BLIND_BURIED` | `AttributeError` — the name is not what the C++ enum suggests | enumerate `[n for n in dir(pcbnew) if n.startswith("VIATYPE_")]` and map values yourself |
 | `cc.GetNetItems(code, pcbnew.PCB_PAD_T)` | `TypeError … argument 3 of type 'std::vector< KICAD_T >'` | avoid; use `kicad-cli pcb drc`'s unconnected pairs, per the DRC note in [`RELEASE.md`](RELEASE.md) |
 
+A **third** batch, measured 2026-08-26 on 10.0.5 while generating an inverter board (zone-fill
+settle checks and netclass setup):
+
+| you reach for | what happens | use |
+|---|---|---|
+| `SHAPE_POLY_SET.PolygonCount()` | `AttributeError` | `OutlineCount()` / `FullPointCount()`; for settle comparisons prefer `Area()` |
+| `BooleanXor(...)` as a pure function | returns `None` — it **mutates the receiver in place**, and XOR against an identical set empties it | snapshot first with the copy constructor `SHAPE_POLY_SET(other)`, XOR the copy, then read `OutlineCount()`/`Area()` off the copy |
+| netclass creation via `BOARD_DESIGN_SETTINGS` (`m_NetClasses`, `.Add`, …) | `AttributeError` — no netclass mutation is exposed on 10.0.5 | netclasses do not live in `.kicad_pcb` at all anymore: `(net_class …)` blocks in a board file are KiCad ≤5 format. Write them into the `.kicad_pro` JSON under `net_settings.classes` |
+
+Two zone-fill settle-check lessons from the same run, companions to the UUID-ordering section
+below: key fill snapshots by **zone UUID** (`zone.m_Uuid.AsString()`), never by `(net, layer)` —
+multiple zones legitimately share a net and layer, and the key collision makes the settle check
+compare one zone's fill against another's (measured: 5 zones collapsed to 3 keys, reported as
+"did not settle"). And two consecutive fills of an unchanged board can differ by nm²-scale XOR
+slivers from the UUID-ordering nondeterminism; gate the settle verdict on an area threshold
+(≥1 mm² is materially unsettled) rather than exact emptiness, and report the sliver rather than
+silencing it.
+
 **Exporting footprints out of a board into a `.pretty`** is the workflow those first three block,
 and it is worth having: it vendors a library that resolves only through some machine's global
 `fp-lib-table` at an absolute path, and it guarantees the result matches what will be
