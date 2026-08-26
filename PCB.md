@@ -111,8 +111,9 @@ drilled-hole and side-specific geometry:
 This audit is prose plus one executable backstop, and the backstop is not optional for
 generator-owned copper: after every generated or scripted routing pass, run
 `scripts/kicad_copper_collisions.py` on the saved board before rendering, interpreting DRC, or
-iterating the router. It fails closed on any two copper items of different nets whose effective
-shapes touch on a shared layer — the certain-short class that blind waypoint routing produces
+iterating the router. It fails closed on any two audited copper items — track segments, arcs,
+vias, and pads; zone fills are excluded because the filler owns them — of different nets whose
+effective shapes touch or overlap on a shared layer: the certain-short class that blind waypoint routing produces
 wholesale and that then surfaces as hundreds of interleaved `shorting_items`/`tracks_crossing` DRC
 findings. A nonzero result is not a cue to nudge waypoints: recurring collisions at the same pins
 or in the same channel are the congestion evidence above, so return to placement, corridor, or

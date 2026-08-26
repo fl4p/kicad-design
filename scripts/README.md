@@ -24,7 +24,7 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_netlist.py` | parse KiCad netlists across supported pretty-print formats and reject empty or inconsistent exports |
 | `kicad_symlib.py` | resolve inherited symbols, common unit 0, body styles, and pin transforms |
 | `kicad_verify.py` | run ERC/DRC safely and resolve ignored checks from reports plus project configuration |
-| `kicad_copper_collisions.py` | fail-closed certain-short audit: any two copper items on a shared layer with different nets whose effective shapes touch |
+| `kicad_copper_collisions.py` | fail-closed certain-short audit: tracks/arcs/vias/pads of different nets whose effective shapes touch or overlap on a shared copper layer |
 | `kicad_footprint_swap.py` | orchestrate a deadline-bound, adapter-owned multi-target footprint migration and recoverable promotion |
 | `kicad_repro.py` | bind reproducibility evidence to outputs actually produced and detect replacement after verification |
 | `kicad_autoroute.py` | load strict autoroute configuration and shared route/report contracts |
@@ -47,11 +47,14 @@ python3 scripts/kicad_copper_collisions.py BOARD.kicad_pcb   # re-execs under Ki
 
 `kicad_copper_collisions.py` is the executable backstop for the route-readiness audit in
 `PCB.md`: run it after every generated routing pass, before interpreting DRC. Exit 0 means
-audited-clean, 1 means unevaluable (missing/unloadable board, or nothing to audit — not a pass),
-2 means certain shorts. It checks tracks, arcs, vias, and pads via `GetEffectiveShape` on each
-shared copper layer; zone fills are excluded because the filler owns them. Calibrated 2026-08-26
-on KiCad 10.0.5 against a board with DRC-confirmed shorts (290 collisions, exit 2) and a clean
-1777-item production board (0 collisions, exit 0).
+audited-clean, 1 means unevaluable (missing/unloadable board, nothing to audit, or no usable
+pcbnew interpreter — none of which is a pass), 2 means certain shorts. It checks tracks, arcs,
+vias, and pads via `GetEffectiveShape` on each shared copper layer with a probed 1-IU touch
+clearance (`Collide(…, 0)` misses exact tangency on 10.0.5); zone fills are excluded because
+the filler owns them, and NPTH pads count only where flashed. The `--json` artifact carries an
+explicit `verdict` and the board path on every run, unevaluable included — never read a stale
+report. Calibrated 2026-08-26 on KiCad 10.0.5 against a board with DRC-confirmed shorts
+(295 collisions, exit 2) and a clean 1761-item production board (0 collisions, exit 0).
 
 Treat examples here as workflow illustrations; the script parser, module API, and tracked schemas
 are authoritative.

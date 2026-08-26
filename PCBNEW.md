@@ -63,16 +63,19 @@ settle checks and netclass setup):
 |---|---|---|
 | `SHAPE_POLY_SET.PolygonCount()` | `AttributeError` | `OutlineCount()` / `FullPointCount()`; for settle comparisons prefer `Area()` |
 | `BooleanXor(...)` as a pure function | returns `None` — it **mutates the receiver in place**, and XOR against an identical set empties it | snapshot first with the copy constructor `SHAPE_POLY_SET(other)`, XOR the copy, then read `OutlineCount()`/`Area()` off the copy |
-| netclass creation via `BOARD_DESIGN_SETTINGS` (`m_NetClasses`, `.Add`, …) | `AttributeError` — no netclass mutation is exposed on 10.0.5 | netclasses do not live in `.kicad_pcb` at all anymore: `(net_class …)` blocks in a board file are KiCad ≤5 format. Write them into the `.kicad_pro` JSON under `net_settings.classes` |
+| netclass creation via `BOARD_DESIGN_SETTINGS.m_NetClasses` / `.Add` | `AttributeError` — those legacy names are gone on 10.0.5 | in-memory mutation exists via `BOARD_DESIGN_SETTINGS.m_NetSettings` (`NET_SETTINGS.SetNetclass(name, NETCLASS)` inserts and reads back). But netclasses do not live in `.kicad_pcb` anymore — `(net_class …)` blocks in a board file are KiCad ≤5 format — so for *persistent* netclasses write the `.kicad_pro` JSON under `net_settings.classes` |
 
 Two zone-fill settle-check lessons from the same run, companions to the UUID-ordering section
 below: key fill snapshots by **zone UUID** (`zone.m_Uuid.AsString()`), never by `(net, layer)` —
 multiple zones legitimately share a net and layer, and the key collision makes the settle check
 compare one zone's fill against another's (measured: 5 zones collapsed to 3 keys, reported as
-"did not settle"). And two consecutive fills of an unchanged board can differ by nm²-scale XOR
-slivers from the UUID-ordering nondeterminism; gate the settle verdict on an area threshold
-(≥1 mm² is materially unsettled) rather than exact emptiness, and report the sliver rather than
-silencing it.
+"did not settle"). And two consecutive fills of an unchanged in-memory board were once observed
+to differ by an nm²-scale XOR sliver (3 nm², one zone, one board, one machine) — cause not
+established; UUID-ordering effects are documented below for *cross-run* order, not for two fills
+of the same loaded board. Per `GUARDS.md`, the default verdict for any nonzero XOR remains
+unsettled; if a project decides to tolerate slivers, derive its threshold from that board's
+smallest copper feature, record the provenance, and always report the sliver's area and zone
+rather than silencing it.
 
 **Exporting footprints out of a board into a `.pretty`** is the workflow those first three block,
 and it is worth having: it vendors a library that resolves only through some machine's global
