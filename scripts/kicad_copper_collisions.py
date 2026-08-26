@@ -41,12 +41,15 @@ Exit codes (fail closed, per GUARDS.md):
 without an audit); never put them in a gating invocation.
 
 JSON lifecycle: when `--json` is given, a fresh "unevaluable / audit did not
-complete" placeholder is written before anything is evaluated — including
-before the `pcbnew` import attempt — and is atomically replaced
-(`os.replace`) by the real verdict only when the audit finishes, so a crash,
-kill, or bogus interpreter cannot leave a stale clean report standing. Every
-artifact carries an explicit `verdict`, the audited board path, the writer's
-pid, and the board file's size/mtime as an input binding. Concurrent audits
+complete" placeholder is written before anything is evaluated — a best-effort
+pre-parse scan writes it even when the command line is later rejected — and
+is atomically replaced (`os.replace`, temp file cleaned up on failure) by the
+real verdict only when the audit finishes, so a crash, kill, parse error, or
+bogus interpreter cannot leave a stale clean report standing. Every artifact
+carries an explicit `verdict`, the audited board path, the writer's pid, and
+the board file's size/mtime *snapshotted before load and re-verified after
+the audit* — a board replaced mid-audit is unevaluable, not clean. An empty
+`--json` path, or one aliasing the board file, is rejected. Concurrent audits
 sharing one `--json` path are unsupported — last completed writer wins.
 
 Usage:
@@ -57,8 +60,11 @@ Runs itself under KiCad's bundled interpreter when `pcbnew` is not importable.
 Set KICAD_PYTHON to override discovery; a configured interpreter that cannot
 `import pcbnew` is an unevaluable failure, not a silent fallback. A worker
 exit of 0 is trusted only when the worker printed a line starting with the OK
-verdict prefix and, when `--json` is in play, the artifact's verdict is
-"clean". Trust boundary: KICAD_PYTHON is *trusted configuration* — the probe
+verdict prefix and, when `--json` is in play, the artifact's verdict matches
+the exit status (0 needs "clean", 2 needs "collisions"); worker statuses
+outside 0/1/2 (signals, foreign launchers) normalize to unevaluable. Captured
+worker output is decoded as UTF-8 with replacement, so an exotic locale
+cannot crash the parent. Trust boundary: KICAD_PYTHON is *trusted configuration* — the probe
 defends against misconfiguration (wrong python, echo-style stubs), not
 against a deliberately malicious executable, which no output marker can
 authenticate. `--timeout` kills and reaps the direct worker process only;
@@ -179,9 +185,28 @@ def audit_board(board, pcbnew):
 
 # --------------------------------------------------------------------------- driver
 
-def _write_json(json_out, board_path, verdict, findings, inventory, reason=None):
+def _stat_board(board_path):
+    """Best-effort (size, mtime) snapshot of the board file, or None."""
+    try:
+        st = os.stat(board_path)
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime)
+
+
+def _same_path(a, b):
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except OSError:
+        return False
+
+
+def _write_json(json_out, board_path, verdict, findings, inventory,
+                reason=None, board_stat=None):
     if not json_out:
         return
+    if _same_path(json_out, board_path):
+        raise ValueError("--json path must not be the board file")
     payload = {
         "board": os.path.abspath(board_path),
         "verdict": verdict,  # "collisions" | "clean" | "unevaluable"
@@ -191,16 +216,21 @@ def _write_json(json_out, board_path, verdict, findings, inventory, reason=None)
     if reason:
         payload["reason"] = reason
     payload["pid"] = os.getpid()
-    try:
-        st = os.stat(board_path)
-        payload["board_size"] = st.st_size
-        payload["board_mtime"] = st.st_mtime
-    except OSError:
-        pass
+    if board_stat is None:
+        board_stat = _stat_board(board_path)
+    if board_stat is not None:
+        payload["board_size"], payload["board_mtime"] = board_stat
     tmp = f"{json_out}.tmp.{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=1)
-    os.replace(tmp, json_out)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=1)
+        os.replace(tmp, json_out)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _unevaluable(json_out, board_path, reason, inventory=None):
@@ -225,6 +255,9 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
 
     if not os.path.isfile(board_path):
         return _unevaluable(json_out, board_path, f"no such board {board_path}")
+    # Snapshot the input before loading; the verdict must bind the revision
+    # that was actually audited, and a file replaced mid-audit must fail.
+    snapshot = _stat_board(board_path)
     try:
         board = pcbnew.LoadBoard(board_path)
         if board is None:
@@ -235,12 +268,17 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
         return _unevaluable(
             json_out, board_path, "exception during load/audit (see stderr)"
         )
+    if _stat_board(board_path) != snapshot:
+        return _unevaluable(
+            json_out, board_path, "board file changed during the audit"
+        )
     if inventory["items"] == 0:
         return _unevaluable(
             json_out, board_path, "no copper items on any layer", inventory
         )
     verdict = "collisions" if findings else "clean"
-    _write_json(json_out, board_path, verdict, findings, inventory)
+    _write_json(json_out, board_path, verdict, findings, inventory,
+                board_stat=snapshot)
     for finding in findings[:max_report]:
         nets = "×".join(finding["nets"])
         print(
@@ -277,7 +315,8 @@ def _interpreter_has_pcbnew(interpreter):
         proc = subprocess.run(
             [interpreter, "-c", probe],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -320,7 +359,8 @@ def _run_worker(interpreter, args):
     env = dict(os.environ, **{_WORKER_ENV: "1"})
     try:
         proc = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=args.timeout
+            cmd, env=env, capture_output=True, encoding="utf-8",
+            errors="replace", timeout=args.timeout,
         )
     except subprocess.TimeoutExpired:
         return _unevaluable(
@@ -331,6 +371,13 @@ def _run_worker(interpreter, args):
         sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
+    def artifact_verdict():
+        try:
+            with open(args.json_out, encoding="utf-8") as fh:
+                return json.load(fh).get("verdict")
+        except (OSError, ValueError):
+            return None
+
     if proc.returncode == 0:
         ok = any(
             line.startswith(f"{_OK_LINE}:")
@@ -341,18 +388,26 @@ def _run_worker(interpreter, args):
                 args.json_out, args.board,
                 "worker exited 0 without producing the OK verdict line",
             )
-        if args.json_out:
-            try:
-                with open(args.json_out, encoding="utf-8") as fh:
-                    verdict = json.load(fh).get("verdict")
-            except (OSError, ValueError):
-                verdict = None
-            if verdict != "clean":
-                return _unevaluable(
-                    args.json_out, args.board,
-                    f"worker exited 0 but JSON verdict is {verdict!r}",
-                )
-    return proc.returncode
+        if args.json_out and artifact_verdict() != "clean":
+            return _unevaluable(
+                args.json_out, args.board,
+                f"worker exited 0 but JSON verdict is {artifact_verdict()!r}",
+            )
+        return 0
+    if proc.returncode == 2:
+        if args.json_out and artifact_verdict() != "collisions":
+            return _unevaluable(
+                args.json_out, args.board,
+                f"worker exited 2 but JSON verdict is {artifact_verdict()!r}",
+            )
+        return 2
+    if proc.returncode == 1:
+        return 1
+    # Signals and foreign statuses must not masquerade as a defined verdict.
+    return _unevaluable(
+        args.json_out, args.board,
+        f"worker exited with unexpected status {proc.returncode}",
+    )
 
 
 class _Parser(argparse.ArgumentParser):
@@ -362,20 +417,57 @@ class _Parser(argparse.ArgumentParser):
         self.exit(1, f"COPPER-COLLISIONS-UNEVALUABLE: {message}\n")
 
 
+def _prescan_json_and_board(argv):
+    """Best-effort extraction of the --json path and board from raw argv, so
+    a stale artifact can be invalidated even when argparse later rejects the
+    command line. Returns (board_guess, json_guess); either may be None."""
+    board = json_out = None
+    it = iter(range(len(argv)))
+    for i in it:
+        arg = argv[i]
+        if arg == "--json" and i + 1 < len(argv):
+            json_out = argv[i + 1]
+        elif arg.startswith("--json="):
+            json_out = arg.split("=", 1)[1]
+        elif not arg.startswith("-") and board is None:
+            if i == 0 or argv[i - 1] not in ("--json", "--max-report", "--timeout"):
+                board = arg
+    return board, json_out
+
+
 def main(argv=None):
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # Invalidate any stale artifact even if parsing fails below; skip when
+    # the pre-scan cannot tell the artifact apart from the board.
+    board_guess, json_guess = _prescan_json_and_board(raw_argv)
+    if json_guess and board_guess and not _same_path(json_guess, board_guess):
+        try:
+            _write_json(
+                json_guess, board_guess, "unevaluable", [], {},
+                "audit did not complete",
+            )
+        except OSError:
+            pass
+
     parser = _Parser(description=__doc__.splitlines()[0])
     parser.add_argument("board")
     parser.add_argument("--max-report", type=int, default=MAX_REPORT_DEFAULT)
     parser.add_argument("--json", dest="json_out")
     parser.add_argument("--timeout", type=int, default=WORKER_TIMEOUT_DEFAULT,
                         help="worker re-execution timeout, seconds")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
     # Exit-code contract reserves 2 for collisions, so reject bad values with
     # the unevaluable code instead of argparse's exit(2).
     if args.max_report < 0:
         return _unevaluable(args.json_out, args.board, "--max-report must be >= 0")
     if args.timeout <= 0:
         return _unevaluable(args.json_out, args.board, "--timeout must be > 0")
+    if args.json_out is not None and not args.json_out:
+        return _unevaluable(None, args.board, "--json path must be non-empty")
+    if args.json_out and _same_path(args.json_out, args.board):
+        return _unevaluable(
+            None, args.board, "--json path must not be the board file"
+        )
 
     # Invalidate any stale artifact before anything is evaluated — including
     # the import attempt: a broken native pcbnew can raise more than
