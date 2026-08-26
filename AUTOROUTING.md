@@ -212,9 +212,12 @@ governance — applies to KRT unchanged.
 Install (measured on macOS arm64): clone and **check out a release tag** (a bare `main`
 clone is not a pin), `python3 -m venv .venv`, `pip install -r requirements.txt`
 (numpy/scipy/shapely), then `python build_router.py --tag <that tag>` — plain
-`build_router.py` downloads whatever release is current. Record together: the tag, the
-binary's self-reported version, and `shasum -a 256 rust_router/grid_router.so`. In the
-measured install a v0.21.3 checkout's default download produced a binary announcing
+`build_router.py` attempts the latest prebuilt release, with documented fallbacks to a
+local source build, so it is not a pin. Record together: the tag, the binary's
+self-reported version, and `shasum -a 256 rust_router/grid_router.so`. In the measured
+install — an untagged `main` checkout (commit `9e1d562`, top-level `VERSION` 0.21.3;
+session observation, no download receipt retained) — the default download produced a
+binary announcing
 `grid_router v0.21.1`; the divergence is KRT's own documented convention (repo patch
 versions advance without a Rust-crate bump — see `rust_router/Cargo.toml`), which is why
 the recorded tag + self-report + digest triple, not any one number, is the pin.
@@ -254,15 +257,18 @@ Measured caveats — all three bit during the scout:
    floor 0.25 → 0.2 mm (disclosed loudly as "FAB FLOOR RELAXED"), downgraded DRC
    severities to ignore (`solder_mask_bridge`, `pth`/`npth_inside_courtyard`,
    `annular_width`, `malformed_courtyard`, `lib_footprint_*`; `courtyards_overlap` and
-   `starved_thermal` → warning), and added a `min_via_drill`. It preserves the original
-   values under its own `kicad_routing_tools.fab_floor_origin` key, so restoration is
-   mechanical — do it. Every subsequent DRC — KiCad's included — grades against the
+   `starved_thermal` → warning), and added a `min_via_drill`. Its
+   `kicad_routing_tools.fab_floor_origin` key preserves **only the five original
+   fab-floor values** (manufacturing-floor provenance, not a restoration record): the
+   original severities and the prior absence of `min_via_drill` are not preserved, so
+   keep a pre-run copy of the project file (or its full diff) and restore from that.
+   Every subsequent DRC — KiCad's included — grades against the
    relaxed set, so a "clean" report and any before/after comparison are meaningless
    until you diff the project file (section above) and restore the original floor and
    severities, or accept them as recorded project decisions. The measured consequence
    is in the verdict above: four hole-clearance violations invisible under the relaxed
    floor, real under the original one.
-3. **The version pair diverges** (release tag vs binary self-report — see the install
+3. **The version pair diverges** (repo `VERSION` vs binary self-report — see the install
    paragraph); pin the tag + self-report + digest triple.
 
 ## Inputs required for a promotable run

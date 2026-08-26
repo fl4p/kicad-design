@@ -239,8 +239,10 @@ multilayer boards — budget minutes there, not hours), while in one observed se
 pass it would have preceded ran more than five elapsed hours (including an idle hour) of
 undiagnosed manual iteration on a placement the scout then showed routable up to one pad overlap.
 Skip it only for trivial connectivity already verified — the retrospective entry must name the
-verifying artifact or check — or where no backend can run, recording the attempted backend,
-version, and exact error; a bare assertion is not a recorded reason. Net count is not a gate in
+verifying artifact or check — or where no backend can run, recording for **each**
+otherwise-applicable backend (KRT and Freerouting) the attempted version and exact error, or its
+specific incompatibility; one backend failing does not excuse the other, and a bare assertion is
+not a recorded reason. Net count is not a gate in
 either direction: density, layer count, placement quality and constraint tightness determine
 difficulty, and the project's established native, manual, interactive, or generator-owned routing
 path remains the authority for what is finally authored.
@@ -249,9 +251,10 @@ One trigger is not optional to evaluate: after two failed full routing passes on
 each ending in cross-net shorts, crossings, or an unrouted remainder rather than a reviewable
 candidate — do not start a third native rewrite until you have either run (or re-run) the
 exploratory router scout or recorded in the layout retrospective why the scout is unsuitable here (with
-the placement or corridor change the next native pass will make instead). The skip conditions and
-evidence requirements are the same as for the default pre-pass scout above; "unsuitable" without
-the named evidence does not qualify. Rewriting the same
+the placement or corridor change the next native pass will make instead). An "unsuitable" record
+must carry at least the default scout rule's named evidence — after two failed passes the
+trivial-connectivity branch no longer applies, and the next-pass change is required on top; a
+bare assertion qualifies under neither rule. Rewriting the same
 routing plan a third time on momentum is the failure mode this rule exists to interrupt; the
 decision may go either way, but it must be a recorded decision, not a default.
 

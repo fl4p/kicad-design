@@ -17,7 +17,7 @@ guard detail it does not need:
 | `SCHEMATIC.md` | capturing, generating, editing, reviewing or declaring completion of a schematic, and before PCB implementation |
 | `GUARDS.md` | writing or reviewing generator checks, audits, validators or calibration harnesses |
 | `PCB.md` | the task touches board layout, zones, stackup, creepage or routing ownership |
-| `AUTOROUTING.md` | the project opts into external autorouting — Freerouting, route manifests, promotion |
+| `AUTOROUTING.md` | any routing pass is planned — default pre-pass scout; promotion (Freerouting/KRT, route manifests) needs the project opt-in |
 | `PCBNEW.md` | scripting `pcbnew`, reproducibility or generator performance |
 | `FOOTPRINTS.md` | selecting, generating or modifying footprints and land patterns |
 | `RELEASE.md` | DRC severity, fab output or release readiness |
