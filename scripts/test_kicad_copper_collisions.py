@@ -299,6 +299,7 @@ class ExitAndJsonTests(unittest.TestCase):
         with (
             mock.patch.dict(sys.modules, {"pcbnew": fake_pcbnew, "wx": None}),
             mock.patch.object(guard.os.path, "isfile", return_value=board_exists),
+            mock.patch.object(guard, "_stat_board", return_value=(10, 1.0)),
             mock.patch.object(guard, "audit_board", side_effect=audit),
         ):
             return guard.run_audit(tmp_path, json_out=self.json_path, **kwargs)
@@ -702,6 +703,138 @@ class Round4Tests(unittest.TestCase):
             json_out=json_out,
             timeout=guard.WORKER_TIMEOUT_DEFAULT,
         )
+
+
+class Round5Tests(unittest.TestCase):
+    def test_unstatable_board_is_unevaluable_even_if_isfile_lied(self):
+        # fail closed: a None snapshot must never reach the audit, and
+        # None == None on both sides must never mean "unchanged"
+        fake_pcbnew = mock.Mock()
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": fake_pcbnew, "wx": None}),
+            mock.patch.object(guard.os.path, "isfile", return_value=True),
+            mock.patch.object(guard, "_stat_board", return_value=None),
+        ):
+            rc = guard.run_audit("x.kicad_pcb")
+        self.assertEqual(rc, 1)
+        fake_pcbnew.LoadBoard.assert_not_called()
+
+    def test_post_audit_stat_failure_is_unevaluable(self):
+        fake_pcbnew = mock.Mock()
+        a = FakeItem("a", 1, [F_CU], BOX)
+        fake_pcbnew.LoadBoard.return_value = FakeBoard([a])
+        real_audit = guard.audit_board
+        stats = iter([(10, 1.0), None])  # snapshot ok, post-audit gone
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": fake_pcbnew, "wx": None}),
+            mock.patch.object(guard.os.path, "isfile", return_value=True),
+            mock.patch.object(guard, "_stat_board", side_effect=lambda p: next(stats)),
+            mock.patch.object(
+                guard, "audit_board", side_effect=lambda b, p: real_audit(b, FakePcbnew)
+            ),
+        ):
+            rc = guard.run_audit("x.kicad_pcb")
+        self.assertEqual(rc, 1)
+
+    def test_prescan_never_takes_option_shaped_json_value(self):
+        # `--json --max-report` must not name a file "--max-report"
+        self.assertEqual(
+            guard._prescan_json_and_board(
+                ["--json", "--max-report", "5", "board.kicad_pcb"]
+            ),
+            (None, None),
+        )
+
+    def test_prescan_stops_at_double_dash(self):
+        # tokens after `--` are positionals to argparse; honoring --json=
+        # there previously overwrote a real board file
+        board, json_out = guard._prescan_json_and_board(
+            ["decoy.kicad_pcb", "--", "--json=/path/to/real-board.kicad_pcb"]
+        )
+        self.assertIsNone(json_out)
+        self.assertEqual(board, "decoy.kicad_pcb")
+
+    def test_prescan_consumes_option_values_as_state_machine(self):
+        board, json_out = guard._prescan_json_and_board(
+            ["--max-report", "5", "b.kicad_pcb", "--json", "out.json"]
+        )
+        self.assertEqual(board, "b.kicad_pcb")
+        self.assertEqual(json_out, "out.json")
+        self.assertEqual(
+            guard._prescan_json_and_board(["--json=", "b.kicad_pcb"]),
+            (None, None),
+        )
+
+    def test_write_json_uses_exclusive_mkstemp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            json_path = os.path.join(tmp, "audit.json")
+            with mock.patch.object(
+                guard.tempfile, "mkstemp", wraps=tempfile.mkstemp
+            ) as created:
+                guard._write_json(json_path, "b.kicad_pcb", "clean", [], {})
+            created.assert_called_once()
+            self.assertEqual(created.call_args.kwargs["dir"], tmp)
+
+    def test_hard_link_alias_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board = os.path.join(tmp, "b.kicad_pcb")
+            with open(board, "w") as fh:
+                fh.write("(kicad_pcb)")
+            alias = os.path.join(tmp, "alias.json")
+            os.link(board, alias)
+            with self.assertRaises(ValueError):
+                guard._write_json(alias, board, "clean", [], {})
+            with open(board, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "(kicad_pcb)")
+
+    def test_replace_failure_cleans_temp_and_keeps_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            json_path = os.path.join(tmp, "audit.json")
+            with open(json_path, "w", encoding="utf-8") as fh:
+                fh.write('{"verdict": "unevaluable"}')
+            with mock.patch.object(
+                guard.os, "replace", side_effect=OSError("boom")
+            ):
+                with self.assertRaises(OSError):
+                    guard._write_json(json_path, "b.kicad_pcb", "clean", [], {})
+            with open(json_path, encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["verdict"], "unevaluable")
+            self.assertEqual(
+                [f for f in os.listdir(tmp) if ".tmp." in f], []
+            )
+
+    def test_probe_capture_forces_utf8_with_replacement(self):
+        proc = mock.Mock(returncode=0, stdout=guard._PROBE_MARKER)
+        with mock.patch.object(
+            guard.subprocess, "run", return_value=proc
+        ) as spawned:
+            guard._interpreter_has_pcbnew("/x/python3")
+        kwargs = spawned.call_args.kwargs
+        self.assertEqual(kwargs["encoding"], "utf-8")
+        self.assertEqual(kwargs["errors"], "replace")
+
+    def test_worker_verdict_mismatch_rewrites_artifact_unevaluable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            json_path = os.path.join(tmp, "audit.json")
+            with open(json_path, "w", encoding="utf-8") as fh:
+                json.dump({"verdict": "unevaluable"}, fh)
+            proc = mock.Mock(
+                returncode=0, stdout=f"{guard._OK_LINE}: 0 collisions\n",
+                stderr="",
+            )
+            args = mock.Mock(
+                board="x.kicad_pcb",
+                max_report=guard.MAX_REPORT_DEFAULT,
+                json_out=json_path,
+                timeout=guard.WORKER_TIMEOUT_DEFAULT,
+            )
+            with mock.patch.object(guard.subprocess, "run", return_value=proc):
+                rc = guard._run_worker("/x/python3", args)
+            self.assertEqual(rc, 1)
+            with open(json_path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+            self.assertEqual(payload["verdict"], "unevaluable")
+            self.assertIn("reason", payload)
 
 
 if __name__ == "__main__":

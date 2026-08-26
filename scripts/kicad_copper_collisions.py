@@ -44,8 +44,11 @@ JSON lifecycle: when `--json` is given, a fresh "unevaluable / audit did not
 complete" placeholder is written before anything is evaluated — a best-effort
 pre-parse scan writes it even when the command line is later rejected — and
 is atomically replaced (`os.replace`, temp file cleaned up on failure) by the
-real verdict only when the audit finishes, so a crash, kill, parse error, or
-bogus interpreter cannot leave a stale clean report standing. Every artifact
+real verdict only when the audit finishes — the temp is created exclusively
+(`mkstemp`) beside the destination, so a pre-planted symlink cannot capture
+the write, and the alias check compares device/inode — so a crash, kill,
+parse error, or bogus interpreter cannot leave a stale clean report
+standing. Every artifact
 carries an explicit `verdict`, the audited board path, the writer's pid, and
 the board file's size/mtime *snapshotted before load and re-verified after
 the audit* — a board replaced mid-audit is unevaluable, not clean. An empty
@@ -79,6 +82,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import traceback
 
 MAX_REPORT_DEFAULT = 40
@@ -195,10 +199,17 @@ def _stat_board(board_path):
 
 
 def _same_path(a, b):
+    """True when the two names refer to the same file: compares device/inode
+    (catches symlinks AND hard links); falls back to realpath equality when a
+    path does not exist yet."""
     try:
-        return os.path.realpath(a) == os.path.realpath(b)
+        sa, sb = os.stat(a), os.stat(b)
+        return (sa.st_dev, sa.st_ino) == (sb.st_dev, sb.st_ino)
     except OSError:
-        return False
+        try:
+            return os.path.realpath(a) == os.path.realpath(b)
+        except OSError:
+            return False
 
 
 def _write_json(json_out, board_path, verdict, findings, inventory,
@@ -220,9 +231,14 @@ def _write_json(json_out, board_path, verdict, findings, inventory,
         board_stat = _stat_board(board_path)
     if board_stat is not None:
         payload["board_size"], payload["board_mtime"] = board_stat
-    tmp = f"{json_out}.tmp.{os.getpid()}"
+    # Exclusive creation (O_EXCL) of an unpredictable sibling temp name: a
+    # pre-created symlink at a guessed path cannot capture this write.
+    dest_dir = os.path.dirname(os.path.abspath(json_out)) or "."
+    fd, tmp = tempfile.mkstemp(
+        prefix=os.path.basename(json_out) + ".tmp.", dir=dest_dir
+    )
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=1)
         os.replace(tmp, json_out)
     except BaseException:
@@ -256,8 +272,11 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
     if not os.path.isfile(board_path):
         return _unevaluable(json_out, board_path, f"no such board {board_path}")
     # Snapshot the input before loading; the verdict must bind the revision
-    # that was actually audited, and a file replaced mid-audit must fail.
+    # that was actually audited, and a file replaced mid-audit must fail. An
+    # unstat-able board is unevaluable — None must never compare equal.
     snapshot = _stat_board(board_path)
+    if snapshot is None:
+        return _unevaluable(json_out, board_path, "cannot stat board file")
     try:
         board = pcbnew.LoadBoard(board_path)
         if board is None:
@@ -268,7 +287,8 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
         return _unevaluable(
             json_out, board_path, "exception during load/audit (see stderr)"
         )
-    if _stat_board(board_path) != snapshot:
+    post_stat = _stat_board(board_path)
+    if post_stat is None or post_stat != snapshot:
         return _unevaluable(
             json_out, board_path, "board file changed during the audit"
         )
@@ -420,18 +440,40 @@ class _Parser(argparse.ArgumentParser):
 def _prescan_json_and_board(argv):
     """Best-effort extraction of the --json path and board from raw argv, so
     a stale artifact can be invalidated even when argparse later rejects the
-    command line. Returns (board_guess, json_guess); either may be None."""
+    command line. Returns (board_guess, json_guess); either may be None.
+
+    Safety over coverage: this must never WRITE to a wrong path. Option
+    values are consumed as a state machine, option recognition stops at
+    `--`, and any ambiguity (an option-shaped --json value, an empty one)
+    abandons the scan entirely rather than guessing."""
     board = json_out = None
-    it = iter(range(len(argv)))
-    for i in it:
+    i, n = 0, len(argv)
+    while i < n:
         arg = argv[i]
-        if arg == "--json" and i + 1 < len(argv):
+        if arg == "--":
+            break
+        if arg in ("--max-report", "--timeout"):
+            i += 2
+            continue
+        if arg == "--json":
+            if i + 1 >= n or argv[i + 1].startswith("-") or not argv[i + 1]:
+                return None, None
             json_out = argv[i + 1]
-        elif arg.startswith("--json="):
-            json_out = arg.split("=", 1)[1]
-        elif not arg.startswith("-") and board is None:
-            if i == 0 or argv[i - 1] not in ("--json", "--max-report", "--timeout"):
-                board = arg
+            i += 2
+            continue
+        if arg.startswith("--json="):
+            value = arg.split("=", 1)[1]
+            if not value or value.startswith("-"):
+                return None, None
+            json_out = value
+            i += 1
+            continue
+        if arg.startswith("-"):
+            i += 1
+            continue
+        if board is None:
+            board = arg
+        i += 1
     return board, json_out
 
 
@@ -446,7 +488,7 @@ def main(argv=None):
                 json_guess, board_guess, "unevaluable", [], {},
                 "audit did not complete",
             )
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     parser = _Parser(description=__doc__.splitlines()[0])
