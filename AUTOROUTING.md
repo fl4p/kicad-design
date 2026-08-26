@@ -197,7 +197,8 @@ machinery below.
 ## KiCadRoutingTools (KRT): a native-format backend, measured
 
 [KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools) ("KRT", announced
-2026-02) is a second scout/backend option beside Freerouting: a Python CLI + KiCad plugin
+2026-02) is the default scout backend (`PCB.md` makes the pre-pass scout itself the
+default; Freerouting remains the alternative where KRT is unsuitable): a Python CLI + KiCad plugin
 with a prebuilt Rust A* core that **reads and writes `.kicad_pcb` directly** (KiCad 9/10) —
 no DSN/SES round-trip, no JRE. That sidesteps the DSN carrier limits in the
 constraint-serialization section, but only for constraints you pass it explicitly:

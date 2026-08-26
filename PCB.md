@@ -228,19 +228,24 @@ Treat every routing or repair pass as a transaction against a preserved, KiCad-g
 When a local nudge trades one corridor violation for another, restore the clean checkpoint and
 reroute the whole interacting bundle rather than promoting a less visible defect.
 
-External autorouting is optional. Start with the project's established native, manual, interactive,
-or generator-owned routing path. Consider an exploratory run of an external router — Freerouting,
-or the native-format KiCadRoutingTools (KRT; measured entry in `AUTOROUTING.md`) — when routing is
-in scope and the native path consumes disproportionate time, repeated rip-up iterations stop
-reducing the unrouted set, or individual failures are no longer diagnosable. A board with more than
-roughly 50 routing-relevant nets is a useful prompt to consider it, not a threshold: remaining
-connection count, density, layer count, placement and constraint complexity matter more than net
-count. Do not invoke a router solely because the board crosses that heuristic.
+External autorouting as design authority is optional; the exploratory scout is the default. Before
+the first full routing pass — and again after any failed one — run a scout with the native-format
+KiCadRoutingTools (KRT; measured entry in `AUTOROUTING.md`: pip-level setup, ~45 s wall on a
+2-layer 31-net board), or Freerouting where KRT is unsuitable. The scout runs on a scratch copy and
+commits nothing; read it for feasibility, congestion, corridor and via-hotspot evidence, and for
+whether remaining failures are placement defects rather than routing ones. The asymmetry that makes
+it the default: the scout costs about a minute, while skipping it was measured to cost one session
+more than five hours of undiagnosed manual iteration on a placement the scout then proved routable
+(one pad overlap aside). Skip it only for trivial connectivity already verified, or where no
+backend can run — and record that reason in the layout retrospective. Net count is not a gate in
+either direction: density, layer count, placement quality and constraint tightness determine
+difficulty, and the project's established native, manual, interactive, or generator-owned routing
+path remains the authority for what is finally authored.
 
 One trigger is not optional to evaluate: after two failed full routing passes on the same board —
 each ending in cross-net shorts, crossings, or an unrouted remainder rather than a reviewable
-candidate — do not start a third native rewrite until you have either run an exploratory router
-scout (Freerouting or KRT) or recorded in the layout retrospective why the scout is unsuitable here (with
+candidate — do not start a third native rewrite until you have either run (or re-run) the
+exploratory router scout or recorded in the layout retrospective why the scout is unsuitable here (with
 the placement or corridor change the next native pass will make instead). Rewriting the same
 routing plan a third time on momentum is the failure mode this rule exists to interrupt; the
 decision may go either way, but it must be a recorded decision, not a default.
