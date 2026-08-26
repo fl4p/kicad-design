@@ -27,7 +27,7 @@ pays only for what it needs:
 - [Gate detailed placement and routing on floorplan review](#gate-detailed-placement-and-routing-on-floorplan-review)
 - [Prove placement is route-ready and define completion](#prove-placement-is-route-ready-and-define-completion)
 - [Use the incremental footprint-swap path](#use-the-incremental-footprint-swap-path)
-- [Scope external autorouting](#scoped-external-autorouting-opt-in-when-native-routing-stalls)
+- [Scope external autorouting](#scoped-external-autorouting-scout-by-default-promote-by-opt-in)
 - [Record and share layout experience](#record-and-share-layout-experience)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
 - [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
@@ -178,7 +178,7 @@ mechanism receipt, non-settling fill, unrelated semantic change, or local confli
 delta is a quick refusal, not permission to broaden routing scope. See
 [`scripts/README.md`](scripts/README.md) for the transaction contract.
 
-## Scoped external autorouting: opt in when native routing stalls
+## Scoped external autorouting: scout by default, promote by opt-in
 
 Choose routing ownership before choosing a backend:
 
@@ -234,10 +234,13 @@ KiCadRoutingTools (KRT; measured entry in `AUTOROUTING.md`: pip-level setup, ~45
 2-layer 31-net board), or Freerouting where KRT is unsuitable. The scout runs on a scratch copy and
 commits nothing; read it for feasibility, congestion, corridor and via-hotspot evidence, and for
 whether remaining failures are placement defects rather than routing ones. The asymmetry that makes
-it the default: the scout costs about a minute, while skipping it was measured to cost one session
-more than five hours of undiagnosed manual iteration on a placement the scout then proved routable
-(one pad overlap aside). Skip it only for trivial connectivity already verified, or where no
-backend can run — and record that reason in the layout retrospective. Net count is not a gate in
+it the default: the measured scout took under a minute on that board (unmeasured on denser or
+multilayer boards — budget minutes there, not hours), while in one observed session the routing
+pass it would have preceded ran more than five elapsed hours (including an idle hour) of
+undiagnosed manual iteration on a placement the scout then showed routable up to one pad overlap.
+Skip it only for trivial connectivity already verified — the retrospective entry must name the
+verifying artifact or check — or where no backend can run, recording the attempted backend,
+version, and exact error; a bare assertion is not a recorded reason. Net count is not a gate in
 either direction: density, layer count, placement quality and constraint tightness determine
 difficulty, and the project's established native, manual, interactive, or generator-owned routing
 path remains the authority for what is finally authored.
@@ -246,7 +249,9 @@ One trigger is not optional to evaluate: after two failed full routing passes on
 each ending in cross-net shorts, crossings, or an unrouted remainder rather than a reviewable
 candidate — do not start a third native rewrite until you have either run (or re-run) the
 exploratory router scout or recorded in the layout retrospective why the scout is unsuitable here (with
-the placement or corridor change the next native pass will make instead). Rewriting the same
+the placement or corridor change the next native pass will make instead). The skip conditions and
+evidence requirements are the same as for the default pre-pass scout above; "unsuitable" without
+the named evidence does not qualify. Rewriting the same
 routing plan a third time on momentum is the failure mode this rule exists to interrupt; the
 decision may go either way, but it must be a recorded decision, not a default.
 

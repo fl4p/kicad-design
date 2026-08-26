@@ -1,7 +1,8 @@
 # Scoped external autorouting
 
-Operational companion for projects that have opted into external autorouting under the
-routing-ownership policy in [`PCB.md`](PCB.md): the exploratory/critical/routine classification,
+Operational companion for external autorouting. The exploratory scout is the default pre-pass
+step for every board (`PCB.md`); *promotion* of external geometry remains a per-project opt-in
+under the routing-ownership policy in [`PCB.md`](PCB.md): the exploratory/critical/routine classification,
 the structures that must stay critical, and the transactional checkpoint discipline live there.
 Classify ownership first; this file owns the workflow that turns a routine-scope candidate into
 promoted, manifest-bound routes.
@@ -187,7 +188,8 @@ between rip-up rounds instead of shrinking; or you catch yourself widening
 candidate families instead of fixing placement. Any of those means the enumeration
 has stopped being the right instrument.
 
-When the native path is slow or is not converging, consider an exploratory Freerouting run as
+The pre-pass scout is the default (`PCB.md`); when the native path is slow or is not converging,
+re-run the scout — KRT or Freerouting — as
 placement guidance even if the native or pattern router will ultimately finish the board. Its first
 pass can provide evidence about congestion and placement even when none of its geometry is
 promoted. Discarded scout geometry commits nothing, but running and reviewing it still has a cost;
@@ -207,28 +209,40 @@ working; what it derives from board netclasses was not measured. Everything else
 file — scout-first, never trust the router's summary, diff the project file, promotion
 governance — applies to KRT unchanged.
 
-Install (measured on macOS arm64, release v0.21.3): clone, `python3 -m venv .venv`,
-`pip install -r requirements.txt` (numpy/scipy/shapely), then `python build_router.py`,
-which downloads a prebuilt `grid_router` binary. Pin **both** the release tag and the
-binary's self-reported version: release v0.21.3 shipped a binary announcing
-`grid_router v0.21.1` — record the pair, or a re-run cannot prove it used the same core.
+Install (measured on macOS arm64): clone and **check out a release tag** (a bare `main`
+clone is not a pin), `python3 -m venv .venv`, `pip install -r requirements.txt`
+(numpy/scipy/shapely), then `python build_router.py --tag <that tag>` — plain
+`build_router.py` downloads whatever release is current. Record together: the tag, the
+binary's self-reported version, and `shasum -a 256 rust_router/grid_router.so`. In the
+measured install a v0.21.3 checkout's default download produced a binary announcing
+`grid_router v0.21.1`; the divergence is KRT's own documented convention (repo patch
+versions advance without a Rust-crate bump — see `rust_router/Cargo.toml`), which is why
+the recorded tag + self-report + digest triple, not any one number, is the pin.
 
 Measured scout, 2026-08-27, on a 2-layer 59-footprint / 31-net EGS002 inverter board
 (placement taken mid-session from an agent's manual-routing attempt, all copper stripped):
 
-- `py_router/route_planes.py board.kicad_pcb --nets GND --plane-layers B.Cu`: ~9 s wall,
-  with a per-net plane resistance / max-current JSON report.
+- `py_router/route_planes.py board.kicad_pcb --nets GND --plane-layers B.Cu`: seconds of
+  wall time as observed (console logs were not retained; timings here are session
+  observations, not artifact-backed). It emits a per-net plane resistance / max-current
+  JSON report (documented feature).
 - `py_router/route.py board_routed.kicad_pcb --overwrite --track-width 0.5 --power-nets
-  "BUS+" "SW_L" ... --power-nets-widths 2.0 ...`: ~35 s wall, 30/30 nets routed, 51 vias,
-  0 failed, ending in a "KiCad-oracle" recheck that refills zones through pcbnew and
-  confirms connectivity.
+  "BUS+" "SW_L" ... --power-nets-widths 2.0 ...`: about half a minute observed; the run
+  reported 0 failed and ended in a "KiCad-oracle" recheck that refills zones through
+  pcbnew and confirms connectivity. Artifact-verified from the saved boards: all 31 nets
+  connected after refill, 51 vias.
 - Independent verification (rule above: never the summary): `kicad-cli pcb drc` plus the
-  fail-closed `scripts/kicad_copper_collisions.py` audit. Verdict: **zero
-  router-introduced shorts, crossings, clearance errors, or unrouted connections**. The
-  only `shorting_items` (2) were a pad-on-pad placement overlap already present on the
-  stripped input — confirmed by running the same audit on the bare board. The same
-  placement had held a manual agent routing loop at 37–104 certain shorts across ~5 h;
-  as placement-feasibility evidence the scout was decisive either way.
+  fail-closed `scripts/kicad_copper_collisions.py` audit, graded **under the board's
+  original rules** (original `.kicad_pro` restored — see caveat 2). Verdict: zero
+  router-introduced shorts, crossings, or unrouted connections, but **four
+  `hole_clearance` violations** where its GND pour clears NPTH mounting holes at
+  0.2005 mm — copper that is legal only under the 0.2 mm floor KRT itself wrote into the
+  project and that the relaxed project graded clean. The only `shorting_items` (2) were a
+  pad-on-pad placement overlap already present on the stripped input — confirmed by
+  running the same audit on the bare board. The same placement had held a manual agent
+  routing loop for ~5 h, ending at 37 KiCad `shorting_items` (104 pairwise contacts by
+  the stricter collision audit — different metrics, reported separately); as
+  placement-feasibility evidence the scout was decisive either way.
 
 Measured caveats — all three bit during the scout:
 
@@ -237,14 +251,19 @@ Measured caveats — all three bit during the scout:
    unconnected GND items that a `pcbnew.ZONE_FILLER` refill reduced to 0. Refill before
    any DRC, audit, or fab export of KRT output.
 2. **It rewrites the sibling `.kicad_pro`.** In one run it relaxed the copper-to-hole
-   floor 0.25 → 0.2 mm (disclosed loudly as "FAB FLOOR RELAXED") and downgraded DRC
+   floor 0.25 → 0.2 mm (disclosed loudly as "FAB FLOOR RELAXED"), downgraded DRC
    severities to ignore (`solder_mask_bridge`, `pth`/`npth_inside_courtyard`,
-   `annular_width`, `lib_footprint_*`; `starved_thermal` → warning). Every subsequent
-   DRC — KiCad's included — grades against the relaxed set, so a "clean" report and any
-   before/after comparison are meaningless until you diff the project file (section
-   above) and restore the original floor and severities, or accept them as recorded
-   project decisions.
-3. **The version pair diverges** (release tag vs binary self-report, above) — pin both.
+   `annular_width`, `malformed_courtyard`, `lib_footprint_*`; `courtyards_overlap` and
+   `starved_thermal` → warning), and added a `min_via_drill`. It preserves the original
+   values under its own `kicad_routing_tools.fab_floor_origin` key, so restoration is
+   mechanical — do it. Every subsequent DRC — KiCad's included — grades against the
+   relaxed set, so a "clean" report and any before/after comparison are meaningless
+   until you diff the project file (section above) and restore the original floor and
+   severities, or accept them as recorded project decisions. The measured consequence
+   is in the verdict above: four hole-clearance violations invisible under the relaxed
+   floor, real under the original one.
+3. **The version pair diverges** (release tag vs binary self-report — see the install
+   paragraph); pin the tag + self-report + digest triple.
 
 ## Inputs required for a promotable run
 
@@ -346,7 +365,7 @@ python3 scripts/kicad_autoroute_scaffold.py apply \
 The production flow is a candidate-and-promotion pipeline:
 
 ```text
-accepted or authorized critical-footprint floorplan -> optional exploratory scout
+accepted or authorized critical-footprint floorplan -> default exploratory scout (skippable only with recorded evidence, PCB.md)
 -> revise placement/corridors if needed -> discard scout copper
 -> update artifact and renew user approval or recorded autonomous decision as applicable
 -> generator-owned critical skeleton -> deterministic seed with routine opens
