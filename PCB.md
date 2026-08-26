@@ -229,17 +229,18 @@ When a local nudge trades one corridor violation for another, restore the clean 
 reroute the whole interacting bundle rather than promoting a less visible defect.
 
 External autorouting is optional. Start with the project's established native, manual, interactive,
-or generator-owned routing path. Consider an exploratory Freerouting run when routing is in scope
-and the native path consumes disproportionate time, repeated rip-up iterations stop reducing the
-unrouted set, or individual failures are no longer diagnosable. A board with more than roughly 50
-routing-relevant nets is a useful prompt to consider it, not a threshold: remaining connection
-count, density, layer count, placement and constraint complexity matter more than net count. Do not
-invoke Freerouting solely because the board crosses that heuristic.
+or generator-owned routing path. Consider an exploratory run of an external router — Freerouting,
+or the native-format KiCadRoutingTools (KRT; measured entry in `AUTOROUTING.md`) — when routing is
+in scope and the native path consumes disproportionate time, repeated rip-up iterations stop
+reducing the unrouted set, or individual failures are no longer diagnosable. A board with more than
+roughly 50 routing-relevant nets is a useful prompt to consider it, not a threshold: remaining
+connection count, density, layer count, placement and constraint complexity matter more than net
+count. Do not invoke a router solely because the board crosses that heuristic.
 
 One trigger is not optional to evaluate: after two failed full routing passes on the same board —
 each ending in cross-net shorts, crossings, or an unrouted remainder rather than a reviewable
-candidate — do not start a third native rewrite until you have either run the exploratory
-Freerouting scout or recorded in the layout retrospective why the scout is unsuitable here (with
+candidate — do not start a third native rewrite until you have either run an exploratory router
+scout (Freerouting or KRT) or recorded in the layout retrospective why the scout is unsuitable here (with
 the placement or corridor change the next native pass will make instead). Rewriting the same
 routing plan a third time on momentum is the failure mode this rule exists to interrupt; the
 decision may go either way, but it must be a recorded decision, not a default.

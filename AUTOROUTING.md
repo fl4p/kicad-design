@@ -15,6 +15,7 @@ promoted, manifest-bound routes.
 - [Check that each constraint reaches an input the router consumes](#check-that-each-constraint-reaches-an-input-the-router-consumes)
 - [Diff the project file after any external router runs](#diff-the-project-file-after-any-external-router-runs)
 - [Choose the backend from behaviour](#choose-the-backend-from-behaviour)
+- [KiCadRoutingTools (KRT): a native-format backend, measured](#kicadroutingtools-krt-a-native-format-backend-measured)
 - [Inputs required for a promotable run](#inputs-required-for-a-promotable-run)
 - [Onboard with the v2 scaffold](#onboard-with-the-v2-scaffold)
 - [Run the candidate-and-promotion pipeline](#run-the-candidate-and-promotion-pipeline)
@@ -192,6 +193,57 @@ pass can provide evidence about congestion and placement even when none of its g
 promoted. Discarded scout geometry commits nothing, but running and reviewing it still has a cost;
 promotion remains a separate, explicit project decision governed by the scope and manifest
 machinery below.
+
+## KiCadRoutingTools (KRT): a native-format backend, measured
+
+[KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools) ("KRT", announced
+2026-02) is a second scout/backend option beside Freerouting: a Python CLI + KiCad plugin
+with a prebuilt Rust A* core that **reads and writes `.kicad_pcb` directly** (KiCad 9/10) —
+no DSN/SES round-trip, no JRE. That sidesteps the DSN carrier limits in the
+constraint-serialization section, but only for constraints you pass it explicitly:
+`--track-width` and `--power-nets <patterns> --power-nets-widths <mm...>` were measured
+working; what it derives from board netclasses was not measured. Everything else in this
+file — scout-first, never trust the router's summary, diff the project file, promotion
+governance — applies to KRT unchanged.
+
+Install (measured on macOS arm64, release v0.21.3): clone, `python3 -m venv .venv`,
+`pip install -r requirements.txt` (numpy/scipy/shapely), then `python build_router.py`,
+which downloads a prebuilt `grid_router` binary. Pin **both** the release tag and the
+binary's self-reported version: release v0.21.3 shipped a binary announcing
+`grid_router v0.21.1` — record the pair, or a re-run cannot prove it used the same core.
+
+Measured scout, 2026-08-27, on a 2-layer 59-footprint / 31-net EGS002 inverter board
+(placement taken mid-session from an agent's manual-routing attempt, all copper stripped):
+
+- `py_router/route_planes.py board.kicad_pcb --nets GND --plane-layers B.Cu`: ~9 s wall,
+  with a per-net plane resistance / max-current JSON report.
+- `py_router/route.py board_routed.kicad_pcb --overwrite --track-width 0.5 --power-nets
+  "BUS+" "SW_L" ... --power-nets-widths 2.0 ...`: ~35 s wall, 30/30 nets routed, 51 vias,
+  0 failed, ending in a "KiCad-oracle" recheck that refills zones through pcbnew and
+  confirms connectivity.
+- Independent verification (rule above: never the summary): `kicad-cli pcb drc` plus the
+  fail-closed `scripts/kicad_copper_collisions.py` audit. Verdict: **zero
+  router-introduced shorts, crossings, clearance errors, or unrouted connections**. The
+  only `shorting_items` (2) were a pad-on-pad placement overlap already present on the
+  stripped input — confirmed by running the same audit on the bare board. The same
+  placement had held a manual agent routing loop at 37–104 certain shorts across ~5 h;
+  as placement-feasibility evidence the scout was decisive either way.
+
+Measured caveats — all three bit during the scout:
+
+1. **Zones are saved unfilled.** KRT's own completion oracle refills in memory, but the
+   artifact on disk has no `filled_polygon`; `kicad-cli pcb drc` on it reported 24
+   unconnected GND items that a `pcbnew.ZONE_FILLER` refill reduced to 0. Refill before
+   any DRC, audit, or fab export of KRT output.
+2. **It rewrites the sibling `.kicad_pro`.** In one run it relaxed the copper-to-hole
+   floor 0.25 → 0.2 mm (disclosed loudly as "FAB FLOOR RELAXED") and downgraded DRC
+   severities to ignore (`solder_mask_bridge`, `pth`/`npth_inside_courtyard`,
+   `annular_width`, `lib_footprint_*`; `starved_thermal` → warning). Every subsequent
+   DRC — KiCad's included — grades against the relaxed set, so a "clean" report and any
+   before/after comparison are meaningless until you diff the project file (section
+   above) and restore the original floor and severities, or accept them as recorded
+   project decisions.
+3. **The version pair diverges** (release tag vs binary self-report, above) — pin both.
 
 ## Inputs required for a promotable run
 
