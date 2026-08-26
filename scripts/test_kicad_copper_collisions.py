@@ -754,6 +754,16 @@ class Round5Tests(unittest.TestCase):
         self.assertIsNone(json_out)
         self.assertEqual(board, "decoy.kicad_pcb")
 
+    def test_prescan_never_swallows_separator_as_option_value(self):
+        # `--max-report -- --json=real.kicad_pcb` previously consumed `--`
+        # as the option value and then wrote over the post-`--` path
+        self.assertEqual(
+            guard._prescan_json_and_board(
+                ["--max-report", "--", "--json=real.kicad_pcb", "b.kicad_pcb"]
+            ),
+            (None, None),
+        )
+
     def test_prescan_consumes_option_values_as_state_machine(self):
         board, json_out = guard._prescan_json_and_board(
             ["--max-report", "5", "b.kicad_pcb", "--json", "out.json"]

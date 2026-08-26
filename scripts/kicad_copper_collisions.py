@@ -453,6 +453,10 @@ def _prescan_json_and_board(argv):
         if arg == "--":
             break
         if arg in ("--max-report", "--timeout"):
+            # `--` is a separator, never a consumable value: swallowing it
+            # here would let a post-`--` token be misread as an option.
+            if i + 1 < n and argv[i + 1] == "--":
+                return None, None
             i += 2
             continue
         if arg == "--json":
