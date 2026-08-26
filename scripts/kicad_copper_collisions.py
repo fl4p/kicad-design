@@ -34,15 +34,20 @@ not routing bad luck.
 Exit codes (fail closed, per GUARDS.md):
   0  audited, no collisions — and only with the explicit OK verdict line
   1  unevaluable — board missing/unloadable, nothing to audit, no usable
-     pcbnew interpreter, bad CLI value, worker timeout, or an exception
+     pcbnew interpreter, bad CLI value or parse error, worker timeout, or an
+     exception
   2  collisions found
+`--help`/`--version`-style informational exits follow CLI convention (exit 0
+without an audit); never put them in a gating invocation.
 
 JSON lifecycle: when `--json` is given, a fresh "unevaluable / audit did not
-complete" placeholder is written before any evaluation and is only replaced
-by the real verdict when the audit finishes, so a crash, kill, or bogus
-interpreter can never leave a stale clean report standing. Every artifact
-carries an explicit `verdict` field and the audited board path. (The one gap:
-an argparse-level error exits before the JSON path is known.)
+complete" placeholder is written before anything is evaluated — including
+before the `pcbnew` import attempt — and is atomically replaced
+(`os.replace`) by the real verdict only when the audit finishes, so a crash,
+kill, or bogus interpreter cannot leave a stale clean report standing. Every
+artifact carries an explicit `verdict`, the audited board path, the writer's
+pid, and the board file's size/mtime as an input binding. Concurrent audits
+sharing one `--json` path are unsupported — last completed writer wins.
 
 Usage:
   kicad_copper_collisions.py BOARD.kicad_pcb [--max-report N] [--json OUT]
@@ -51,7 +56,13 @@ Usage:
 Runs itself under KiCad's bundled interpreter when `pcbnew` is not importable.
 Set KICAD_PYTHON to override discovery; a configured interpreter that cannot
 `import pcbnew` is an unevaluable failure, not a silent fallback. A worker
-exit of 0 is trusted only when the worker printed the OK verdict line.
+exit of 0 is trusted only when the worker printed a line starting with the OK
+verdict prefix and, when `--json` is in play, the artifact's verdict is
+"clean". Trust boundary: KICAD_PYTHON is *trusted configuration* — the probe
+defends against misconfiguration (wrong python, echo-style stubs), not
+against a deliberately malicious executable, which no output marker can
+authenticate. `--timeout` kills and reaps the direct worker process only;
+descendants are not tracked (the pcbnew worker spawns none).
 """
 
 from __future__ import annotations
@@ -179,8 +190,17 @@ def _write_json(json_out, board_path, verdict, findings, inventory, reason=None)
     }
     if reason:
         payload["reason"] = reason
-    with open(json_out, "w", encoding="utf-8") as fh:
+    payload["pid"] = os.getpid()
+    try:
+        st = os.stat(board_path)
+        payload["board_size"] = st.st_size
+        payload["board_mtime"] = st.st_mtime
+    except OSError:
+        pass
+    tmp = f"{json_out}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=1)
+    os.replace(tmp, json_out)
 
 
 def _unevaluable(json_out, board_path, reason, inventory=None):
@@ -244,7 +264,8 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
 def _interpreter_has_pcbnew(interpreter):
     """Probe that the interpreter really imports pcbnew.
 
-    Requires exit 0 AND stdout that is exactly the probe marker. The marker
+    Requires exit 0 AND stdout equal to the probe marker up to surrounding
+    whitespace (some wrappers append a newline). The marker
     is concatenated at runtime so it is absent from the command text: a bogus
     executable that echoes its arguments and exits 0 (/bin/echo) fails the
     exact-match, and one that ignores them (/usr/bin/true) prints nothing.
@@ -310,16 +331,39 @@ def _run_worker(interpreter, args):
         sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
-    if proc.returncode == 0 and _OK_LINE not in (proc.stdout or ""):
-        return _unevaluable(
-            args.json_out, args.board,
-            "worker exited 0 without producing the OK verdict line",
+    if proc.returncode == 0:
+        ok = any(
+            line.startswith(f"{_OK_LINE}:")
+            for line in (proc.stdout or "").splitlines()
         )
+        if not ok:
+            return _unevaluable(
+                args.json_out, args.board,
+                "worker exited 0 without producing the OK verdict line",
+            )
+        if args.json_out:
+            try:
+                with open(args.json_out, encoding="utf-8") as fh:
+                    verdict = json.load(fh).get("verdict")
+            except (OSError, ValueError):
+                verdict = None
+            if verdict != "clean":
+                return _unevaluable(
+                    args.json_out, args.board,
+                    f"worker exited 0 but JSON verdict is {verdict!r}",
+                )
     return proc.returncode
 
 
+class _Parser(argparse.ArgumentParser):
+    """Parse errors exit 1: the contract reserves 2 for collisions."""
+
+    def error(self, message):
+        self.exit(1, f"COPPER-COLLISIONS-UNEVALUABLE: {message}\n")
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = _Parser(description=__doc__.splitlines()[0])
     parser.add_argument("board")
     parser.add_argument("--max-report", type=int, default=MAX_REPORT_DEFAULT)
     parser.add_argument("--json", dest="json_out")
@@ -333,14 +377,16 @@ def main(argv=None):
     if args.timeout <= 0:
         return _unevaluable(args.json_out, args.board, "--timeout must be > 0")
 
+    # Invalidate any stale artifact before anything is evaluated — including
+    # the import attempt: a broken native pcbnew can raise more than
+    # ImportError.
+    _write_json(
+        args.json_out, args.board, "unevaluable", [], {},
+        "audit did not complete",
+    )
     try:
         import pcbnew  # noqa: F401
     except ImportError:
-        # Invalidate any stale artifact before launcher decisions, too.
-        _write_json(
-            args.json_out, args.board, "unevaluable", [], {},
-            "audit did not complete",
-        )
         if os.environ.get(_WORKER_ENV):
             return _unevaluable(
                 args.json_out, args.board,
@@ -350,6 +396,11 @@ def main(argv=None):
         if not interpreter:
             return _unevaluable(args.json_out, args.board, error)
         return _run_worker(interpreter, args)
+    except Exception:
+        sys.stderr.write(traceback.format_exc())
+        return _unevaluable(
+            args.json_out, args.board, "pcbnew import failed (see stderr)"
+        )
 
     return run_audit(args.board, args.max_report, args.json_out)
 
