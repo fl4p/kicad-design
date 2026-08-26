@@ -51,10 +51,13 @@ audited-clean, 1 means unevaluable (missing/unloadable board, nothing to audit, 
 pcbnew interpreter — none of which is a pass), 2 means certain shorts. It checks tracks, arcs,
 vias, and pads via `GetEffectiveShape` on each shared copper layer with a probed 1-IU touch
 clearance (`Collide(…, 0)` misses exact tangency on 10.0.5); zone fills are excluded because
-the filler owns them, and NPTH pads count only where flashed. The `--json` artifact carries an
-explicit `verdict` and the board path on every run, unevaluable included — never read a stale
-report. Calibrated 2026-08-26 on KiCad 10.0.5 against a board with DRC-confirmed shorts
-(295 collisions, exit 2) and a clean 1761-item production board (0 collisions, exit 0).
+the filler owns them, and NPTH pads count only where flashed. With `--json`, a fresh
+"unevaluable / audit did not complete" placeholder is written before evaluation and replaced by
+the real verdict (with the board path) only when the audit finishes, so a crash or bogus
+interpreter cannot leave a stale clean report; exit 0 from a re-executed worker is trusted only
+with the printed OK verdict line. Calibrated 2026-08-26 on KiCad 10.0.5 against a board with
+DRC-confirmed shorts (295 collisions, exit 2) and a clean 1761-item production board
+(0 collisions, exit 0).
 
 Treat examples here as workflow illustrations; the script parser, module API, and tracked schemas
 are authoritative.

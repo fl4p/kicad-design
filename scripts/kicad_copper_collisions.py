@@ -32,21 +32,26 @@ routing pass; repeated collisions at the same pins are placement evidence,
 not routing bad luck.
 
 Exit codes (fail closed, per GUARDS.md):
-  0  audited, no collisions
-  1  unevaluable input — board missing/unloadable, no copper items to audit
-     (an empty audit is not a pass), or no usable pcbnew interpreter
+  0  audited, no collisions — and only with the explicit OK verdict line
+  1  unevaluable — board missing/unloadable, nothing to audit, no usable
+     pcbnew interpreter, bad CLI value, worker timeout, or an exception
   2  collisions found
 
-The `--json` artifact is written on every path, including unevaluable ones,
-and always carries an explicit `verdict` field plus the audited board path —
-never trust a stale report whose verdict or board does not match the run.
+JSON lifecycle: when `--json` is given, a fresh "unevaluable / audit did not
+complete" placeholder is written before any evaluation and is only replaced
+by the real verdict when the audit finishes, so a crash, kill, or bogus
+interpreter can never leave a stale clean report standing. Every artifact
+carries an explicit `verdict` field and the audited board path. (The one gap:
+an argparse-level error exits before the JSON path is known.)
 
 Usage:
   kicad_copper_collisions.py BOARD.kicad_pcb [--max-report N] [--json OUT]
+                             [--timeout SECONDS]
 
 Runs itself under KiCad's bundled interpreter when `pcbnew` is not importable.
 Set KICAD_PYTHON to override discovery; a configured interpreter that cannot
-`import pcbnew` is an unevaluable failure, not a silent fallback.
+`import pcbnew` is an unevaluable failure, not a silent fallback. A worker
+exit of 0 is trusted only when the worker printed the OK verdict line.
 """
 
 from __future__ import annotations
@@ -57,12 +62,19 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 
 MAX_REPORT_DEFAULT = 40
+WORKER_TIMEOUT_DEFAULT = 600
 # Probed on 10.0.5: clearance 0 misses exact tangency; clearance 1 IU (1 nm)
 # collides tangent shapes and rejects a 1-IU gap.
 TOUCH_CLEARANCE_IU = 1
 _WORKER_ENV = "KICAD_COPPER_COLLISIONS_WORKER"
+# Built by concatenation so the marker never appears literally in the probe
+# command text: an executable that merely echoes its arguments (e.g.
+# /bin/echo) must not be able to satisfy the probe.
+_PROBE_MARKER = "PCBNEW-" + "PROBE-OK"
+_OK_LINE = "COPPER-COLLISIONS-OK"
 
 
 # --------------------------------------------------------------------------- audit
@@ -171,8 +183,17 @@ def _write_json(json_out, board_path, verdict, findings, inventory, reason=None)
         json.dump(payload, fh, indent=1)
 
 
+def _unevaluable(json_out, board_path, reason, inventory=None):
+    _write_json(json_out, board_path, "unevaluable", [], inventory or {}, reason)
+    print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}")
+    return 1
+
+
 def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
     max_report = max(0, max_report)
+    # Invalidate any stale artifact before evaluating anything: if this run
+    # dies mid-audit, the report on disk must say "did not complete".
+    _write_json(json_out, board_path, "unevaluable", [], {}, "audit did not complete")
     try:
         import wx
 
@@ -183,22 +204,21 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
     import pcbnew  # bundled interpreter only
 
     if not os.path.isfile(board_path):
-        reason = f"no such board {board_path}"
-        _write_json(json_out, board_path, "unevaluable", [], {}, reason)
-        print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}")
-        return 1
-    board = pcbnew.LoadBoard(board_path)
-    if board is None:
-        reason = f"failed to load {board_path}"
-        _write_json(json_out, board_path, "unevaluable", [], {}, reason)
-        print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}")
-        return 1
-    findings, inventory = audit_board(board, pcbnew)
+        return _unevaluable(json_out, board_path, f"no such board {board_path}")
+    try:
+        board = pcbnew.LoadBoard(board_path)
+        if board is None:
+            return _unevaluable(json_out, board_path, f"failed to load {board_path}")
+        findings, inventory = audit_board(board, pcbnew)
+    except Exception:
+        sys.stderr.write(traceback.format_exc())
+        return _unevaluable(
+            json_out, board_path, "exception during load/audit (see stderr)"
+        )
     if inventory["items"] == 0:
-        reason = "no copper items on any layer"
-        _write_json(json_out, board_path, "unevaluable", [], inventory, reason)
-        print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}")
-        return 1
+        return _unevaluable(
+            json_out, board_path, "no copper items on any layer", inventory
+        )
     verdict = "collisions" if findings else "clean"
     _write_json(json_out, board_path, verdict, findings, inventory)
     for finding in findings[:max_report]:
@@ -216,7 +236,7 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
         print(f"COPPER-COLLISIONS-FAIL: {len(findings)} certain shorts "
               f"({inventory['items']} copper items; {layer_counts})")
         return 2
-    print(f"COPPER-COLLISIONS-OK: 0 collisions "
+    print(f"{_OK_LINE}: 0 collisions "
           f"({inventory['items']} copper items; {layer_counts})")
     return 0
 
@@ -224,19 +244,24 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
 def _interpreter_has_pcbnew(interpreter):
     """Probe that the interpreter really imports pcbnew.
 
-    Requires the marker on stdout: a bogus executable that ignores its
-    arguments and exits 0 (e.g. /usr/bin/true) must not pass.
+    Requires exit 0 AND stdout that is exactly the probe marker. The marker
+    is concatenated at runtime so it is absent from the command text: a bogus
+    executable that echoes its arguments and exits 0 (/bin/echo) fails the
+    exact-match, and one that ignores them (/usr/bin/true) prints nothing.
     """
+    probe = (
+        "import pcbnew, sys; sys.stdout.write('PCBNEW-' + 'PROBE-OK')"
+    )
     try:
         proc = subprocess.run(
-            [interpreter, "-c", "import pcbnew, sys; sys.stdout.write('PCBNEW-OK')"],
+            [interpreter, "-c", probe],
             capture_output=True,
             text=True,
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return "PCBNEW-OK" in (proc.stdout or "")
+    return proc.returncode == 0 and (proc.stdout or "").strip() == _PROBE_MARKER
 
 
 def _find_kicad_python():
@@ -265,39 +290,66 @@ def _find_kicad_python():
     return None, "no interpreter with pcbnew found; set KICAD_PYTHON"
 
 
-def main(argv=None):
-    def nonneg(value):
-        parsed = int(value)
-        if parsed < 0:
-            raise argparse.ArgumentTypeError("must be >= 0")
-        return parsed
+def _run_worker(interpreter, args):
+    """Re-execute under `interpreter`; trust exit 0 only with the OK line."""
+    cmd = [interpreter, "-u", os.path.abspath(__file__), args.board,
+           "--max-report", str(args.max_report)]
+    if args.json_out:
+        cmd += ["--json", args.json_out]
+    env = dict(os.environ, **{_WORKER_ENV: "1"})
+    try:
+        proc = subprocess.run(
+            cmd, env=env, capture_output=True, text=True, timeout=args.timeout
+        )
+    except subprocess.TimeoutExpired:
+        return _unevaluable(
+            args.json_out, args.board,
+            f"worker exceeded --timeout {args.timeout}s",
+        )
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    if proc.returncode == 0 and _OK_LINE not in (proc.stdout or ""):
+        return _unevaluable(
+            args.json_out, args.board,
+            "worker exited 0 without producing the OK verdict line",
+        )
+    return proc.returncode
 
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("board")
-    parser.add_argument("--max-report", type=nonneg, default=MAX_REPORT_DEFAULT)
+    parser.add_argument("--max-report", type=int, default=MAX_REPORT_DEFAULT)
     parser.add_argument("--json", dest="json_out")
+    parser.add_argument("--timeout", type=int, default=WORKER_TIMEOUT_DEFAULT,
+                        help="worker re-execution timeout, seconds")
     args = parser.parse_args(argv)
+    # Exit-code contract reserves 2 for collisions, so reject bad values with
+    # the unevaluable code instead of argparse's exit(2).
+    if args.max_report < 0:
+        return _unevaluable(args.json_out, args.board, "--max-report must be >= 0")
+    if args.timeout <= 0:
+        return _unevaluable(args.json_out, args.board, "--timeout must be > 0")
 
     try:
         import pcbnew  # noqa: F401
     except ImportError:
+        # Invalidate any stale artifact before launcher decisions, too.
+        _write_json(
+            args.json_out, args.board, "unevaluable", [], {},
+            "audit did not complete",
+        )
         if os.environ.get(_WORKER_ENV):
-            print(
-                "COPPER-COLLISIONS-UNEVALUABLE: re-executed interpreter still "
-                "cannot import pcbnew"
+            return _unevaluable(
+                args.json_out, args.board,
+                "re-executed interpreter still cannot import pcbnew",
             )
-            return 1
         interpreter, error = _find_kicad_python()
         if not interpreter:
-            print(f"COPPER-COLLISIONS-UNEVALUABLE: {error}")
-            return 1
-        cmd = [interpreter, "-u", os.path.abspath(__file__), args.board,
-               "--max-report", str(args.max_report)]
-        if args.json_out:
-            cmd += ["--json", args.json_out]
-        env = dict(os.environ, **{_WORKER_ENV: "1"})
-        proc = subprocess.run(cmd, env=env)
-        return proc.returncode
+            return _unevaluable(args.json_out, args.board, error)
+        return _run_worker(interpreter, args)
 
     return run_audit(args.board, args.max_report, args.json_out)
 

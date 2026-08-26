@@ -72,10 +72,11 @@ compare one zone's fill against another's (measured: 5 zones collapsed to 3 keys
 "did not settle"). And two consecutive fills of an unchanged in-memory board were once observed
 to differ by an nm²-scale XOR sliver (3 nm², one zone, one board, one machine) — cause not
 established; UUID-ordering effects are documented below for *cross-run* order, not for two fills
-of the same loaded board. Per `GUARDS.md`, the default verdict for any nonzero XOR remains
-unsettled; if a project decides to tolerate slivers, derive its threshold from that board's
-smallest copper feature, record the provenance, and always report the sliver's area and zone
-rather than silencing it.
+of the same loaded board. The `GUARDS.md` settle contract is unconditional: a nonzero per-zone
+XOR is unsettled and the board is not saved. When a sliver appears, report its area and zone and
+investigate; do not gate it away with a local threshold. If a recurring, understood sliver ever
+justifies tolerance, that is a change to the `GUARDS.md` contract itself, made with recorded
+provenance — not a per-generator exception.
 
 **Exporting footprints out of a board into a `.pretty`** is the workflow those first three block,
 and it is worth having: it vendors a library that resolves only through some machine's global
