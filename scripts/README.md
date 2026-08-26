@@ -333,7 +333,12 @@ bound below the project root.
   transform cells.
 - Autoroute promotion is currently disabled for every compatibility cell because snapshot v5 and
   the parity negative control have not completed the full DSN/SES/promotion requalification. Do not
-  re-enable a cell until new dated, digest-bound evidence covers those mechanisms.
+  re-enable a cell until new dated, digest-bound evidence covers those mechanisms. **This disables
+  promotion only.** An exploratory scout (Freerouting or KRT, per `PCB.md` and `AUTOROUTING.md`)
+  needs none of this machinery: it runs on a scratch copy, commits nothing, and its output is
+  placement/congestion evidence — do not read this bullet as a reason to skip the scout. (One
+  agent session did exactly that and hand-routed for hours on a placement a 45-second scout
+  proved routable.)
 - Snapshot adapters can prove semantic reproduction without byte identity. Do not claim the latter
   unless the project-owned generator establishes it.
 - Third-party routing does not become design authority merely because DRC passes. Preserve the
