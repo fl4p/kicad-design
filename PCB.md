@@ -214,7 +214,12 @@ and the route is critical. For thermal cases, apply [`THERMALS.md`](THERMALS.md)
 For generated boards, “manual” means deliberately authoring the route in generator
 source—not editing the generated `.kicad_pcb`.
 
-Treat every routing or repair pass as a transaction against a preserved, KiCad-graded checkpoint:
+Treat every routing or repair pass as a transaction against a preserved, KiCad-graded checkpoint.
+The same rule covers discarding: never revert, regenerate over, or `git checkout` away a board
+state that exists nowhere else — archive the working copy first (a dated sidecar file is enough).
+A superseded board is still evidence: the record of what a failed pass actually produced. (Measured
+loss this rule closes: an agent reverted its final hand-routed board uncommitted to start a
+re-route; the state survived only because a human still had it open in the KiCad GUI.)
 
 - clear placement-origin shorts, ordinary clearance, hole and edge failures before routing so later
   findings have an attributable cause;
