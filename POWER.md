@@ -87,18 +87,25 @@ against it:
    [`FOOTPRINTS.md`](FOOTPRINTS.md) on never reusing a remembered table as a current
    verdict). Never propagate band values from memory or from this file into a release
    decision.
-2. **Overshoot.** Switching nodes ring above the bus. Bound the real peak (measure or
-   clamp) and band on the peak, not the DC bus. A wider gap "for overshoot" that jumps
-   an entire band is margin, not code — record it as margin.
-3. **Environment.** Dust and condensation (mobile rigs, unsealed enclosures) push toward
-   pollution-degree-3 creepage, several× the PD2 figure. A **qualified** conformal
+2. **Overshoot — but into the right quantity.** Switching nodes ring above the bus.
+   Bound the real peak (measure or clamp), then apply it where the binding standard
+   says it applies: clearance-type limits follow peak/transient voltages, creepage-type
+   limits follow the RMS/DC working voltage — resolve the two separately rather than
+   widening one figure "for overshoot". Extra distance beyond the resolved requirement
+   is margin, not code — record it as margin.
+3. **Environment.** Dust and condensation (mobile rigs, unsealed enclosures) push the
+   pollution-degree classification up, and higher pollution degrees carry materially
+   larger creepage requirements — read the factor from the binding standard's table for
+   the actual voltage and material group, never from memory. A **qualified** conformal
    coating (the standard's permanent-coating construction, applied and inspected to its
-   process requirements — not any sprayed acrylic) can both move the board to the coated
-   column and suppress the contamination mechanism that motivated the wide gap; it
-   *reduces* the tracking risk, it does not abolish it (coverage defects, trapped ionic
-   contamination, permeability, and mechanical damage remain), so coating plus a
-   moderate gap is a trade to record, not a free pass. Milled slots raise creepage
-   without board growth where coating is not wanted.
+   process requirements — not any sprayed acrylic) can both change the applicable
+   construction and suppress the contamination mechanism that motivated the wide gap;
+   it *reduces* the tracking risk, it does not abolish it (coverage defects, trapped
+   ionic contamination, permeability, and mechanical damage remain), so coating plus a
+   moderate gap is a trade to record, not a free pass. A milled slot can raise the
+   effective creepage path without board growth, but whether and how a slot is credited
+   (minimum slot width included) is construction- and standard-dependent — verify
+   before relying on it.
 4. **Module-interface floors.** A purchased module's own pin pitch may put HV and SELV
    at fractions of a millimetre (a 2.54 mm header interleaving gate drive and logic).
    For *functional or project-derived* specs, document that floor as a residual bound to
@@ -107,14 +114,17 @@ against it:
    requirement** applies, a module below it is not a documentable residual — it
    disqualifies the module or blocks release.
 
-Record the decision per net-class pair with measured minimum gaps per layer, the chosen
-column (coated/uncoated), and who accepted any figure below the untangled spec.
+Record the decision per net-class pair with measured minimum gaps per layer, the
+constructions relied on (coating credited or not, slots credited or not), and who
+accepted any figure below the untangled spec.
 
 ## Classify HV domains by inter-domain voltage, not by net name
 
-Creepage classes follow the voltage *between domains* under normal, transient, and
-relevant fault conditions, together with the insulation function — not net names, and
-not nominal DC level alone. Within a single galvanic system, bootstrapped high-side gate
+Insulation requirements between two domains follow the binding standard's separate
+quantities — clearance-type limits from the peak/transient voltage between them,
+creepage-type limits from the RMS/DC working voltage between them, each evaluated under
+normal operation and the relevant fault conditions, together with the insulation
+function — not net names, and not nominal DC level alone. Within a single galvanic system, bootstrapped high-side gate
 drive rides at bus potential relative to the bus return while low-side gate drive sits
 at return potential, whatever the names suggest: one measured run classified low-side
 gate nets as HV and blocked routing at an unmeetable clearance until it reclassified by

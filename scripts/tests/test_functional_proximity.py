@@ -38,7 +38,7 @@ CASES = [
     # name, board text (None = missing file), argv extras, want exit, want substring
     ("bad_over_budget",
      board(ANCHOR, fp("S1", 100, 115.1, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     [], 1, "S1→Q1 15.10mm > 15.0mm"),
+     [], 1, "S1->Q1 15.10mm > 15.0mm"),
     ("good_under_budget",
      board(ANCHOR, fp("S1", 100, 114.9, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      [], 0, "14.90mm of 15.0mm"),
@@ -93,9 +93,32 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--min-expected=3"], 2, "[E-EXPECT]"),
     ("junk_root_refused", "junk " + board(ANCHOR), [], 2, "[E-PARSE]"),
+    ("fused_root_token_refused",
+     board(ANCHOR).replace("(kicad_pcb ", "(kicad_pcbjunk ", 1), [], 2, "[E-PARSE]"),
+    ("unbalanced_refused", board(ANCHOR)[:-1], [], 2, "[E-PARSE]"),
     ("malformed_at_refused",
      board(ANCHOR).replace("(at 100 100 0.0)", "(at 10..0 100 0.0)", 1),
      [], 2, "[E-PARSE]"),
+    ("nonnumeric_at_refused",
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at BAD 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("malformed_pad_at_refused",
+     board(ANCHOR).replace("(at 5 0)", "(at x5 0)", 1), [], 2, "[E-PARSE]"),
+    ("selfpad_forces_far_pad",  # S1 pads at (100,110) and (100,120); SelfPad picks the far one
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))),
+     [], 1, "20.00mm > 15.0mm"),
+    ("selfpad_wrong_name",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "NOPE")))),
+     [], 2, "[E-PADS]"),
+    ("negative_min_expected_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--min-expected=-1"], 2, "[E-ARGS]"),
+    ("ascii_stdout_still_verdicts",  # PYTHONIOENCODING=ascii must not suppress the verdict
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     [], 0, "FUNC-PROX-PASS"),
     ("duplicate_ref_refused", board(ANCHOR, ANCHOR), [], 2, "[E-PARSE]"),
     ("duplicate_property_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("Anchor", "Q1"),
@@ -107,6 +130,9 @@ CASES = [
      ["--min-expected"], 2, "[E-ARGS]"),
     ("missing_file_refused", "MISSING", [], 2, "[E-READ]"),
 ]
+
+
+TAGS = {0: "FUNC-PROX-PASS:", 1: "FUNC-PROX-FAIL:", 2: "FUNC-PROX-UNVERIFIED:"}
 
 
 def main() -> int:
@@ -122,18 +148,47 @@ def main() -> int:
             else:
                 with open(path, "w") as f:
                     f.write(text)
+            env = dict(os.environ)
+            if name == "ascii_stdout_still_verdicts":
+                env["PYTHONIOENCODING"] = "ascii"
             r = subprocess.run([sys.executable, GUARD, path] + extra,
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=env)
             out = (r.stdout + r.stderr).strip()
-            ok = r.returncode == want_exit and want_sub in out and out.count("\n") == 0
-            print("%-28s %s  (exit %d)  %s" % (name, "ok" if ok else "FAIL",
+            ok = (r.returncode == want_exit and want_sub in out
+                  and out.count("\n") == 0
+                  and out.startswith(TAGS[want_exit])
+                  and (want_exit != 1 or "[OVER-BUDGET]" in out))
+            print("%-30s %s  (exit %d)  %s" % (name, "ok" if ok else "FAIL",
                                                r.returncode, out[:110]))
             if not ok:
                 failures.append((name, want_exit, want_sub, r.returncode, out))
+    # E-INTERNAL: unreachable via input by construction, so force it in-process.
+    import importlib.util
+    import io
+    spec = importlib.util.spec_from_file_location("fp_guard", GUARD)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.run = lambda _argv: 1 // 0  # type: ignore[attr-defined]
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        rc = mod.main(["guard", "whatever"])
+    finally:
+        sys.stdout = old
+    out = buf.getvalue().strip()
+    ok = rc == 2 and "[E-INTERNAL]" in out and out.startswith(TAGS[2]) \
+        and out.count("\n") == 0
+    print("%-30s %s  (exit %d)  %s" % ("internal_error_still_verdicts",
+                                       "ok" if ok else "FAIL", rc, out[:110]))
+    if not ok:
+        failures.append(("internal_error_still_verdicts", 2, "[E-INTERNAL]", rc, out))
+    total = len(CASES) + 1
     if failures:
-        print("\n%d/%d cases FAILED" % (len(failures), len(CASES)))
+        print("\n%d/%d cases FAILED" % (len(failures), total))
         return 1
-    print("\nall %d cases pass" % len(CASES))
+    print("\nall %d cases pass" % total)
     return 0
 
 

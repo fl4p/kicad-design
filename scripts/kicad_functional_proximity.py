@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional-proximity guard: verify declared satellite→anchor placement bindings.
+"""Functional-proximity guard: verify declared satellite->anchor placement bindings.
 
 Motivation (measured): a placement generator binned DNP snubber strings as "small
 passives, bottom row" ~90 mm from the switches they snub. Every mechanical gate
@@ -8,11 +8,11 @@ question. The knowledge existed at capture time ("D-S per device" in the design
 record) and was never consulted again. This guard replays capture-time intent at
 layout time, mechanically.
 
-Scope — read this before trusting a PASS: the guard is a gross-misplacement
+Scope - read this before trusting a PASS: the guard is a gross-misplacement
 tripwire over DECLARED intent. It measures minimum pad-centre to pad-centre
 distance, optionally restricted to named pads. It does not reconstruct current
 loops, return paths, or routed length, and a PASS is not evidence of a good
-switching layout — keep the loop/topology audits and the DRC length tier
+switching layout - keep the loop/topology audits and the DRC length tier
 (POWER.md) in place beside it.
 
 Binding contract (emitted at capture/generation time, when the partner is known):
@@ -24,22 +24,23 @@ Binding contract (emitted at capture/generation time, when the partner is known)
   AnchorPad = <pad name/number on the anchor>                   (optional selector)
 
 A footprint carrying MaxDist/SelfPad/AnchorPad WITHOUT Anchor is a capture defect
-and makes the run UNVERIFIED — deleting an Anchor from a failing binding must
+and makes the run UNVERIFIED - deleting an Anchor from a failing binding must
 never improve the verdict.
 
 Usage:
   kicad_functional_proximity.py BOARD.kicad_pcb [--default-max-mm=MM]
       [--min-expected=N] [--expect=REF1,REF2,...]
 
-  --expect gives the exact set of reference designators the schematic/generator
-  emitted bindings for; any missing or extra declaring footprint is UNVERIFIED.
-  Release invocations must pass --expect (or at least --min-expected) derived from
-  the capture side — without an expectation, a binding silently deleted before the
-  run is invisible to this guard.
+  Release invocations MUST pass --expect with the exact set of reference
+  designators the schematic/generator emitted bindings for; any missing or extra
+  declaring footprint is UNVERIFIED. --min-expected is a weaker development-time
+  tripwire only (a count cannot see one binding swapped for another) and is not a
+  release substitute. Without an expectation, a binding deleted before the run is
+  invisible to this guard.
 
-Verdicts (fail-closed; every run prints exactly one verdict line; UNVERIFIED lines
-carry a stable branch id in brackets so a calibration harness can prove which
-refusal fired):
+Verdicts (fail-closed; every run prints exactly one ASCII verdict line - the
+printer transliterates, so no locale/encoding can suppress the verdict; refusal
+lines carry a stable branch id in brackets, and FAIL lines carry [OVER-BUDGET]):
   0  FUNC-PROX-PASS         every declared binding within budget, all
                             preconditions clean, expectation (if given) met,
                             at least one binding checked
@@ -47,9 +48,12 @@ refusal fired):
   2  FUNC-PROX-UNVERIFIED   the run cannot be trusted; zero declared bindings is
                             always UNVERIFIED (a vacuous run is never a pass)
 
-No third-party dependencies; parses the board file directly (strict UTF-8, root
-expression checked). The pad transform matches KiCad 10 writer output for front
-and back footprints (validated against pcbnew on a mixed-side board).
+Parsing is deliberately strict for a regex-based reader: strict UTF-8, root token
+check, quoted-string-aware parenthesis balance, numerically validated (at ...)
+for every footprint and every pad, duplicate-property and duplicate-refdes
+refusal. Anything the reader cannot positively interpret is E-PARSE, never a
+guess. The pad transform matches KiCad 10 writer output for front and back
+footprints (validated against pcbnew on mixed-side boards).
 """
 
 import math
@@ -60,39 +64,70 @@ import sys
 def verdict(code: int, msg: str, branch: str = "") -> int:
     tag = {0: "FUNC-PROX-PASS", 1: "FUNC-PROX-FAIL", 2: "FUNC-PROX-UNVERIFIED"}[code]
     bid = "[%s] " % branch if branch else ""
-    print("%s: %s%s" % (tag, bid, msg))
+    line = "%s: %s%s" % (tag, bid, msg)
+    # ASCII-transliterated write: no locale or PYTHONIOENCODING can raise here,
+    # so the one-verdict-line contract holds on any host.
+    sys.stdout.write(line.encode("ascii", "backslashreplace").decode("ascii") + "\n")
     return code
+
+
+def _floats(text, what, want=(2, 3)):
+    fields = text.split()
+    if len(fields) not in want:
+        raise ValueError("%s: malformed (at %s)" % (what, text))
+    try:
+        nums = [float(x) for x in fields]
+    except ValueError:
+        raise ValueError("%s: non-numeric (at %s)" % (what, text))
+    if not all(math.isfinite(v) for v in nums):
+        raise ValueError("%s: non-finite (at %s)" % (what, text))
+    return nums
 
 
 def parse_board(path):
     """Return {refdes: {"pads": [(name, gx, gy)], "props": {...}}}; raises ValueError."""
     with open(path, encoding="utf-8") as f:  # strict UTF-8: undecodable input raises
         s = f.read()
-    if not s.lstrip().startswith("(kicad_pcb"):
+    if not re.match(r"\s*\(kicad_pcb[\s(]", s):
         raise ValueError("root expression is not (kicad_pcb ...)")
+    stripped = re.sub(r'"(?:[^"\\]|\\.)*"', '""', s)
+    if stripped.count("(") != stripped.count(")"):
+        raise ValueError("unbalanced parentheses (%d open, %d close)"
+                         % (stripped.count("("), stripped.count(")")))
+    if not stripped.rstrip().endswith(")"):
+        raise ValueError("board does not end in a closing parenthesis")
     fps = {}
     starts = [m.start() for m in re.finditer(r"\(footprint ", s)]
     starts.append(len(s))
     for i in range(len(starts) - 1):
         b = s[starts[i]:starts[i + 1]]
         ref_m = re.search(r'\(property "Reference" "([^"]+)"', b)
-        at_m = re.search(r"\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)", b)
+        at_m = re.search(r"\(at\s+([^)]*)\)", b)  # first (at ...) is the footprint's own
         if not ref_m or not at_m:
-            raise ValueError("footprint without Reference or (at ...): %r" % b[:80])
+            raise ValueError("footprint without Reference or (at ...): %r" % b[:60])
         ref = ref_m.group(1)
-        fx, fy = float(at_m.group(1)), float(at_m.group(2))
-        th = math.radians(float(at_m.group(3) or 0))
+        nums = _floats(at_m.group(1), "footprint %s" % ref)
+        fx, fy = nums[0], nums[1]
+        th = math.radians(nums[2] if len(nums) == 3 else 0.0)
         props = {}
         for k, v in re.findall(r'\(property "([^"]+)" "([^"]*)"', b):
             if k in props:
                 raise ValueError("%s: duplicate property %r" % (ref, k))
             props[k] = v
         pads = []
-        for pm in re.finditer(r'\(pad "([^"]*)"[^(]*\(at ([-\d.]+) ([-\d.]+)', b):
-            x, y = float(pm.group(2)), float(pm.group(3))
+        pstarts = [m.start() for m in re.finditer(r'\(pad\s+"', b)]
+        pstarts.append(len(b))
+        for k in range(len(pstarts) - 1):
+            pb = b[pstarts[k]:pstarts[k + 1]]
+            nm = re.match(r'\(pad\s+"([^"]*)"', pb)
+            pat = re.search(r"\(at\s+([^)]*)\)", pb)
+            if not nm or not pat:
+                raise ValueError("%s: pad without a parseable (at ...)" % ref)
+            pn = _floats(pat.group(1), "%s pad %r" % (ref, nm.group(1)))
+            x, y = pn[0], pn[1]
             gx = fx + x * math.cos(th) + y * math.sin(th)
             gy = fy - x * math.sin(th) + y * math.cos(th)
-            pads.append((pm.group(1), gx, gy))
+            pads.append((nm.group(1), gx, gy))
         if ref in fps:
             raise ValueError("reference designator %r is ambiguous "
                              "(multiple footprints)" % ref)
@@ -122,6 +157,8 @@ def run(argv) -> int:
                     return verdict(2, "--default-max-mm must be finite and > 0", "E-ARGS")
             elif name == "--min-expected":
                 min_expected = int(val)
+                if min_expected < 0:
+                    return verdict(2, "--min-expected must be >= 0", "E-ARGS")
             elif name == "--expect":
                 expect = sorted(set(r.strip() for r in val.split(",") if r.strip()))
                 if not expect:
@@ -145,7 +182,7 @@ def run(argv) -> int:
                      if "Anchor" not in fp["props"]
                      and any(k in fp["props"] for k in BINDING_FIELDS))
     if orphans:
-        return verdict(2, "binding fields without Anchor on %s — a deleted or "
+        return verdict(2, "binding fields without Anchor on %s - a deleted or "
                           "never-emitted Anchor must not improve the verdict"
                        % ", ".join(orphans), "E-ORPHAN")
     if expect is not None:
@@ -157,11 +194,11 @@ def run(argv) -> int:
                            % (",".join(missing) or "-", ",".join(extra) or "-"),
                            "E-EXPECT")
     if len(declaring) < min_expected:
-        return verdict(2, "%d binding(s) declared but --min-expected=%d — bindings "
+        return verdict(2, "%d binding(s) declared but --min-expected=%d - bindings "
                           "missing at capture time" % (len(declaring), min_expected),
                        "E-EXPECT")
     if not declaring:
-        return verdict(2, "0 bindings declared — nothing to verify, and a vacuous "
+        return verdict(2, "0 bindings declared - nothing to verify, and a vacuous "
                           "run is never a pass; emit Anchor/MaxDist at capture time "
                           "(see POWER.md)", "E-EMPTY")
 
@@ -189,7 +226,7 @@ def run(argv) -> int:
             budget = default_max
         else:
             return verdict(2, "%s declares Anchor without MaxDist and no "
-                              "--default-max-mm was given — budgets are "
+                              "--default-max-mm was given - budgets are "
                               "project-derived, the guard has no built-in number"
                            % ref, "E-BUDGET")
         spads = fp["pads"]
@@ -199,7 +236,7 @@ def run(argv) -> int:
         if "AnchorPad" in fp["props"]:
             apads = [p for p in apads if p[0] == fp["props"]["AnchorPad"]]
         if not spads or not apads:
-            return verdict(2, "%s→%s: no pads match (SelfPad/AnchorPad selector "
+            return verdict(2, "%s->%s: no pads match (SelfPad/AnchorPad selector "
                               "wrong, or a footprint has no pads)" % (ref, anchor),
                            "E-PADS")
         best = min(((math.hypot(px - qx, py - qy), pn, qn)
@@ -210,11 +247,12 @@ def run(argv) -> int:
             failures.append((ref, anchor, d, budget, pn, qn))
 
     if failures:
-        detail = "; ".join("%s→%s %.2fmm > %.1fmm (pads %s↔%s)" % f for f in failures)
+        detail = "; ".join("%s->%s %.2fmm > %.1fmm (pads %s<->%s)" % f
+                           for f in failures)
         return verdict(1, "%d of %d binding(s) exceed budget: %s"
-                       % (len(failures), len(results), detail))
+                       % (len(failures), len(results), detail), "OVER-BUDGET")
     worst = max(results, key=lambda r: r[2] / r[3])
-    return verdict(0, "%d binding(s) within budget; tightest margin %s→%s "
+    return verdict(0, "%d binding(s) within budget; tightest margin %s->%s "
                       "%.2fmm of %.1fmm"
                    % (len(results), worst[0], worst[1], worst[2], worst[3]))
 
@@ -222,7 +260,7 @@ def run(argv) -> int:
 def main(argv) -> int:
     try:
         return run(argv)
-    except Exception as exc:  # noqa: BLE001 — a guard must never die without a verdict
+    except Exception as exc:  # noqa: BLE001 - a guard must never die without a verdict
         return verdict(2, "internal error, refusing to grade: %r" % exc, "E-INTERNAL")
 
 
