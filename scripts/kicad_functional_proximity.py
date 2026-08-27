@@ -29,159 +29,294 @@ never improve the verdict.
 
 Usage:
   kicad_functional_proximity.py BOARD.kicad_pcb [--default-max-mm=MM]
-      [--min-expected=N] [--expect=REF1,REF2,...]
+      [--min-expected=N] [--expect=REF1,REF2,...] [--skip-load-check]
 
   Release invocations MUST pass --expect with the exact set of reference
   designators the schematic/generator emitted bindings for; any missing or extra
   declaring footprint is UNVERIFIED. --min-expected is a weaker development-time
   tripwire only (a count cannot see one binding swapped for another) and is not a
-  release substitute. Without an expectation, a binding deleted before the run is
-  invisible to this guard.
+  release substitute.
 
-Verdicts (fail-closed; every run prints exactly one ASCII verdict line - the
-printer transliterates, so no locale/encoding can suppress the verdict; refusal
-lines carry a stable branch id in brackets, and FAIL lines carry [OVER-BUDGET]):
-  0  FUNC-PROX-PASS         every declared binding within budget, all
-                            preconditions clean, expectation (if given) met,
-                            at least one binding checked
+Two defense layers, both fail-closed:
+
+1. **Authoritative loadability precondition.** Before grading, the board must load
+   in the installed KiCad (kicad-cli, located via $KICAD_CLI or standard install
+   paths). A board KiCad rejects is refused [E-LOAD]; kicad-cli missing is
+   refused [E-TOOL]. --skip-load-check disables this layer for synthetic test
+   fixtures and development; a release run must not pass it.
+2. **Structural s-expression parsing.** The board is tokenized (parens, quoted
+   strings with escapes, printable-ASCII atoms separated by ASCII whitespace) and
+   walked structurally. Inside a footprint, only the known KiCad 10 child
+   elements are permitted - an unrecognized child element is refused [E-PARSE],
+   never silently ignored, so no separator or spelling trick can hide a binding
+   field from the guard while KiCad still shows it (or vice versa). This is a
+   deliberately NARROWER supported subset than KiCad's own parser (e.g. unquoted
+   non-ASCII atoms refuse here; some legacy boards load in KiCad but refuse
+   here) - narrowing is fail-safe, silence is not.
+
+Numbers use a measured subset of KiCad 10.0.5's accepted forms: decimal,
+bare-dot and exponent forms (explicit exponent sign included) grade; a leading
+'+', digit underscores, and nan/inf refuse; a nonzero literal that underflows to
+zero and any coordinate outside +-2000 mm refuse (KiCad clamps internally near
+2147 mm; the guard refuses rather than diverging silently).
+
+Verdicts (every run prints exactly one ASCII, control-scrubbed stdout line;
+refusals carry a stable branch id, FAIL carries [OVER-BUDGET]):
+  0  FUNC-PROX-PASS         every declared binding within budget, preconditions
+                            clean, expectation (if given) met, >= 1 binding
   1  FUNC-PROX-FAIL         at least one binding exceeds its budget
   2  FUNC-PROX-UNVERIFIED   the run cannot be trusted; zero declared bindings is
                             always UNVERIFIED (a vacuous run is never a pass)
-
-Parsing is deliberately strict for a regex-based reader: strict UTF-8; the
-(kicad_pcb ...) root expression is scanned string-aware to its matching close and
-must span the file (footprints after the root are refused, not graded); token
-separators are the ASCII whitespace KiCad accepts (space/tab/CR/LF - a tab cannot
-hide a selector, and non-ASCII outside quoted strings is refused, since KiCad
-rejects it while Python whitespace matching would silently admit it); numbers use a verified
-subset of KiCad 10's accepted forms (decimals, bare-dot and exponent forms load;
-leading '+', underscores, nan/inf refuse), validated for every footprint and
-every pad; duplicate properties and duplicate refdes refuse. Anything the reader
-cannot positively interpret is E-PARSE, never a guess. The verdict line is ASCII-transliterated and control-character-scrubbed,
-so it is exactly one stdout line on any host. The pad transform matches KiCad 10
-writer output for front and back footprints (validated against pcbnew on
-mixed-side boards).
 """
 
 import math
+import os
 import re
+import subprocess
 import sys
+import tempfile
 
 
 def verdict(code: int, msg: str, branch: str = "") -> int:
     tag = {0: "FUNC-PROX-PASS", 1: "FUNC-PROX-FAIL", 2: "FUNC-PROX-UNVERIFIED"}[code]
     bid = "[%s] " % branch if branch else ""
     line = "%s: %s%s" % (tag, bid, msg)
-    # ASCII-transliterated, control-character-scrubbed write: no locale,
-    # PYTHONIOENCODING, or embedded newline in echoed input can raise here or
-    # break the exactly-one-stdout-line contract.
     line = line.encode("ascii", "backslashreplace").decode("ascii")
     line = re.sub(r"[\x00-\x1f\x7f]", " ", line)
     sys.stdout.write(line + "\n")
     return code
 
 
-# Verified subset of the number forms KiCad 10.0.5's parser accepts (measured:
-# 1e2, 100., .5, -.5 load; +100 and 1_00 are rejected). Python float() is wider
-# (underscores, nan/inf, leading '+'), so validate lexically before converting.
-_NUM = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE]-?\d+)?\Z")
-_WS = " \t\r\n"  # KiCad token separators are ASCII; Python \s would admit NBSP etc.
+# ---------------------------------------------------------------- tokenizer ---
+
+_WS = " \t\r\n"
 
 
-def _floats(text, what, want=(2, 3)):
-    fields = [f for f in re.split(r"[ \t\r\n]+", text.strip(_WS)) if f]
-    if len(fields) not in want:
-        raise ValueError("%s: malformed (at %s)" % (what, text))
-    if not all(_NUM.match(x) for x in fields):
-        raise ValueError("%s: non-numeric (at %s)" % (what, text))
-    nums = [float(x) for x in fields]
-    if not all(math.isfinite(v) for v in nums):
-        raise ValueError("%s: non-finite (at %s)" % (what, text))
-    return nums
-
-
-def _root_span_end(s):
-    """Index of the char closing the first top-level expression (string-aware)."""
-    i = s.find("(")
-    if i < 0:
-        raise ValueError("no expression found")
-    depth = 0
-    instr = esc = False
-    for j in range(i, len(s)):
-        c = s[j]
-        if instr:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                instr = False
-        elif c == '"':
-            instr = True
+def _tokenize(s):
+    """Yield ('(',), (')',), ('str', text), ('atom', text). Anything else raises."""
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in _WS:
+            i += 1
         elif c == "(":
-            depth += 1
+            yield ("(",)
+            i += 1
         elif c == ")":
-            depth -= 1
-            if depth == 0:
-                return j
-    raise ValueError("root expression never closes")
+            yield (")",)
+            i += 1
+        elif c == '"':
+            j = i + 1
+            buf = []
+            while j < n and s[j] != '"':
+                if s[j] == "\\":
+                    if j + 1 >= n:
+                        raise ValueError("unterminated escape at offset %d" % j)
+                    buf.append(s[j + 1])
+                    j += 2
+                else:
+                    buf.append(s[j])
+                    j += 1
+            if j >= n:
+                raise ValueError("unterminated string starting at offset %d" % i)
+            yield ("str", "".join(buf))
+            i = j + 1
+        else:
+            j = i
+            while j < n and s[j] not in _WS and s[j] not in '()"':
+                if not (0x21 <= ord(s[j]) <= 0x7E):
+                    raise ValueError("unsupported character %r at offset %d "
+                                     "(outside the guard's supported subset)"
+                                     % (s[j], j))
+                j += 1
+            yield ("atom", s[i:j])
+            i = j
+
+
+def _read_tree(s):
+    """Parse exactly one top-level list; trailing tokens refuse."""
+    stack = []
+    root = None
+    for tok in _tokenize(s):
+        if root is not None:
+            raise ValueError("content after the root expression")
+        if tok[0] == "(":
+            stack.append([])
+        elif tok[0] == ")":
+            if not stack:
+                raise ValueError("unbalanced ')'")
+            done = stack.pop()
+            if stack:
+                stack[-1].append(done)
+            else:
+                root = done
+        else:
+            if not stack:
+                raise ValueError("token outside any expression")
+            stack[-1].append(tok)
+    if stack:
+        raise ValueError("root expression never closes")
+    if root is None:
+        raise ValueError("no expression found")
+    return root
+
+
+def _head(node):
+    return node[0][1] if (isinstance(node, list) and node
+                          and node[0][0] == "atom") else None
+
+
+# ------------------------------------------------------------------ numbers ---
+
+# Measured against KiCad 10.0.5: 1e2, 100., .5, -.5, 1e+3, 1E+3 load; +100 and
+# 1_00 are rejected. Python float() is wider, so validate lexically first.
+_NUM = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\Z")
+_RANGE_MM = 2000.0
+
+
+def _coord(tok, what):
+    if tok[0] != "atom" or not _NUM.match(tok[1]):
+        raise ValueError("%s: non-numeric coordinate %r" % (what, tok[1]))
+    v = float(tok[1])
+    if not math.isfinite(v):
+        raise ValueError("%s: non-finite coordinate %r" % (what, tok[1]))
+    if v == 0.0 and re.search(r"[1-9]", tok[1].split("e")[0].split("E")[0]):
+        raise ValueError("%s: coordinate %r underflows to zero" % (what, tok[1]))
+    if abs(v) > _RANGE_MM:
+        raise ValueError("%s: coordinate %r outside the supported +-%g mm range"
+                         % (what, tok[1], _RANGE_MM))
+    return v
+
+
+def _at_args(node, what, want=(2, 3)):
+    args = node[1:]
+    if len(args) not in want:
+        raise ValueError("%s: malformed (at ...)" % what)
+    return [_coord(t, what) for t in args]
+
+
+# ------------------------------------------------------------------- walker ---
+
+# Direct children a KiCad 10 footprint may carry. An unknown child is refused,
+# never ignored: silent tolerance is exactly how a mangled "property" token
+# would hide a binding field. Extend this list deliberately when KiCad does.
+_FP_CHILD_LISTS = {
+    "at", "descr", "tags", "property", "path", "sheetname", "sheetfile", "attr",
+    "uuid", "tstamp", "layer", "autoplace_cost", "solder_mask_margin",
+    "solder_paste_margin", "solder_paste_margin_ratio", "solder_paste_ratio",
+    "clearance", "zone_connect", "thermal_width", "thermal_gap", "fp_text",
+    "fp_text_box", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly",
+    "fp_curve", "pad", "model", "zone", "group", "embedded_fonts",
+    "net_tie_pad_groups", "private_layers", "duplicate_pad_numbers_are_jumpers",
+    "jumper_pad_groups", "embedded_files", "units", "locked", "tedit",
+}
+_FP_CHILD_ATOMS = {"locked", "placed"}
+
+
+def _parse_footprint(node):
+    ref = None
+    at = None
+    props = {}
+    pads = []
+    for ch in node[1:]:
+        if isinstance(ch, tuple):
+            if ch[0] == "str":
+                continue  # the library id
+            if ch[0] == "atom" and ch[1] in _FP_CHILD_ATOMS:
+                continue
+            raise ValueError("unexpected token %r inside footprint" % (ch[1],))
+        h = _head(ch)
+        if h is None or h not in _FP_CHILD_LISTS:
+            raise ValueError("unrecognized footprint child %r - refusing rather "
+                             "than silently ignoring it" % (h,))
+        if h == "at" and at is None:
+            at = ch
+        elif h == "property":
+            # Real KiCad 10 output writes some property names as bare atoms
+            # (e.g. ki_fp_filters); names may be str or atom, values must be str.
+            if (len(ch) < 3 or ch[1][0] not in ("str", "atom")
+                    or ch[2][0] != "str"):
+                raise ValueError("malformed (property ...) inside footprint")
+            k, v = ch[1][1], ch[2][1]
+            if k in props:
+                raise ValueError("duplicate property %r" % k)
+            props[k] = v
+        elif h == "pad":
+            if len(ch) < 2 or ch[1][0] != "str":
+                raise ValueError("malformed (pad ...) inside footprint")
+            pname = ch[1][1]
+            pat = next((g for g in ch[2:]
+                        if isinstance(g, list) and _head(g) == "at"), None)
+            if pat is None:
+                raise ValueError("pad %r without (at ...)" % pname)
+            pads.append((pname, pat))
+    ref = props.get("Reference")
+    if ref is None or at is None:
+        raise ValueError("footprint without Reference property or (at ...)")
+    nums = _at_args(at, "footprint %s" % ref)
+    fx, fy = nums[0], nums[1]
+    th = math.radians(nums[2] if len(nums) == 3 else 0.0)
+    gpads = []
+    for pname, pat in pads:
+        pn = _at_args(pat, "%s pad %r" % (ref, pname))
+        x, y = pn[0], pn[1]
+        gx = fx + x * math.cos(th) + y * math.sin(th)
+        gy = fy - x * math.sin(th) + y * math.cos(th)
+        gpads.append((pname, gx, gy))
+    return ref, {"pads": gpads, "props": props}
 
 
 def parse_board(path):
-    """Return {refdes: {"pads": [(name, gx, gy)], "props": {...}}}; raises ValueError."""
-    with open(path, encoding="utf-8") as f:  # strict UTF-8: undecodable input raises
+    with open(path, encoding="utf-8") as f:  # strict UTF-8
         s = f.read()
-    if not re.match(r"[ \t\r\n]*\(kicad_pcb[ \t\r\n(]", s):
+    root = _read_tree(s)
+    if _head(root) != "kicad_pcb":
         raise ValueError("root expression is not (kicad_pcb ...)")
-    outside = re.sub(r'"(?:[^"\\]|\\.)*"', '""', s)
-    m = re.search(r"[^\x00-\x7f]", outside)
-    if m:
-        raise ValueError("non-ASCII character outside quoted strings at offset %d"
-                         % m.start())
-    root_end = _root_span_end(s)
-    if s[root_end + 1:].strip():
-        raise ValueError("content after the (kicad_pcb ...) root expression")
-    s = s[:root_end]  # grade only children of the root, exactly like KiCad would
     fps = {}
-    starts = [m.start() for m in re.finditer(r"\(footprint[ \t\r\n]", s)]
-    starts.append(len(s))
-    for i in range(len(starts) - 1):
-        b = s[starts[i]:starts[i + 1]]
-        ref_m = re.search(r'\(property[ \t\r\n]+"Reference"[ \t\r\n]+"([^"]+)"', b)
-        at_m = re.search(r"\(at[ \t\r\n]+([^)]*)\)", b)  # first (at ...) is the footprint's own
-        if not ref_m or not at_m:
-            raise ValueError("footprint without Reference or (at ...): %r" % b[:60])
-        ref = ref_m.group(1)
-        nums = _floats(at_m.group(1), "footprint %s" % ref)
-        fx, fy = nums[0], nums[1]
-        th = math.radians(nums[2] if len(nums) == 3 else 0.0)
-        props = {}
-        for k, v in re.findall(r'\(property[ \t\r\n]+"([^"]+)"[ \t\r\n]+"([^"]*)"', b):
-            if k in props:
-                raise ValueError("%s: duplicate property %r" % (ref, k))
-            props[k] = v
-        pads = []
-        pstarts = [m.start() for m in re.finditer(r'\(pad[ \t\r\n]+"', b)]
-        pstarts.append(len(b))
-        for k in range(len(pstarts) - 1):
-            pb = b[pstarts[k]:pstarts[k + 1]]
-            nm = re.match(r'\(pad[ \t\r\n]+"([^"]*)"', pb)
-            pat = re.search(r"\(at[ \t\r\n]+([^)]*)\)", pb)
-            if not nm or not pat:
-                raise ValueError("%s: pad without a parseable (at ...)" % ref)
-            pn = _floats(pat.group(1), "%s pad %r" % (ref, nm.group(1)))
-            x, y = pn[0], pn[1]
-            gx = fx + x * math.cos(th) + y * math.sin(th)
-            gy = fy - x * math.sin(th) + y * math.cos(th)
-            pads.append((nm.group(1), gx, gy))
-        if ref in fps:
-            raise ValueError("reference designator %r is ambiguous "
-                             "(multiple footprints)" % ref)
-        fps[ref] = {"pads": pads, "props": props}
+    for ch in root[1:]:
+        if isinstance(ch, list) and _head(ch) == "footprint":
+            ref, fp = _parse_footprint(ch)
+            if ref in fps:
+                raise ValueError("reference designator %r is ambiguous "
+                                 "(multiple footprints)" % ref)
+            fps[ref] = fp
     if not fps:
         raise ValueError("no footprints parsed")
     return fps
 
+
+# ---------------------------------------------------------- KiCad load check ---
+
+_KICAD_CLI_CANDIDATES = (
+    "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+    "/usr/bin/kicad-cli", "/usr/local/bin/kicad-cli", "/snap/bin/kicad.kicad-cli",
+)
+
+
+def _find_kicad_cli():
+    env = os.environ.get("KICAD_CLI")
+    if env:
+        return env if os.path.isfile(env) else None
+    import shutil
+    onpath = shutil.which("kicad-cli")
+    if onpath:
+        return onpath
+    for c in _KICAD_CLI_CANDIDATES:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _kicad_loads(cli, board):
+    """True iff the installed KiCad can load the board (authoritative)."""
+    with tempfile.TemporaryDirectory() as td:
+        r = subprocess.run(
+            [cli, "pcb", "export", "pos", "-o", os.path.join(td, "p.pos"), board],
+            capture_output=True, text=True, timeout=120)
+    return r.returncode == 0
+
+
+# --------------------------------------------------------------------- main ---
 
 BINDING_FIELDS = ("MaxDist", "SelfPad", "AnchorPad")
 
@@ -191,8 +326,12 @@ def run(argv) -> int:
     default_max = None
     min_expected = 0
     expect = None
+    skip_load = False
     for o in (a for a in argv[1:] if a.startswith("--")):
         name, eq, val = o.partition("=")
+        if name == "--skip-load-check" and not eq:
+            skip_load = True
+            continue
         if not eq:
             return verdict(2, "option %s needs =VALUE (e.g. --min-expected=4)" % name,
                            "E-ARGS")
@@ -215,6 +354,21 @@ def run(argv) -> int:
             return verdict(2, "malformed value in %s" % o, "E-ARGS")
     if len(args) != 1:
         return verdict(2, "want exactly one board file (plus --options)", "E-ARGS")
+
+    if not skip_load:
+        cli = _find_kicad_cli()
+        if cli is None:
+            return verdict(2, "kicad-cli not found ($KICAD_CLI or standard paths) - "
+                              "the authoritative load check cannot run; "
+                              "--skip-load-check exists for development only",
+                           "E-TOOL")
+        try:
+            loadable = _kicad_loads(cli, args[0])
+        except (OSError, subprocess.SubprocessError) as exc:
+            return verdict(2, "KiCad load check could not run: %s" % exc, "E-TOOL")
+        if not loadable:
+            return verdict(2, "the installed KiCad refuses to load this board - "
+                              "not grading what the authority rejects", "E-LOAD")
 
     try:
         fps = parse_board(args[0])
@@ -298,9 +452,10 @@ def run(argv) -> int:
         return verdict(1, "%d of %d binding(s) exceed budget: %s"
                        % (len(failures), len(results), detail), "OVER-BUDGET")
     worst = max(results, key=lambda r: r[2] / r[3])
+    note = " (advisory: KiCad load check skipped)" if skip_load else ""
     return verdict(0, "%d binding(s) within budget; tightest margin %s->%s "
-                      "%.2fmm of %.1fmm"
-                   % (len(results), worst[0], worst[1], worst[2], worst[3]))
+                      "%.2fmm of %.1fmm%s"
+                   % (len(results), worst[0], worst[1], worst[2], worst[3], note))
 
 
 def main(argv) -> int:

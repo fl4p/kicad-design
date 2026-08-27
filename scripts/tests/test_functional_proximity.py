@@ -184,7 +184,7 @@ CASES = [
     ("negative_coordinate_accepted",  # kills removing the leading '-' from the grammar
      board(ANCHOR, fp("S1", -0.5, 110, props=(("Anchor", "Q1"), ("MaxDist", "150"))))
      .replace("(at -0.5 110 0.0)", "(at -.5 110 0.0)", 1),
-     [], 0, "FUNC-PROX-PASS"),
+     [], 0, "101.00mm of 150.0mm"),
     ("underscore_number_refused",  # Python float() accepts 1_00; KiCad rejects it
      board(ANCHOR).replace("(at 100 100 0.0)", "(at 1_00 100 0.0)", 1),
      [], 2, "[E-PARSE]"),
@@ -192,6 +192,40 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))).replace(
          '(property "Anchor" "Q1"', '(property "Anchor" "Q1"'),
      [], 2, "[E-PARSE]"),
+    # --- round-5: separators, exponent forms, underflow/range, unicode strings ---
+    ("vt_separator_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property\x0b"SelfPad"', 1),
+     [], 2, "[E-PARSE]"),
+    ("punct_separator_refused",  # (property!"SelfPad" must refuse, never silently ignore
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property!"SelfPad"', 1),
+     [], 2, "[E-PARSE]"),
+    ("del_char_refused",
+     board(ANCHOR).replace('(layer "F.Cu")', '(layer\x7f"F.Cu")', 1),
+     [], 2, "[E-PARSE]"),
+    ("exponent_plus_and_uppercase_ok",  # KiCad accepts 1e+2 / 1E2; distances must grade
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
+     .replace("(at 100 110 0.0)", "(at 1e+2 1.1E2 0.0)", 1),
+     [], 0, "10.00mm of 15.0mm"),
+    ("underflow_to_zero_refused",  # KiCad rejects 1e-324; Python floats it to 0.0
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at 1e-324 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("outside_range_refused",  # KiCad clamps ~2147mm; the guard refuses instead of diverging
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at 1e308 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("multiline_board_ok",  # real newlines between elements (kills CR/LF separator removal)
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
+     .replace(") (", ")\n("),
+     [], 0, "10.00mm of 15.0mm"),
+    ("unicode_in_quoted_string_ok",  # quoted UTF-8 values stay legal
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "1000\u00b5F")))),
+     [], 0, "10.00mm of 15.0mm"),
 ]
 
 
@@ -214,7 +248,7 @@ def main() -> int:
             env = dict(os.environ)
             if name in ("ascii_stdout_still_verdicts", "ascii_stdout_on_refusal"):
                 env["PYTHONIOENCODING"] = "ascii"
-            r = subprocess.run([sys.executable, GUARD, path] + extra,
+            r = subprocess.run([sys.executable, GUARD, path, "--skip-load-check"] + extra,
                                capture_output=True, text=True, env=env)
             out = r.stdout.rstrip("\n")
             # The verdict is exactly one newline-terminated stdout line; stderr empty.
@@ -249,7 +283,46 @@ def main() -> int:
                                        "ok" if ok else "FAIL", rc, out[:110]))
     if not ok:
         failures.append(("internal_error_still_verdicts", 2, "[E-INTERNAL]", rc, out))
-    total = len(CASES) + 1
+    # Load-check layer: bogus $KICAD_CLI must refuse E-TOOL (no --skip-load-check).
+    with tempfile.TemporaryDirectory() as td2:
+        bp = os.path.join(td2, "b.kicad_pcb")
+        with open(bp, "w") as f:
+            f.write(board(ANCHOR))
+        env = dict(os.environ)
+        env["KICAD_CLI"] = "/nonexistent/kicad-cli"
+        r = subprocess.run([sys.executable, GUARD, bp], capture_output=True,
+                           text=True, env=env)
+        ok = r.returncode == 2 and "[E-TOOL]" in r.stdout and r.stderr == ""
+        print("%-30s %s  (exit %d)  %s" % ("bogus_kicad_cli_e_tool",
+                                           "ok" if ok else "FAIL", r.returncode,
+                                           r.stdout.strip()[:110]))
+        if not ok:
+            failures.append(("bogus_kicad_cli_e_tool", 2, "[E-TOOL]",
+                             r.returncode, r.stdout))
+        # With a real kicad-cli present, an unloadable synthetic fixture must E-LOAD.
+        import importlib.util as _ilu
+        spec2 = _ilu.spec_from_file_location("fp_guard2", GUARD)
+        assert spec2 is not None and spec2.loader is not None
+        g2 = _ilu.module_from_spec(spec2)
+        spec2.loader.exec_module(g2)
+        cli = g2._find_kicad_cli()
+        if cli:
+            badp = os.path.join(td2, "bad.kicad_pcb")
+            with open(badp, "w") as f:
+                f.write(board(ANCHOR).replace("(at 100 100 0.0)",
+                                              "(at BAD 100 0.0)", 1))
+            r = subprocess.run([sys.executable, GUARD, badp], capture_output=True,
+                               text=True)
+            ok = r.returncode == 2 and "[E-LOAD]" in r.stdout and r.stderr == ""
+            print("%-30s %s  (exit %d)  %s" % ("unloadable_board_e_load",
+                                               "ok" if ok else "FAIL", r.returncode,
+                                               r.stdout.strip()[:110]))
+            if not ok:
+                failures.append(("unloadable_board_e_load", 2, "[E-LOAD]",
+                                 r.returncode, r.stdout))
+        else:
+            print("%-30s skipped (no kicad-cli found)" % "unloadable_board_e_load")
+    total = len(CASES) + 1 + 1 + (1 if cli else 0)
     if failures:
         print("\n%d/%d cases FAILED" % (len(failures), total))
         return 1
