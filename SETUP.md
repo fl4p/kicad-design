@@ -8,6 +8,7 @@ that do not depend on device evidence.
 
 ## Contents
 
+- [Verify the model can see images](#verify-the-model-can-see-images)
 - [Run the preflight](#run-the-preflight)
 - [Select for lifecycle and reuse](#select-for-lifecycle-and-reuse)
 - [Check owned inventory](#check-owned-inventory)
@@ -18,6 +19,33 @@ that do not depend on device evidence.
 - [Read the complete document](#read-the-complete-document)
 - [Study reference implementations](#study-reference-implementations)
 - [Fail closed](#fail-closed)
+
+## Verify the model can see images
+
+This gate is skill-wide, not sourcing-specific (`SKILL.md`, "Vision is a precondition"): run it
+once per session before the first task under this skill. An error from the harness's image tool is
+not the only failure mode — a serving can return an image block the model cannot actually read, and
+image support can appear or disappear between sessions of the same nominal model; both were
+observed in one benchmark run. A model's self-report ("I can see images") is not evidence.
+
+Procedure, using [`scripts/vision_probe.py`](scripts/vision_probe.py) (stdlib-only):
+
+1. `python3 scripts/vision_probe.py new <scratch-dir>` — prints only the path of a PNG containing
+   a random 6-digit code; the ground truth stays in a sidecar file and must not be read or
+   printed into the transcript.
+2. Read the PNG with the harness's image-capable read tool and state the digits.
+3. `python3 scripts/vision_probe.py check <png> <digits-you-saw>` — prints
+   `VISION-PROBE-PASS` (exit 0), `VISION-PROBE-FAIL` (exit 1), or
+   `VISION-PROBE-UNVERIFIED` (exit 2, probe could not run).
+
+Gate semantics, fail-closed: only a same-session PASS permits normal operation. FAIL and
+UNVERIFIED are equivalent for gating — as is any read-tool image error such as "model does not
+support images" — and mean stop, report the capability failure, and continue only on the user's
+explicit confirmation, recorded, with every visual-evidence step labeled not performed. A FAIL
+message reveals that probe's code, so each probe is single-use; generate a fresh one per attempt.
+Do not cache a PASS across sessions or serving changes. (Calibration on record: the probe passes
+under a vision-capable reader, fails on a wrong guess, and returns UNVERIFIED on a missing
+sidecar.)
 
 ## Run the preflight
 

@@ -9,6 +9,23 @@ Apply the invariant first, then the required action. Treat named parts and measu
 examples, not as defaults for unrelated projects. Verify every device-specific claim against the
 selected device and the current toolchain.
 
+## Vision is a precondition
+
+This skill targets multimodal models: its verification steps include reading rendered schematics,
+board renders, and datasheet figures. Before the first task of a session under this skill, prove
+the serving can actually see images with the blind probe in
+[`scripts/vision_probe.py`](scripts/README.md) (procedure in [`SETUP.md`](SETUP.md), "Verify the
+model can see images"). On anything other than a same-session `VISION-PROBE-PASS` — the model is
+text-only, the harness returns "model does not support images", the image block arrives but the
+probe fails, or the probe cannot run — **stop and report the capability failure to the user**;
+continue only on the user's explicit confirmation, record that waiver in the project log, and label
+every visual-evidence step as not performed rather than substituting programmatic proxies
+silently. Never record "visually reviewed" (or equivalent) without a same-session PASS. Serving
+capabilities drift: re-probe after a model or provider change, a harness restart, or a resumed
+session. (Measured failure this gate closes: an image-blind serving hand-routed for hours while
+its own render reviews silently degraded to text proxies, and a session record claimed a visual
+review that could not have happened.)
+
 ## Route the task before acting
 
 Read only the companions required by the task:

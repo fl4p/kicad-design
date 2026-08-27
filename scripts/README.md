@@ -30,6 +30,7 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_autoroute.py` | load strict autoroute configuration and shared route/report contracts |
 | `kicad_autoroute_tools.py` | verify or explicitly install the pinned Freerouting/JRE toolchain |
 | `kicad_route_candidate.py` | create a scratch candidate, enforce route scope, and emit a review report |
+| `vision_probe.py` | blind image round-trip proving the serving can actually see images (skill-wide session gate, `SKILL.md` "Vision is a precondition" / `SETUP.md`) |
 | `kicad_route_manifest.py` | promote a reviewed candidate through explicit digest approval |
 | `kicad_autoroute_scaffold.py` | generate and verify project-owned autoroute configuration, adapters, applicators, and audits |
 
@@ -46,7 +47,13 @@ python3 scripts/kicad_copper_collisions.py BOARD.kicad_pcb   # re-execs under Ki
 ```
 
 `kicad_copper_collisions.py` is the executable backstop for the route-readiness audit in
-`PCB.md`: run it after every generated routing pass, before interpreting DRC. Exit 0 means
+`PCB.md`: run it after every generated routing pass, before interpreting DRC. Never grade copper by
+KiCad's `shorting_items` count alone: crossed same-layer tracks file under `tracks_crossing` and
+near-touches under `clearance`, so `shorting_items = 0` can be reported on a board that still
+carries cross-net copper contacts (measured: an agent drove `shorting_items` 66&rarr;0 over ~12 h
+while this audit still found 18 certain contacts). Do not adjudicate a DRC copper finding by
+re-deriving track coordinates in reasoning; if a finding seems wrong, check it with this audit or
+another executable tool, never by overruling the tool from memory. Exit 0 means
 audited-clean, 1 means unevaluable (missing/unloadable board, nothing to audit, or no usable
 pcbnew interpreter — none of which is a pass), 2 means certain shorts. It checks tracks, arcs,
 vias, and pads via `GetEffectiveShape` on each shared copper layer with a probed 1-IU touch
