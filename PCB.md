@@ -180,7 +180,11 @@ below. Each remaining finding then takes exactly one branch:
   Measure and record the signed minimum clearance between both members' complete hypothetical
   populated volumes — bodies, leads and expected solder joints, on every occupied side — naming
   the closest feature pair and the geometry source (courtyards stay the finding mechanism, never
-  the measured envelope). If that clearance shows population is impossible with the current
+  the measured envelope). Feasibility is electrical as well as geometric: a provisioned part must
+  sit where its populated state performs its function — a snubber provision belongs at its switch,
+  a decoupling provision at its load — and one measured run carried four snubber strings ~90 mm
+  from the devices they snub through every mechanical gate; a provision that can only be populated
+  in a functionally useless location is a defect while still DNP. If that clearance shows population is impossible with the current
   placement, the closure is a **provisioning forfeit** — a user-owned option deletion: the finding
   stays open and blocks release until the user's approval is recorded in the design/release
   documentation, bound to that pair, variant and board revision, referenced by the exclusion, and
