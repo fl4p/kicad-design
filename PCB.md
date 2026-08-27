@@ -155,12 +155,13 @@ is potential physical interference — a body, lead or joint competing for anoth
 space — that only side, height, standoff and population review can clear. Disposition each finding
 **per pair**, in writing, identifying both members by reference designator (for
 `pth_inside_courtyard`, the pad owner and the courtyard owner; for `courtyards_overlap`, the two
-courtyard owners), and close it through the established mechanisms, never as free prose:
+courtyard owners), and close it through the established mechanisms, never as free prose. First
+validate the courtyard models: correct any erroneous footprint or rule and rerun the DRC —
+classify only the findings that remain. An intentionally conservative envelope is not erroneous
+and must never be shrunk to silence the DRC; keep it and close its pairs through the branches
+below. Each remaining finding then takes exactly one branch:
 
 - real interference — fix the placement and rerun;
-- an erroneous courtyard model — correct the footprint or rule and rerun; an intentionally
-  conservative envelope is not erroneous and must never be shrunk to silence the DRC — keep it and
-  close the pair through one of the branches below;
 - demonstrated non-interference with **both members populated** (intentional stacking, or a graze
   with verified 3D clearance) — a pair-specific DRC exclusion whose comment states the geometric
   evidence;
