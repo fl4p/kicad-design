@@ -51,7 +51,8 @@ python3 scripts/kicad_copper_collisions.py BOARD.kicad_pcb   # re-execs under Ki
 KiCad's `shorting_items` count alone: crossed same-layer tracks file under `tracks_crossing` and
 near-touches under `clearance`, so `shorting_items = 0` can be reported on a board that still
 carries cross-net copper contacts (measured: an agent drove `shorting_items` 66&rarr;0 over ~12 h
-while this audit still found 18 certain contacts). Do not adjudicate a DRC copper finding by
+while this audit still found 18 cross-net contacting item pairs — a different counting unit than
+DRC violation records). Do not adjudicate a DRC copper finding by
 re-deriving track coordinates in reasoning; if a finding seems wrong, check it with this audit or
 another executable tool, never by overruling the tool from memory. Exit 0 means
 audited-clean, 1 means unevaluable (missing/unloadable board, nothing to audit, or no usable

@@ -22,11 +22,15 @@ that do not depend on device evidence.
 
 ## Verify the model can see images
 
-This gate is skill-wide, not sourcing-specific (`SKILL.md`, "Vision is a precondition"): run it
-once per session before the first task under this skill. An error from the harness's image tool is
-not the only failure mode — a serving can return an image block the model cannot actually read, and
-image support can appear or disappear between sessions of the same nominal model; both were
-observed in one benchmark run. A model's self-report ("I can see images") is not evidence.
+This gate is skill-wide, not sourcing-specific (`SKILL.md`, "Vision is a precondition", which also
+defines the two narrow non-visual exemptions): run it once per session before the first task that
+involves visual evidence. An error from the harness's image tool is not the only failure mode — a
+serving can return an image block the model cannot actually read, and image support can appear or
+disappear between sessions of the same nominal model; both were observed in one benchmark run. A
+model's self-report ("I can see images") is not evidence. Threat boundary: the probe detects
+accidental blindness and hallucinated capability in an instruction-following agent; it is not
+tamper-resistant and does not defend against an agent that opens or edits the `.truth` sidecar —
+reading the sidecar is a protocol violation, not an impossibility.
 
 Procedure, using [`scripts/vision_probe.py`](scripts/vision_probe.py) (stdlib-only):
 
@@ -41,11 +45,13 @@ Procedure, using [`scripts/vision_probe.py`](scripts/vision_probe.py) (stdlib-on
 Gate semantics, fail-closed: only a same-session PASS permits normal operation. FAIL and
 UNVERIFIED are equivalent for gating — as is any read-tool image error such as "model does not
 support images" — and mean stop, report the capability failure, and continue only on the user's
-explicit confirmation, recorded, with every visual-evidence step labeled not performed. A FAIL
-message reveals that probe's code, so each probe is single-use; generate a fresh one per attempt.
-Do not cache a PASS across sessions or serving changes. (Calibration on record: the probe passes
-under a vision-capable reader, fails on a wrong guess, and returns UNVERIFIED on a missing
-sidecar.)
+explicit confirmation, recorded, with every visual-evidence step labeled not performed. Probes are
+single-use and the script enforces it: `check` consumes the sidecar before grading, so a re-check
+of the same probe returns UNVERIFIED, and a FAIL does not reveal the expected digits — any retry
+needs a fresh probe. The sidecar binds to the PNG by SHA-256, so a missing, altered, or swapped
+image cannot PASS. Do not cache a PASS across sessions or serving changes. (Calibration on record:
+PASS under a vision-capable reader; FAIL on a wrong guess; UNVERIFIED on a missing sidecar, a
+missing or foreign PNG, a consumed probe, and malformed arguments.)
 
 ## Run the preflight
 
