@@ -155,7 +155,9 @@ is potential physical interference — a body, lead or joint competing for anoth
 space — that only side, height, standoff and population review can clear. Disposition each finding
 **per pair**, in writing, identifying both members by reference designator (for
 `pth_inside_courtyard`, the pad owner and the courtyard owner; for `courtyards_overlap`, the two
-courtyard owners), and close it through the established mechanisms, never as free prose. The KiCad
+courtyard owners) — one record per pair with that pair's own measured value, never a grouped row
+whose range can swallow an outlier — and close it through the established mechanisms, never as
+free prose. The KiCad
 DRC report is the authoritative enumeration: the disposition must cover every `courtyards_overlap`
 and `pth_inside_courtyard` record in the current report, keyed by its members — a custom geometry
 script can supply evidence for a disposition, never define or filter the finding set. Before
@@ -173,7 +175,11 @@ below. Each remaining finding then takes exactly one branch:
   evidence;
 - DNP — inapplicable only while one named member is unpopulated in the release-bound assembly
   variant ([`VARIANTS.md`](VARIANTS.md)); record it as an exclusion naming that member and variant
-  — never as a generic non-interference exclusion — and re-open it for any populated variant;
+  — never as a generic non-interference exclusion — and re-open it for any populated variant.
+  Measure and record the body gap for the hypothetical populated state: if populating the absent
+  member is geometrically impossible with the current placement (its body would land on another
+  part's body or solder joint), the closure is a **provisioning forfeit** — the placed option is
+  being deleted, which requires the user's recorded approval, not a routine DNP close;
 - anything else — an approved waiver, subject to
   [the four independent release states](RELEASE.md#keep-four-release-states-independent).
 
