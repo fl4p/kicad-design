@@ -24,11 +24,14 @@ Usage:
 The agent workflow: run `new`, read the printed PNG with the harness image/read
 tool, then run `check <png> <the digits you saw>`.
 
-Single-use is enforced: `check` consumes the sidecar before printing any verdict,
-so a second `check` on the same probe returns UNVERIFIED, and a FAIL does not
-reveal the expected digits. The sidecar also carries the SHA-256 of the PNG, and
-`check` recomputes it, so a missing, altered, or swapped PNG (or a sidecar from a
-different probe) cannot produce a PASS.
+Single-use is enforced: `check` claims the sidecar with an atomic rename before
+grading, so each probe grades at most once even under concurrent duplicate checks,
+a second `check` returns UNVERIFIED, and a FAIL does not reveal the expected
+digits. The sidecar also carries the SHA-256 of the PNG, and `check` recomputes
+it, so a missing, altered, or swapped PNG (or a sidecar from a different probe)
+cannot produce a PASS. Every run prints exactly one verdict line
+(PASS/FAIL/UNVERIFIED), help included, so exit-code-only consumers cannot misread
+a non-grading run.
 
 Exit codes / verdict lines (fail-closed):
   0  VISION-PROBE-PASS         digits match this PNG's recorded truth
@@ -143,21 +146,33 @@ def cmd_check(args) -> int:
         return unverified("`check` wants exactly <png> <digits>")
     png, guess = args[0], args[1].strip()
     truth_path = sidecar_path(png)
+    # Claim the probe atomically before any verdict: rename wins exactly once, so
+    # concurrent duplicate checks cannot both grade, and a FAIL leaves no reusable
+    # probe behind. The claimed file is kept as the audit trail of what was graded.
+    claimed = truth_path + ".graded"
     try:
-        with open(truth_path) as f:
+        os.rename(truth_path, claimed)
+    except FileNotFoundError:
+        return unverified(
+            "no fresh truth sidecar — probe already checked or never created; "
+            "generate a fresh probe"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return unverified("cannot claim sidecar, refusing to grade: %s" % exc)
+    try:
+        with open(claimed) as f:
             record = f.read().strip()
     except Exception as exc:  # noqa: BLE001
-        return unverified("cannot read truth sidecar: %s" % exc)
+        return unverified("cannot read claimed sidecar: %s" % exc)
+    try:  # breadcrumb for a clearer message on a later duplicate check
+        with open(truth_path, "x") as f:
+            f.write(CONSUMED + "\n")
+    except Exception:  # noqa: BLE001
+        pass
     if record == CONSUMED:
         return unverified(
             "this probe was already checked once — generate a fresh probe"
         )
-    # Consume before any verdict: a FAIL must not leave a reusable probe behind.
-    try:
-        with open(truth_path, "w") as f:
-            f.write(CONSUMED + "\n")
-    except Exception as exc:  # noqa: BLE001
-        return unverified("cannot consume sidecar, refusing to grade: %s" % exc)
     parts = record.split()
     if len(parts) != 2 or not (parts[0].isdigit() and len(parts[0]) == 6):
         return unverified("malformed truth sidecar")
@@ -184,10 +199,10 @@ def main(argv) -> int:
         return cmd_new(argv[2:])
     if len(argv) >= 2 and argv[1] == "check":
         return cmd_check(argv[2:])
-    if len(argv) == 1 or argv[1] in ("-h", "--help", "help"):
+    if len(argv) >= 2 and argv[1] in ("-h", "--help", "help"):
         print(__doc__)
-        return 2
-    return unverified("unknown command %r (use `new` or `check`)" % argv[1])
+        return unverified("help shown — this was not a grading run")
+    return unverified("no or unknown command (use `new`, `check`, or `--help`)")
 
 
 if __name__ == "__main__":
