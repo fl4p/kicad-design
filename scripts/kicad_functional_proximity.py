@@ -50,12 +50,14 @@ lines carry a stable branch id in brackets, and FAIL lines carry [OVER-BUDGET]):
 
 Parsing is deliberately strict for a regex-based reader: strict UTF-8; the
 (kicad_pcb ...) root expression is scanned string-aware to its matching close and
-must span the file (footprints after the root are refused, not graded); property
-and pad tokens accept any KiCad whitespace, so a tab cannot hide a selector;
-coordinates use KiCad's numeric grammar (no '+', underscores, exponents, nan/inf),
-validated for every footprint and every pad; duplicate properties and duplicate
-refdes refuse. Anything the reader cannot positively interpret is E-PARSE, never
-a guess. The verdict line is ASCII-transliterated and control-character-scrubbed,
+must span the file (footprints after the root are refused, not graded); token
+separators are the ASCII whitespace KiCad accepts (space/tab/CR/LF - a tab cannot
+hide a selector, and non-ASCII outside quoted strings is refused, since KiCad
+rejects it while Python whitespace matching would silently admit it); numbers use a verified
+subset of KiCad 10's accepted forms (decimals, bare-dot and exponent forms load;
+leading '+', underscores, nan/inf refuse), validated for every footprint and
+every pad; duplicate properties and duplicate refdes refuse. Anything the reader
+cannot positively interpret is E-PARSE, never a guess. The verdict line is ASCII-transliterated and control-character-scrubbed,
 so it is exactly one stdout line on any host. The pad transform matches KiCad 10
 writer output for front and back footprints (validated against pcbnew on
 mixed-side boards).
@@ -79,12 +81,15 @@ def verdict(code: int, msg: str, branch: str = "") -> int:
     return code
 
 
-_NUM = re.compile(r"-?\d+(\.\d+)?\Z")  # KiCad's numeric grammar, not Python's:
-                                       # no '+', no underscores, no exponents, no nan/inf
+# Verified subset of the number forms KiCad 10.0.5's parser accepts (measured:
+# 1e2, 100., .5, -.5 load; +100 and 1_00 are rejected). Python float() is wider
+# (underscores, nan/inf, leading '+'), so validate lexically before converting.
+_NUM = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE]-?\d+)?\Z")
+_WS = " \t\r\n"  # KiCad token separators are ASCII; Python \s would admit NBSP etc.
 
 
 def _floats(text, what, want=(2, 3)):
-    fields = text.split()
+    fields = [f for f in re.split(r"[ \t\r\n]+", text.strip(_WS)) if f]
     if len(fields) not in want:
         raise ValueError("%s: malformed (at %s)" % (what, text))
     if not all(_NUM.match(x) for x in fields):
@@ -126,19 +131,24 @@ def parse_board(path):
     """Return {refdes: {"pads": [(name, gx, gy)], "props": {...}}}; raises ValueError."""
     with open(path, encoding="utf-8") as f:  # strict UTF-8: undecodable input raises
         s = f.read()
-    if not re.match(r"\s*\(kicad_pcb[\s(]", s):
+    if not re.match(r"[ \t\r\n]*\(kicad_pcb[ \t\r\n(]", s):
         raise ValueError("root expression is not (kicad_pcb ...)")
+    outside = re.sub(r'"(?:[^"\\]|\\.)*"', '""', s)
+    m = re.search(r"[^\x00-\x7f]", outside)
+    if m:
+        raise ValueError("non-ASCII character outside quoted strings at offset %d"
+                         % m.start())
     root_end = _root_span_end(s)
     if s[root_end + 1:].strip():
         raise ValueError("content after the (kicad_pcb ...) root expression")
     s = s[:root_end]  # grade only children of the root, exactly like KiCad would
     fps = {}
-    starts = [m.start() for m in re.finditer(r"\(footprint\s", s)]
+    starts = [m.start() for m in re.finditer(r"\(footprint[ \t\r\n]", s)]
     starts.append(len(s))
     for i in range(len(starts) - 1):
         b = s[starts[i]:starts[i + 1]]
-        ref_m = re.search(r'\(property\s+"Reference"\s+"([^"]+)"', b)
-        at_m = re.search(r"\(at\s+([^)]*)\)", b)  # first (at ...) is the footprint's own
+        ref_m = re.search(r'\(property[ \t\r\n]+"Reference"[ \t\r\n]+"([^"]+)"', b)
+        at_m = re.search(r"\(at[ \t\r\n]+([^)]*)\)", b)  # first (at ...) is the footprint's own
         if not ref_m or not at_m:
             raise ValueError("footprint without Reference or (at ...): %r" % b[:60])
         ref = ref_m.group(1)
@@ -146,17 +156,17 @@ def parse_board(path):
         fx, fy = nums[0], nums[1]
         th = math.radians(nums[2] if len(nums) == 3 else 0.0)
         props = {}
-        for k, v in re.findall(r'\(property\s+"([^"]+)"\s+"([^"]*)"', b):
+        for k, v in re.findall(r'\(property[ \t\r\n]+"([^"]+)"[ \t\r\n]+"([^"]*)"', b):
             if k in props:
                 raise ValueError("%s: duplicate property %r" % (ref, k))
             props[k] = v
         pads = []
-        pstarts = [m.start() for m in re.finditer(r'\(pad\s+"', b)]
+        pstarts = [m.start() for m in re.finditer(r'\(pad[ \t\r\n]+"', b)]
         pstarts.append(len(b))
         for k in range(len(pstarts) - 1):
             pb = b[pstarts[k]:pstarts[k + 1]]
-            nm = re.match(r'\(pad\s+"([^"]*)"', pb)
-            pat = re.search(r"\(at\s+([^)]*)\)", pb)
+            nm = re.match(r'\(pad[ \t\r\n]+"([^"]*)"', pb)
+            pat = re.search(r"\(at[ \t\r\n]+([^)]*)\)", pb)
             if not nm or not pat:
                 raise ValueError("%s: pad without a parseable (at ...)" % ref)
             pn = _floats(pat.group(1), "%s pad %r" % (ref, nm.group(1)))

@@ -172,6 +172,26 @@ CASES = [
     ("newline_in_option_stays_one_line",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--oops\nnext=1"], 2, "[E-ARGS]"),
+    # --- round-4: KiCad-accepted number forms must load; wider Python forms must not ---
+    ("exponent_and_dot_forms_accepted",  # (at 1e2 110.) == (100,110) -> 10mm of 15
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
+     .replace("(at 100 110 0.0)", "(at 1e2 110. 0.0)", 1),
+     [], 0, "10.00mm of 15.0mm"),
+    ("bare_dot_decimal_accepted",  # (at .5 ...) must parse like KiCad does
+     board(ANCHOR, fp("S1", 0.5, 110, props=(("Anchor", "Q1"), ("MaxDist", "150"))))
+     .replace("(at 0.5 110 0.0)", "(at .5 110 0.0)", 1),
+     [], 0, "FUNC-PROX-PASS"),
+    ("negative_coordinate_accepted",  # kills removing the leading '-' from the grammar
+     board(ANCHOR, fp("S1", -0.5, 110, props=(("Anchor", "Q1"), ("MaxDist", "150"))))
+     .replace("(at -0.5 110 0.0)", "(at -.5 110 0.0)", 1),
+     [], 0, "FUNC-PROX-PASS"),
+    ("underscore_number_refused",  # Python float() accepts 1_00; KiCad rejects it
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at 1_00 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("nbsp_separator_refused",  # KiCad rejects NBSP separators; Python \s would admit them
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))).replace(
+         '(property "Anchor" "Q1"', '(property "Anchor" "Q1"'),
+     [], 2, "[E-PARSE]"),
 ]
 
 
