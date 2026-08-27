@@ -201,6 +201,17 @@ promoted to the whole class: one measured run filed 33 courtyard-class errors as
 while gate-resistor bodies measured fully inside the 2D outlines of flat-mounted 31.5 mm
 film-capacitor boxes — a placement never demonstrated assemblable, presented as release-ready.
 
+Placement correctness is also electrical, and attention does not keep electrical constraints
+alive across a session — record them as machine-checkable bindings instead. Any part whose
+function names a partner (a snubber its switch, decoupling its load, a load capacitor its
+crystal, a termination its receiver) is a **functional satellite**: at capture/generation time,
+when the partner is known, emit `Anchor=<refdes>` and `MaxDist=<mm>` fields on the satellite's
+footprint; at layout time run the fail-closed proximity guard
+(`scripts/kicad_functional_proximity.py`), whose vacuous run (zero declared bindings) is
+UNVERIFIED, never a silent pass. The guard verifies recorded intent only — it cannot invent a
+binding that capture never declared, so the capture-time emission is itself a gate. Domain
+catalogs and default budgets: [`POWER.md`](POWER.md).
+
 The agent responsible for the final handoff must independently reproduce the final artefact from
 its declared authority—or verify the exact explicitly hand-maintained final board—and apply the
 verification ladder in [`SKILL.md`](SKILL.md). For external routing, verify the promoted
