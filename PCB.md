@@ -161,8 +161,9 @@ free prose. The KiCad
 DRC report is the authoritative enumeration: the disposition must cover every `courtyards_overlap`
 and `pth_inside_courtyard` record in the current report, keyed by its members — a custom geometry
 script can supply evidence for a disposition, never define or filter the finding set. Before
-enumerating, confirm both checks' effective severities are not `ignore` (stock KiCad templates
-ship `pth_inside_courtyard` ignored, and `--severity-all` does not resurrect an ignored check) —
+enumerating, confirm both checks' effective severities are not `ignore` (many bundled KiCad
+templates ship `pth_inside_courtyard` ignored, and `--severity-all` does not resurrect an ignored
+check) —
 under an ignored severity the empty enumeration is unevaluable, not clean: restore the severity
 and rerun. First validate the courtyard models: correct any erroneous footprint or rule and rerun the DRC —
 classify only the findings that remain. An intentionally conservative envelope is not erroneous
@@ -176,10 +177,15 @@ below. Each remaining finding then takes exactly one branch:
 - DNP — inapplicable only while one named member is unpopulated in the release-bound assembly
   variant ([`VARIANTS.md`](VARIANTS.md)); record it as an exclusion naming that member and variant
   — never as a generic non-interference exclusion — and re-open it for any populated variant.
-  Measure and record the body gap for the hypothetical populated state: if populating the absent
-  member is geometrically impossible with the current placement (its body would land on another
-  part's body or solder joint), the closure is a **provisioning forfeit** — the placed option is
-  being deleted, which requires the user's recorded approval, not a routine DNP close;
+  Measure and record the signed minimum clearance between both members' complete hypothetical
+  populated volumes — bodies, leads and expected solder joints, on every occupied side — naming
+  the closest feature pair and the geometry source (courtyards stay the finding mechanism, never
+  the measured envelope). If that clearance shows population is impossible with the current
+  placement, the closure is a **provisioning forfeit** — a user-owned option deletion: the finding
+  stays open and blocks release until the user's approval is recorded in the design/release
+  documentation, bound to that pair, variant and board revision, referenced by the exclusion, and
+  the variant/BOM record stops advertising the option — otherwise restore the option
+  geometrically;
 - anything else — an approved waiver, subject to
   [the four independent release states](RELEASE.md#keep-four-release-states-independent).
 
