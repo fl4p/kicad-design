@@ -207,10 +207,12 @@ function names a partner (a snubber its switch, decoupling its load, a load capa
 crystal, a termination its receiver) is a **functional satellite**: at capture/generation time,
 when the partner is known, emit `Anchor=<refdes>` and `MaxDist=<mm>` fields on the satellite's
 footprint; at layout time run the fail-closed proximity guard
-(`scripts/kicad_functional_proximity.py`), whose vacuous run (zero declared bindings) is
-UNVERIFIED, never a silent pass. The guard verifies recorded intent only — it cannot invent a
-binding that capture never declared, so the capture-time emission is itself a gate. Domain
-catalogs and default budgets: [`POWER.md`](POWER.md).
+(`scripts/kicad_functional_proximity.py`) with `--expect=<the refdes list capture emitted>` —
+vacuous runs, binding fields without an Anchor, and expectation mismatches are all UNVERIFIED,
+never a silent pass. The guard verifies recorded intent only — it cannot invent a binding that
+capture never declared, so the capture-time emission is itself a gate, and the guard is a
+gross-misplacement tripwire, not a substitute for loop/topology audits. Domain catalogs and
+tripwire budgets: [`POWER.md`](POWER.md).
 
 The agent responsible for the final handoff must independently reproduce the final artefact from
 its declared authority—or verify the exact explicitly hand-maintained final board—and apply the

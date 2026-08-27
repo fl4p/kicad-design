@@ -22,6 +22,7 @@ guard detail it does not need:
 | `FOOTPRINTS.md` | selecting, generating or modifying footprints and land patterns |
 | `RELEASE.md` | DRC severity, fab output or release readiness |
 | `THERMALS.md` | dissipation, junction/ambient limits, heat paths, gradients, thermal pads/vias or validation |
+| `POWER.md` | switching-power boards — satellite anchor bindings, creepage decision framework, HV domain classification, power-loop placement |
 | `VARIANTS.md` | one generator must emit more than one board |
 | `MODELS.md` | choosing or delegating to an AI model/agent for schematic generation, review, or KiCad automation |
 

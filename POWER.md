@@ -22,19 +22,28 @@ At capture/generation time, emit on every satellite footprint:
     Anchor  = <partner refdes>     MaxDist = <mm budget>
 
 At layout time, run `scripts/kicad_functional_proximity.py` (fail-closed; a vacuous run
-with zero declared bindings is UNVERIFIED, not a pass — set `--min-expected` to the count
-the schematic declares). DNP provisions carry anchors like populated parts: this is how
-PCB.md's DNP feasibility branch stays electrical, not just geometric.
+with zero declared bindings is UNVERIFIED, not a pass). Release invocations pass
+`--expect=<the refdes list the generator emitted bindings for>` — without an expectation
+the guard cannot see a binding that was deleted before the run. Where pin identity
+matters (a decoupling cap's supply pin, a gate pad), add `SelfPad`/`AnchorPad` selectors;
+a bare nearest-pad distance can otherwise pass a part parked near the wrong pin. DNP
+provisions carry anchors like populated parts: this is how PCB.md's DNP feasibility
+branch stays electrical, not just geometric.
 
-Default budgets (pad-to-pad; tighten freely, loosen only with a recorded reason):
+The guard is a **gross-misplacement tripwire, not an acceptance limit**: it catches the
+90-mm-from-its-switch class of defect, and a PASS says nothing about loop area, return
+paths, or routed length — keep the current-loop audit ([`PCB.md`](PCB.md)) and the DRC
+length tier below in force beside it. Tripwire budgets (pad-to-pad; tighten freely;
+these are triage numbers, not derived limits — real limits come from the project's edge
+rates, allowed loop inductance, and package geometry):
 
-| satellite | anchor | default budget |
+| satellite | anchor | tripwire budget |
 |---|---|---|
 | RC snubber string (per switch) | that switch's D-S / C-E pads | 15 mm, same layer as the loop |
-| gate series resistor | the gate pad | 20 mm, routed with its source/kelvin return |
+| gate series resistor | the gate pad (`AnchorPad`) | 20 mm, routed with its source/kelvin return |
 | bootstrap capacitor | driver VB-VS pins | 10 mm |
 | HF loop / DC-link film caps | the bridge rail pads | 15 mm |
-| IC decoupling | the supply pin it serves | 5 mm |
+| IC decoupling | the supply pin it serves (`AnchorPad`) | 5 mm |
 | sense-divider top / feedback tap | the tapped node | 20 mm, routed away from switch nodes |
 | kelvin shunt sense pair | the shunt pad heads | from the pad heads, differential |
 
@@ -46,15 +55,20 @@ in the authoritative DRC enumeration that [`PCB.md`](PCB.md) already governs:
 - Put snubber/gate nets in named netclasses with a routed-length ceiling:
   `(rule snb_len (condition "A.hasNetclass('SNB')") (constraint length (max 20mm)))` —
   violations appear as `length_out_of_range`.
-- Draw a named rule area over the bridge and assert membership:
-  `(rule snb_room (condition "A.Reference == /^(RS|CS)\d/"))` with
-  `(constraint assertion "A.intersectsArea('bridge_room')")` — prefer
-  `intersectsArea()` over `enclosedByArea()` (the manual notes it is faster); use
+- Draw a named rule area over the bridge and assert membership (the rules language uses
+  wildcard string compare, not regex, and `Reference` is inherited by pads and graphics,
+  so scope to the footprint object):
+
+      (rule snb_room
+        (condition "A.Type == 'Footprint' && (A.Reference == 'RS*' || A.Reference == 'CS*')")
+        (constraint assertion "A.intersectsArea('bridge_room')"))
+
+  Prefer `intersectsArea()` over `enclosedByArea()` (the manual notes it is faster); use
   `enclosedByArea()` when full containment is the requirement.
 
-Function names verified against the installed KiCad 10.0.5 manual; re-verify the exact
-rule syntax with a deliberately-failing probe rule before trusting a new rule file
-(a rule that never fires is indistinguishable from a rule that passes).
+Syntax verified against the installed KiCad 10.0.5 manual; still re-verify any new rule
+file with a deliberately-failing probe rule before trusting it (a rule that never fires
+is indistinguishable from a rule that passes).
 
 ## Creepage and clearance: decide with the framework, not a single number
 
@@ -62,36 +76,54 @@ A spec like "3 mm on all HV nodes" usually encodes three things at once — the 
 band, overshoot headroom, and environment margin. Untangle them before trading layout
 against it:
 
-1. **Standards floor.** Find the working-voltage band in IPC-2221B Table 6-1 and read
-   *both* columns: external uncoated (B2) and polymer-coated (B4) differ by several×.
-   Values must be re-verified against the actual table at release time — never propagate
-   band values from memory or from this file into a release decision.
+1. **Standards floor.** Identify the standard that actually binds the product first —
+   for anything with a safety-isolation function that is the applicable product/insulation
+   standard (pollution degree, material group/CTI, overvoltage category, clearance and
+   creepage as separate quantities), not IPC-2221, which is a generic printed-board
+   design standard. Within IPC-2221's own scope, read the current binding revision's
+   table for the working-voltage band and note the column scopes: the external
+   uncoated vs polymer-coated columns apply to board conductors, and assembled component
+   leads/terminations fall under different categories (see also
+   [`FOOTPRINTS.md`](FOOTPRINTS.md) on never reusing a remembered table as a current
+   verdict). Never propagate band values from memory or from this file into a release
+   decision.
 2. **Overshoot.** Switching nodes ring above the bus. Bound the real peak (measure or
    clamp) and band on the peak, not the DC bus. A wider gap "for overshoot" that jumps
    an entire band is margin, not code — record it as margin.
 3. **Environment.** Dust and condensation (mobile rigs, unsealed enclosures) push toward
-   pollution-degree-3 creepage, which is several× the PD2 figure. **Conformal coating
-   beats bare distance here**: it both moves the board to the coated column and removes
-   the contamination mechanism that motivated the wide gap — bare FR-4 at 3 mm can still
-   track when damp and dirty; a coated 1.5 mm gap cannot get damp. Milled slots raise
-   creepage without board growth where coating is not wanted.
+   pollution-degree-3 creepage, several× the PD2 figure. A **qualified** conformal
+   coating (the standard's permanent-coating construction, applied and inspected to its
+   process requirements — not any sprayed acrylic) can both move the board to the coated
+   column and suppress the contamination mechanism that motivated the wide gap; it
+   *reduces* the tracking risk, it does not abolish it (coverage defects, trapped ionic
+   contamination, permeability, and mechanical damage remain), so coating plus a
+   moderate gap is a trade to record, not a free pass. Milled slots raise creepage
+   without board growth where coating is not wanted.
 4. **Module-interface floors.** A purchased module's own pin pitch may put HV and SELV
    at fractions of a millimetre (a 2.54 mm header interleaving gate drive and logic).
-   That floor is *inherent to the chosen interface*: document it as a residual bound to
+   For *functional or project-derived* specs, document that floor as a residual bound to
    the module decision, never silently widen the spec elsewhere to compensate, and never
-   present the board-level figure as if the module met it too.
+   present the board-level figure as if the module met it too. If a **binding safety
+   requirement** applies, a module below it is not a documentable residual — it
+   disqualifies the module or blocks release.
 
 Record the decision per net-class pair with measured minimum gaps per layer, the chosen
 column (coated/uncoated), and who accepted any figure below the untangled spec.
 
-## Classify HV domains by DC potential, not by name
+## Classify HV domains by inter-domain voltage, not by net name
 
-Creepage classes follow the actual potential relative to the touchable reference —
-bootstrapped high-side gate drive rides at bus potential (HV) while low-side gate drive
-and the bus return sit at reference potential, whatever their names suggest. One measured
-run first classified low-side gate nets as HV and blocked routing at an unmeetable
-clearance; reclassifying by DC potential dissolved the blockage. Sense-divider midpoints
-are elevated (HV-side) even though they feed logic.
+Creepage classes follow the voltage *between domains* under normal, transient, and
+relevant fault conditions, together with the insulation function — not net names, and
+not nominal DC level alone. Within a single galvanic system, bootstrapped high-side gate
+drive rides at bus potential relative to the bus return while low-side gate drive sits
+at return potential, whatever the names suggest: one measured run classified low-side
+gate nets as HV and blocked routing at an unmeetable clearance until it reclassified by
+actual potential difference. But the *reference itself* must be established, not
+assumed — in an offline or floating system, the bus return and everything referenced to
+it can be hazardous relative to earth or touchable circuits, and that boundary carries
+its own (usually stricter) insulation requirement. Sense-divider midpoints resistively
+tied to HV are elevated in normal operation and single-fault-analyzed like any other
+elevated node, even though they feed logic.
 
 ## Power loop and placement
 

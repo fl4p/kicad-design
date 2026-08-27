@@ -25,7 +25,7 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_symlib.py` | resolve inherited symbols, common unit 0, body styles, and pin transforms |
 | `kicad_verify.py` | run ERC/DRC safely and resolve ignored checks from reports plus project configuration |
 | `kicad_copper_collisions.py` | fail-closed certain-short audit: tracks/arcs/vias/pads of different nets whose effective shapes touch or overlap on a shared copper layer |
-| `kicad_functional_proximity.py` | fail-closed satellite→anchor placement check: verifies every footprint carrying `Anchor`/`MaxDist` fields sits within its declared pad-to-pad budget; vacuous runs (zero declared bindings) are UNVERIFIED, never a silent pass (see [`POWER.md`](../POWER.md) for the satellite catalog and capture-time emission rule) |
+| `kicad_functional_proximity.py` | fail-closed satellite→anchor placement tripwire: verifies every footprint declaring an `Anchor` binding (with per-binding `MaxDist`, optional `SelfPad`/`AnchorPad` selectors) sits within its pad-to-pad budget; binding fields without `Anchor`, vacuous runs, and `--expect` mismatches are all UNVERIFIED — release runs pass `--expect` from the capture side (see [`POWER.md`](../POWER.md)); calibration harness: `tests/test_functional_proximity.py` |
 | `kicad_footprint_swap.py` | orchestrate a deadline-bound, adapter-owned multi-target footprint migration and recoverable promotion |
 | `kicad_repro.py` | bind reproducibility evidence to outputs actually produced and detect replacement after verification |
 | `kicad_autoroute.py` | load strict autoroute configuration and shared route/report contracts |
