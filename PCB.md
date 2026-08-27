@@ -150,26 +150,30 @@ electrical failure. Conversely, open physical-sample, enclosure, potting, therma
 gates may prevent fabrication release without excusing unfinished electrical CAD.
 
 Treat `courtyards_overlap` and `pth_inside_courtyard` findings as assembly-interference findings,
-never cosmetic. The DRC proves only 2D containment on a courtyard layer; what it flags is potential
-physical interference — a body, lead or joint competing for another footprint's space — that only
-side, height, standoff and population review can clear. Disposition each finding **per pair**, in
-writing, naming the pad owner and the courtyard owner, and close it through the established
-mechanisms, never as free prose:
+never cosmetic. The DRC proves only 2D overlap or containment on a courtyard layer; what it flags
+is potential physical interference — a body, lead or joint competing for another footprint's
+space — that only side, height, standoff and population review can clear. Disposition each finding
+**per pair**, in writing, identifying both members by reference designator (for
+`pth_inside_courtyard`, the pad owner and the courtyard owner; for `courtyards_overlap`, the two
+courtyard owners), and close it through the established mechanisms, never as free prose:
 
 - real interference — fix the placement and rerun;
-- a wrong or deliberately conservative courtyard model — correct the footprint or rule (never
-  reclassify the finding to fit the model) and rerun;
-- demonstrated non-interference (intentional stacking, or a graze with verified 3D clearance) — a
-  pair-specific DRC exclusion whose comment states the geometric evidence;
-- DNP — inapplicable only while the absent member (say which: pad owner or courtyard owner) is
-  unpopulated in the release-bound assembly variant ([`VARIANTS.md`](VARIANTS.md)); record it as an
-  exclusion naming that variant, and re-open it for any populated variant;
-- anything else — an approved waiver, subject to the release-state rules above.
+- an erroneous courtyard model — correct the footprint or rule and rerun; an intentionally
+  conservative envelope is not erroneous and must never be shrunk to silence the DRC — keep it and
+  close the pair through one of the branches below;
+- demonstrated non-interference with **both members populated** (intentional stacking, or a graze
+  with verified 3D clearance) — a pair-specific DRC exclusion whose comment states the geometric
+  evidence;
+- DNP — inapplicable only while one named member is unpopulated in the release-bound assembly
+  variant ([`VARIANTS.md`](VARIANTS.md)); record it as an exclusion naming that member and variant
+  — never as a generic non-interference exclusion — and re-open it for any populated variant;
+- anything else — an approved waiver, subject to
+  [the four independent release states](RELEASE.md#keep-four-release-states-independent).
 
 A verdict sampled from a few pairs ("vertical-mount parts have tiny courtyards") must never be
 promoted to the whole class: one measured run filed 33 courtyard-class errors as "cosmetic only"
-while gate resistors sat — by measured 2D body containment — under flat-mounted 31.5 mm
-film-capacitor boxes, a placement that could not be assembled as drawn, presented as release-ready.
+while gate-resistor bodies measured fully inside the 2D outlines of flat-mounted 31.5 mm
+film-capacitor boxes — a placement never demonstrated assemblable, presented as release-ready.
 
 The agent responsible for the final handoff must independently reproduce the final artefact from
 its declared authority—or verify the exact explicitly hand-maintained final board—and apply the
