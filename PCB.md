@@ -149,16 +149,27 @@ Classify silkscreen and documentation findings separately so cosmetic volume doe
 electrical failure. Conversely, open physical-sample, enclosure, potting, thermal or bench-test
 gates may prevent fabrication release without excusing unfinished electrical CAD.
 
-Courtyard classes (`courtyards_overlap`, `pth_inside_courtyard`) are never cosmetic: they are the
-DRC's assembly-interference check, and a pad inside a foreign courtyard usually means a part body
-over a solder joint — a board that cannot be stuffed. Disposition them **per pair**, in writing,
-into: real interference (fix the placement), deferrable (e.g. a DNP position — valid only while
-unpopulated, and only if the DNP justification is recorded next to the finding), or benign graze
-(courtyard boxes touch with demonstrated 3D clearance). A verdict sampled from a few pairs
-("vertical-mount parts have tiny courtyards") must never be promoted to the whole class — one
-measured run filed 33 courtyard-class errors as "cosmetic only" while several populated parts had
-pads inside the courtyards of Ø30 mm capacitor cans, an unbuildable placement presented as
-release-ready.
+Treat `courtyards_overlap` and `pth_inside_courtyard` findings as assembly-interference findings,
+never cosmetic. The DRC proves only 2D containment on a courtyard layer; what it flags is potential
+physical interference — a body, lead or joint competing for another footprint's space — that only
+side, height, standoff and population review can clear. Disposition each finding **per pair**, in
+writing, naming the pad owner and the courtyard owner, and close it through the established
+mechanisms, never as free prose:
+
+- real interference — fix the placement and rerun;
+- a wrong or deliberately conservative courtyard model — correct the footprint or rule (never
+  reclassify the finding to fit the model) and rerun;
+- demonstrated non-interference (intentional stacking, or a graze with verified 3D clearance) — a
+  pair-specific DRC exclusion whose comment states the geometric evidence;
+- DNP — inapplicable only while the absent member (say which: pad owner or courtyard owner) is
+  unpopulated in the release-bound assembly variant ([`VARIANTS.md`](VARIANTS.md)); record it as an
+  exclusion naming that variant, and re-open it for any populated variant;
+- anything else — an approved waiver, subject to the release-state rules above.
+
+A verdict sampled from a few pairs ("vertical-mount parts have tiny courtyards") must never be
+promoted to the whole class: one measured run filed 33 courtyard-class errors as "cosmetic only"
+while gate resistors sat — by measured 2D body containment — under flat-mounted 31.5 mm
+film-capacitor boxes, a placement that could not be assembled as drawn, presented as release-ready.
 
 The agent responsible for the final handoff must independently reproduce the final artefact from
 its declared authority—or verify the exact explicitly hand-maintained final board—and apply the
