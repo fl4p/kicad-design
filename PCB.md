@@ -231,7 +231,7 @@ reroute the whole interacting bundle rather than promoting a less visible defect
 External autorouting as design authority is optional; the exploratory scout is the default. Before
 the first full routing pass — and again after any failed one — run a scout with the native-format
 KiCadRoutingTools (KRT; measured entry in `AUTOROUTING.md`: pip-level setup, ~45 s wall on a
-2-layer 31-net board), or Freerouting where KRT is unsuitable. The scout runs on a scratch copy and
+2-layer ~30-net board), or Freerouting where KRT is unsuitable. The scout runs on a scratch copy and
 commits nothing; read it for feasibility, congestion, corridor and via-hotspot evidence, and for
 whether remaining failures are placement defects rather than routing ones. The asymmetry that makes
 it the default: the measured scout took under a minute on that board (unmeasured on denser or

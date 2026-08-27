@@ -115,8 +115,8 @@ tool's netlist, not from pictures.
 - All three are new and unreplicated; generic benchmark-contamination
   critiques apply (HWE-Bench tasks come from GitHub/OSHWLab). Do not treat
   gaps below 5 percentage points as decisive without uncertainty or replication.
-- Local evidence (EGS002 inverter schematic-capture bench,
-  `~/dev/pv/ee/pa/inverter-pcb-glm`, verified 2026-08-25): GLM-5.2's clean
+- Local evidence (a ~50-component analog power-board schematic-capture
+  bench, verified 2026-08-25): GLM-5.2's clean
   re-spawn produced a 52-component KiCad schematic that passes KiCad 10 ERC
   with 0 errors and 0 warnings. Kimi K3, Qwen3.8-Max, and DeepSeek-V4-Pro
   produced no usable output, mostly because of provider or harness failures.

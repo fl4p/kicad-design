@@ -222,18 +222,20 @@ binary announcing
 versions advance without a Rust-crate bump — see `rust_router/Cargo.toml`), which is why
 the recorded tag + self-report + digest triple, not any one number, is the pin.
 
-Measured scout, 2026-08-27, on a 2-layer 59-footprint / 31-net EGS002 inverter board
-(placement taken mid-session from an agent's manual-routing attempt, all copper stripped):
+Measured scout, 2026-08-27, on a representative 2-layer mixed power/signal board of
+~60 footprints / ~30 nets (a past project, recorded here as a sizing example only —
+never read this entry as evidence that any current board has been scouted; the placement
+was taken mid-session from an agent's manual-routing attempt, all copper stripped):
 
 - `py_router/route_planes.py board.kicad_pcb --nets GND --plane-layers B.Cu`: seconds of
   wall time as observed (console logs were not retained; timings here are session
   observations, not artifact-backed). It emits a per-net plane resistance / max-current
   JSON report (documented feature).
 - `py_router/route.py board_routed.kicad_pcb --overwrite --track-width 0.5 --power-nets
-  "BUS+" "SW_L" ... --power-nets-widths 2.0 ...`: about half a minute observed; the run
+  <pattern...> --power-nets-widths 2.0 ...`: about half a minute observed; the run
   reported 0 failed and ended in a "KiCad-oracle" recheck that refills zones through
-  pcbnew and confirms connectivity. Artifact-verified from the saved boards: all 31 nets
-  connected after refill, 51 vias.
+  pcbnew and confirms connectivity. Artifact-verified from the saved boards: every net
+  connected after refill, ~50 vias.
 - Independent verification (rule above: never the summary): `kicad-cli pcb drc` plus the
   fail-closed `scripts/kicad_copper_collisions.py` audit, graded **under the board's
   original rules** (original `.kicad_pro` restored — see caveat 2). Verdict: zero
