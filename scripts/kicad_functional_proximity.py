@@ -209,13 +209,15 @@ _FP_CHILD_LISTS = {
     "fp_curve", "pad", "model", "zone", "group", "embedded_fonts",
     "net_tie_pad_groups", "private_layers", "duplicate_pad_numbers_are_jumpers",
     "jumper_pad_groups", "embedded_files", "units", "locked", "tedit",
+    "autoplace_cost90", "autoplace_cost180", "generator", "version",
+    "component_classes",
 }
 _FP_CHILD_ATOMS = {"locked", "placed"}
 
 
 def _parse_footprint(node):
     ref = None
-    at = None
+    ats = []
     props = {}
     pads = []
     for ch in node[1:]:
@@ -226,11 +228,16 @@ def _parse_footprint(node):
                 continue
             raise ValueError("unexpected token %r inside footprint" % (ch[1],))
         h = _head(ch)
+        if h == "variant":
+            raise ValueError("footprint contains a (variant ...) block - variant "
+                             "field overrides can hide bindings; the guard does "
+                             "not support variant boards (resolve the variant "
+                             "before grading)")
         if h is None or h not in _FP_CHILD_LISTS:
             raise ValueError("unrecognized footprint child %r - refusing rather "
                              "than silently ignoring it" % (h,))
-        if h == "at" and at is None:
-            at = ch
+        if h == "at":
+            ats.append(ch)
         elif h == "property":
             # Real KiCad 10 output writes some property names as bare atoms
             # (e.g. ki_fp_filters); names may be str or atom, values must be str.
@@ -245,15 +252,19 @@ def _parse_footprint(node):
             if len(ch) < 2 or ch[1][0] != "str":
                 raise ValueError("malformed (pad ...) inside footprint")
             pname = ch[1][1]
-            pat = next((g for g in ch[2:]
-                        if isinstance(g, list) and _head(g) == "at"), None)
-            if pat is None:
-                raise ValueError("pad %r without (at ...)" % pname)
-            pads.append((pname, pat))
+            pats = [g for g in ch[2:]
+                    if isinstance(g, list) and _head(g) == "at"]
+            if len(pats) != 1:
+                # KiCad keeps the LAST duplicate; grading the first would diverge
+                # silently, so any count other than one refuses.
+                raise ValueError("pad %r must have exactly one (at ...), found %d"
+                                 % (pname, len(pats)))
+            pads.append((pname, pats[0]))
     ref = props.get("Reference")
-    if ref is None or at is None:
-        raise ValueError("footprint without Reference property or (at ...)")
-    nums = _at_args(at, "footprint %s" % ref)
+    if ref is None or len(ats) != 1:
+        raise ValueError("footprint needs a Reference property and exactly one "
+                         "(at ...) (found %d)" % len(ats))
+    nums = _at_args(ats[0], "footprint %s" % ref)
     fx, fy = nums[0], nums[1]
     th = math.radians(nums[2] if len(nums) == 3 else 0.0)
     gpads = []
@@ -293,16 +304,28 @@ _KICAD_CLI_CANDIDATES = (
 )
 
 
+def _authenticated_cli(path):
+    """Return path iff it runs and reports a KiCad version (prove identity)."""
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True,
+                           timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0 and re.search(r"\d+\.\d+\.\d+", r.stdout):
+        return path
+    return None
+
+
 def _find_kicad_cli():
     env = os.environ.get("KICAD_CLI")
     if env:
-        return env if os.path.isfile(env) else None
+        return _authenticated_cli(env) if os.path.isfile(env) else None
     import shutil
     onpath = shutil.which("kicad-cli")
-    if onpath:
+    if onpath and _authenticated_cli(onpath):
         return onpath
     for c in _KICAD_CLI_CANDIDATES:
-        if os.path.isfile(c):
+        if os.path.isfile(c) and _authenticated_cli(c):
             return c
     return None
 
@@ -310,10 +333,11 @@ def _find_kicad_cli():
 def _kicad_loads(cli, board):
     """True iff the installed KiCad can load the board (authoritative)."""
     with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "p.pos")
         r = subprocess.run(
-            [cli, "pcb", "export", "pos", "-o", os.path.join(td, "p.pos"), board],
+            [cli, "pcb", "export", "pos", "-o", out, board],
             capture_output=True, text=True, timeout=120)
-    return r.returncode == 0
+        return r.returncode == 0 and os.path.isfile(out)
 
 
 # --------------------------------------------------------------------- main ---
@@ -355,6 +379,18 @@ def run(argv) -> int:
     if len(args) != 1:
         return verdict(2, "want exactly one board file (plus --options)", "E-ARGS")
 
+    # Snapshot once: the KiCad load check and the structural parser must grade
+    # the SAME bytes - a mutable path between the two would be a TOCTOU hole.
+    try:
+        with open(args[0], "rb") as f:
+            board_bytes = f.read()
+    except OSError as exc:
+        return verdict(2, "cannot read board: %s" % exc, "E-READ")
+    snap_dir = tempfile.TemporaryDirectory()
+    snap = os.path.join(snap_dir.name, "snapshot.kicad_pcb")
+    with open(snap, "wb") as f:
+        f.write(board_bytes)
+
     if not skip_load:
         cli = _find_kicad_cli()
         if cli is None:
@@ -363,7 +399,7 @@ def run(argv) -> int:
                               "--skip-load-check exists for development only",
                            "E-TOOL")
         try:
-            loadable = _kicad_loads(cli, args[0])
+            loadable = _kicad_loads(cli, snap)
         except (OSError, subprocess.SubprocessError) as exc:
             return verdict(2, "KiCad load check could not run: %s" % exc, "E-TOOL")
         if not loadable:
@@ -371,9 +407,9 @@ def run(argv) -> int:
                               "not grading what the authority rejects", "E-LOAD")
 
     try:
-        fps = parse_board(args[0])
+        fps = parse_board(snap)
     except OSError as exc:
-        return verdict(2, "cannot read board: %s" % exc, "E-READ")
+        return verdict(2, "cannot read board snapshot: %s" % exc, "E-READ")
     except (ValueError, UnicodeDecodeError) as exc:
         return verdict(2, "board not parseable as trusted input: %s" % exc, "E-PARSE")
 

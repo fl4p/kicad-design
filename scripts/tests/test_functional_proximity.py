@@ -226,6 +226,41 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "1000\u00b5F")))),
      [], 0, "10.00mm of 15.0mm"),
+    # --- round-6: duplicate (at), separators on SelfPad, variant, atom value ---
+    ("duplicate_footprint_at_refused",  # KiCad uses the LAST at; grading the first diverges
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
+     .replace('(at 100 110 0.0) ', '(at 100 110 0.0) (at 100 199 0.0) ', 1),
+     ["--expect=S1"], 2, "[E-PARSE]"),
+    ("duplicate_pad_at_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
+     .replace('(at 0.0 0.0) (size 1 1)', '(at 0.0 0.0) (at 0 89) (size 1 1)', 1),
+     ["--expect=S1"], 2, "[E-PARSE]"),
+    ("ff_separator_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property\x0c"SelfPad"', 1),
+     [], 2, "[E-PARSE]"),
+    ("nul_separator_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property\x00"SelfPad"', 1),
+     [], 2, "[E-PARSE]"),
+    ("del_on_selfpad_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property\x7f"SelfPad"', 1),
+     [], 2, "[E-PARSE]"),
+    ("variant_block_refused",  # variant overrides can hide bindings; never allowlist blindly
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))
+           .replace("(pad ", '(variant "V1" (property "Anchor" "QX")) (pad ', 1)),
+     [], 2, "[E-PARSE]"),
+    ("atom_property_value_refused",  # (property "Anchor" Q1) unquoted value
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))
+           .replace('(property "Anchor" "Q1"', '(property "Anchor" Q1_ATOM_VALUE (at 0 0 0) (layer "F.Fab") hide (effects (font (size 1 1) (thickness 0.15)))) (property "AnchorX" "x"', 1)),
+     [], 2, "[E-PARSE]"),
 ]
 
 
@@ -299,6 +334,19 @@ def main() -> int:
         if not ok:
             failures.append(("bogus_kicad_cli_e_tool", 2, "[E-TOOL]",
                              r.returncode, r.stdout))
+        # A file that exists but is not KiCad must fail identity -> E-TOOL,
+        # never a fake load approval.
+        for fake in ("/usr/bin/true", "/usr/bin/false"):
+            env2 = dict(os.environ)
+            env2["KICAD_CLI"] = fake
+            r = subprocess.run([sys.executable, GUARD, bp], capture_output=True,
+                               text=True, env=env2)
+            name2 = "fake_cli_%s" % os.path.basename(fake)
+            ok = r.returncode == 2 and "[E-TOOL]" in r.stdout and r.stderr == ""
+            print("%-30s %s  (exit %d)  %s" % (name2, "ok" if ok else "FAIL",
+                                               r.returncode, r.stdout.strip()[:110]))
+            if not ok:
+                failures.append((name2, 2, "[E-TOOL]", r.returncode, r.stdout))
         # With a real kicad-cli present, an unloadable synthetic fixture must E-LOAD.
         import importlib.util as _ilu
         spec2 = _ilu.spec_from_file_location("fp_guard2", GUARD)
@@ -322,7 +370,7 @@ def main() -> int:
                                  r.returncode, r.stdout))
         else:
             print("%-30s skipped (no kicad-cli found)" % "unloadable_board_e_load")
-    total = len(CASES) + 1 + 1 + (1 if cli else 0)
+    total = len(CASES) + 1 + 1 + 2 + (1 if cli else 0)
     if failures:
         print("\n%d/%d cases FAILED" % (len(failures), total))
         return 1
