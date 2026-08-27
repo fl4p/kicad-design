@@ -185,7 +185,10 @@ below. Each remaining finding then takes exactly one branch:
   stays open and blocks release until the user's approval is recorded in the design/release
   documentation, bound to that pair, variant and board revision, referenced by the exclusion, and
   the variant/BOM record stops advertising the option — otherwise restore the option
-  geometrically;
+  geometrically. Restoration is the default while no forfeit approval exists: attempt it within
+  agent-owned placement authority first, and escalate only what requires a user-owned change
+  (board outline, interfaces) — never park the whole decision on the user while an agent-owned
+  restoration is available;
 - anything else — an approved waiver, subject to
   [the four independent release states](RELEASE.md#keep-four-release-states-independent).
 
