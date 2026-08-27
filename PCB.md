@@ -149,6 +149,17 @@ Classify silkscreen and documentation findings separately so cosmetic volume doe
 electrical failure. Conversely, open physical-sample, enclosure, potting, thermal or bench-test
 gates may prevent fabrication release without excusing unfinished electrical CAD.
 
+Courtyard classes (`courtyards_overlap`, `pth_inside_courtyard`) are never cosmetic: they are the
+DRC's assembly-interference check, and a pad inside a foreign courtyard usually means a part body
+over a solder joint — a board that cannot be stuffed. Disposition them **per pair**, in writing,
+into: real interference (fix the placement), deferrable (e.g. a DNP position — valid only while
+unpopulated, and only if the DNP justification is recorded next to the finding), or benign graze
+(courtyard boxes touch with demonstrated 3D clearance). A verdict sampled from a few pairs
+("vertical-mount parts have tiny courtyards") must never be promoted to the whole class — one
+measured run filed 33 courtyard-class errors as "cosmetic only" while several populated parts had
+pads inside the courtyards of Ø30 mm capacitor cans, an unbuildable placement presented as
+release-ready.
+
 The agent responsible for the final handoff must independently reproduce the final artefact from
 its declared authority—or verify the exact explicitly hand-maintained final board—and apply the
 verification ladder in [`SKILL.md`](SKILL.md). For external routing, verify the promoted
