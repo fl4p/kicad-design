@@ -155,7 +155,10 @@ is potential physical interference — a body, lead or joint competing for anoth
 space — that only side, height, standoff and population review can clear. Disposition each finding
 **per pair**, in writing, identifying both members by reference designator (for
 `pth_inside_courtyard`, the pad owner and the courtyard owner; for `courtyards_overlap`, the two
-courtyard owners), and close it through the established mechanisms, never as free prose. First
+courtyard owners), and close it through the established mechanisms, never as free prose. The KiCad
+DRC report is the authoritative enumeration: the disposition must cover every `courtyards_overlap`
+and `pth_inside_courtyard` record in the current report, keyed by its members — a custom geometry
+script can supply evidence for a disposition, never define or filter the finding set. First
 validate the courtyard models: correct any erroneous footprint or rule and rerun the DRC —
 classify only the findings that remain. An intentionally conservative envelope is not erroneous
 and must never be shrunk to silence the DRC; keep it and close its pairs through the branches
