@@ -158,8 +158,11 @@ space — that only side, height, standoff and population review can clear. Disp
 courtyard owners), and close it through the established mechanisms, never as free prose. The KiCad
 DRC report is the authoritative enumeration: the disposition must cover every `courtyards_overlap`
 and `pth_inside_courtyard` record in the current report, keyed by its members — a custom geometry
-script can supply evidence for a disposition, never define or filter the finding set. First
-validate the courtyard models: correct any erroneous footprint or rule and rerun the DRC —
+script can supply evidence for a disposition, never define or filter the finding set. Before
+enumerating, confirm both checks' effective severities are not `ignore` (stock KiCad templates
+ship `pth_inside_courtyard` ignored, and `--severity-all` does not resurrect an ignored check) —
+under an ignored severity the empty enumeration is unevaluable, not clean: restore the severity
+and rerun. First validate the courtyard models: correct any erroneous footprint or rule and rerun the DRC —
 classify only the findings that remain. An intentionally conservative envelope is not erroneous
 and must never be shrunk to silence the DRC; keep it and close its pairs through the branches
 below. Each remaining finding then takes exactly one branch:
