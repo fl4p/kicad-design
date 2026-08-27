@@ -48,12 +48,17 @@ lines carry a stable branch id in brackets, and FAIL lines carry [OVER-BUDGET]):
   2  FUNC-PROX-UNVERIFIED   the run cannot be trusted; zero declared bindings is
                             always UNVERIFIED (a vacuous run is never a pass)
 
-Parsing is deliberately strict for a regex-based reader: strict UTF-8, root token
-check, quoted-string-aware parenthesis balance, numerically validated (at ...)
-for every footprint and every pad, duplicate-property and duplicate-refdes
-refusal. Anything the reader cannot positively interpret is E-PARSE, never a
-guess. The pad transform matches KiCad 10 writer output for front and back
-footprints (validated against pcbnew on mixed-side boards).
+Parsing is deliberately strict for a regex-based reader: strict UTF-8; the
+(kicad_pcb ...) root expression is scanned string-aware to its matching close and
+must span the file (footprints after the root are refused, not graded); property
+and pad tokens accept any KiCad whitespace, so a tab cannot hide a selector;
+coordinates use KiCad's numeric grammar (no '+', underscores, exponents, nan/inf),
+validated for every footprint and every pad; duplicate properties and duplicate
+refdes refuse. Anything the reader cannot positively interpret is E-PARSE, never
+a guess. The verdict line is ASCII-transliterated and control-character-scrubbed,
+so it is exactly one stdout line on any host. The pad transform matches KiCad 10
+writer output for front and back footprints (validated against pcbnew on
+mixed-side boards).
 """
 
 import math
@@ -65,23 +70,56 @@ def verdict(code: int, msg: str, branch: str = "") -> int:
     tag = {0: "FUNC-PROX-PASS", 1: "FUNC-PROX-FAIL", 2: "FUNC-PROX-UNVERIFIED"}[code]
     bid = "[%s] " % branch if branch else ""
     line = "%s: %s%s" % (tag, bid, msg)
-    # ASCII-transliterated write: no locale or PYTHONIOENCODING can raise here,
-    # so the one-verdict-line contract holds on any host.
-    sys.stdout.write(line.encode("ascii", "backslashreplace").decode("ascii") + "\n")
+    # ASCII-transliterated, control-character-scrubbed write: no locale,
+    # PYTHONIOENCODING, or embedded newline in echoed input can raise here or
+    # break the exactly-one-stdout-line contract.
+    line = line.encode("ascii", "backslashreplace").decode("ascii")
+    line = re.sub(r"[\x00-\x1f\x7f]", " ", line)
+    sys.stdout.write(line + "\n")
     return code
+
+
+_NUM = re.compile(r"-?\d+(\.\d+)?\Z")  # KiCad's numeric grammar, not Python's:
+                                       # no '+', no underscores, no exponents, no nan/inf
 
 
 def _floats(text, what, want=(2, 3)):
     fields = text.split()
     if len(fields) not in want:
         raise ValueError("%s: malformed (at %s)" % (what, text))
-    try:
-        nums = [float(x) for x in fields]
-    except ValueError:
+    if not all(_NUM.match(x) for x in fields):
         raise ValueError("%s: non-numeric (at %s)" % (what, text))
+    nums = [float(x) for x in fields]
     if not all(math.isfinite(v) for v in nums):
         raise ValueError("%s: non-finite (at %s)" % (what, text))
     return nums
+
+
+def _root_span_end(s):
+    """Index of the char closing the first top-level expression (string-aware)."""
+    i = s.find("(")
+    if i < 0:
+        raise ValueError("no expression found")
+    depth = 0
+    instr = esc = False
+    for j in range(i, len(s)):
+        c = s[j]
+        if instr:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                instr = False
+        elif c == '"':
+            instr = True
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    raise ValueError("root expression never closes")
 
 
 def parse_board(path):
@@ -90,18 +128,16 @@ def parse_board(path):
         s = f.read()
     if not re.match(r"\s*\(kicad_pcb[\s(]", s):
         raise ValueError("root expression is not (kicad_pcb ...)")
-    stripped = re.sub(r'"(?:[^"\\]|\\.)*"', '""', s)
-    if stripped.count("(") != stripped.count(")"):
-        raise ValueError("unbalanced parentheses (%d open, %d close)"
-                         % (stripped.count("("), stripped.count(")")))
-    if not stripped.rstrip().endswith(")"):
-        raise ValueError("board does not end in a closing parenthesis")
+    root_end = _root_span_end(s)
+    if s[root_end + 1:].strip():
+        raise ValueError("content after the (kicad_pcb ...) root expression")
+    s = s[:root_end]  # grade only children of the root, exactly like KiCad would
     fps = {}
-    starts = [m.start() for m in re.finditer(r"\(footprint ", s)]
+    starts = [m.start() for m in re.finditer(r"\(footprint\s", s)]
     starts.append(len(s))
     for i in range(len(starts) - 1):
         b = s[starts[i]:starts[i + 1]]
-        ref_m = re.search(r'\(property "Reference" "([^"]+)"', b)
+        ref_m = re.search(r'\(property\s+"Reference"\s+"([^"]+)"', b)
         at_m = re.search(r"\(at\s+([^)]*)\)", b)  # first (at ...) is the footprint's own
         if not ref_m or not at_m:
             raise ValueError("footprint without Reference or (at ...): %r" % b[:60])
@@ -110,7 +146,7 @@ def parse_board(path):
         fx, fy = nums[0], nums[1]
         th = math.radians(nums[2] if len(nums) == 3 else 0.0)
         props = {}
-        for k, v in re.findall(r'\(property "([^"]+)" "([^"]*)"', b):
+        for k, v in re.findall(r'\(property\s+"([^"]+)"\s+"([^"]*)"', b):
             if k in props:
                 raise ValueError("%s: duplicate property %r" % (ref, k))
             props[k] = v

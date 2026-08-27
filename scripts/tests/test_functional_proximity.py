@@ -129,6 +129,49 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--min-expected"], 2, "[E-ARGS]"),
     ("missing_file_refused", "MISSING", [], 2, "[E-READ]"),
+    # --- mutation-killing fixtures (round-3 review) ---
+    ("exact_budget_equality_passes",  # kills d > budget -> d >= budget
+     board(ANCHOR, fp("S1", 100, 115, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     [], 0, "15.00mm of 15.0mm"),
+    ("asymmetric_rotation",  # pad (5,2) rot 90 at (110,100) -> (112,95); Q1.D -> 8.60mm; a sign flip changes this
+     board(ANCHOR, fp("R2", 110, 100, rot=90, props=(("Anchor", "Q1"), ("MaxDist", "9")),
+                      pads=(("1", 5, 2),))),
+     [], 0, "8.60mm of 9.0mm"),
+    ("footprint_after_root_refused",  # kills root-containment removal
+     board(ANCHOR) + " " + fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))),
+     ["--expect=S1"], 2, "[E-PARSE]"),
+    ("balanced_trailing_text_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))) + " (x)",
+     [], 2, "[E-PARSE]"),
+    ("nan_coordinate_refused",  # kills numeric-grammar or finiteness relaxation
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at nan 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("plus_sign_coordinate_refused",  # KiCad rejects '+100'; Python float() accepts it
+     board(ANCHOR).replace("(at 100 100 0.0)", "(at +100 100 0.0)", 1),
+     [], 2, "[E-PARSE]"),
+    ("paren_inside_string_ok",  # kills string-blind parenthesis counting
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "a)b(c")))),
+     [], 0, "FUNC-PROX-PASS"),
+    ("maxdist_beats_default",  # kills --default-max-mm overriding a declared MaxDist
+     board(ANCHOR, fp("S1", 100, 120, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--default-max-mm=30"], 1, "20.00mm > 15.0mm"),
+    ("two_bindings_one_fails",  # every other distance case grades a single binding
+     board(ANCHOR,
+           fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))),
+           fp("S2", 100, 130, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     [], 1, "1 of 2 binding(s) exceed budget: S2->Q1 30.00mm"),
+    ("tab_separated_property_honored",  # legal KiCad whitespace must not hide a selector
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10))).replace(
+         '(property "SelfPad" "2"', '(property\t"SelfPad"\t"2"')),
+     [], 1, "20.00mm > 15.0mm"),
+    ("ascii_stdout_on_refusal",  # ascii env on the refusal path too
+     "junk " + board(ANCHOR), [], 2, "[E-PARSE]"),
+    ("newline_in_option_stays_one_line",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--oops\nnext=1"], 2, "[E-ARGS]"),
 ]
 
 
@@ -149,13 +192,15 @@ def main() -> int:
                 with open(path, "w") as f:
                     f.write(text)
             env = dict(os.environ)
-            if name == "ascii_stdout_still_verdicts":
+            if name in ("ascii_stdout_still_verdicts", "ascii_stdout_on_refusal"):
                 env["PYTHONIOENCODING"] = "ascii"
             r = subprocess.run([sys.executable, GUARD, path] + extra,
                                capture_output=True, text=True, env=env)
-            out = (r.stdout + r.stderr).strip()
+            out = r.stdout.rstrip("\n")
+            # The verdict is exactly one newline-terminated stdout line; stderr empty.
             ok = (r.returncode == want_exit and want_sub in out
-                  and out.count("\n") == 0
+                  and r.stdout.endswith("\n") and "\n" not in out
+                  and r.stderr == ""
                   and out.startswith(TAGS[want_exit])
                   and (want_exit != 1 or "[OVER-BUDGET]" in out))
             print("%-30s %s  (exit %d)  %s" % (name, "ok" if ok else "FAIL",
