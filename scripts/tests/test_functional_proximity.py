@@ -337,6 +337,32 @@ CASES = [
          '(pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
          '(pad "a\\tb" thru_hole circle (at 0 10)')),
      [], 1, "20.00mm > 15.0mm"),
+    # --- round-10: qualification closure ---
+    ("duplicate_default_max_refused",  # last-wins would weaken 5mm to 15mm
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"),))),
+     ["--default-max-mm=5", "--default-max-mm=15"], 2, "[E-ARGS]"),
+    ("leading_tab_selfpad_exact",  # SelfPad "\t2" must bind the far pad NAMED tab-2; .strip() would bind near "2"
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "\\t2")),
+                      pads=(("2", 0, 0),)).replace(
+         '(pad "2" thru_hole circle (at 0 0)',
+         '(pad "2" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
+         '(pad "\\t2" thru_hole circle (at 0 10)')),
+     [], 1, "20.00mm > 15.0mm"),
+    ("trailing_space_anchorpad_exact",  # AnchorPad "G " binds the far pad named "G "; .strip() binds near "G"
+     board(ANCHOR.replace('(pad "D" thru_hole circle (at 5 0)',
+                          '(pad "D" thru_hole circle (at 5 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
+                          '(pad "G " thru_hole circle (at 0 40)'),
+           fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                     ("AnchorPad", "G ")))),
+     [], 1, "30.00mm > 15.0mm"),
+    ("input_quantization_independent",  # both fp-at and pad-at carry half-nm: per-input
+     # quantization gives 110.000001+0.000001 -> dist 10.000002 FAIL; quantizing only
+     # the final sum gives 10.000001 PASS at this budget
+     board(ANCHOR, fp("S1", 100, 110.0000005,
+                      props=(("Anchor", "Q1"), ("MaxDist", "10.0000015")),
+                      pads=(("1", 0, 0.0000005),))),
+     [], 1, "10.00mm > 10.0mm"),
 ]
 
 
