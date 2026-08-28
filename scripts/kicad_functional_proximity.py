@@ -60,10 +60,13 @@ Usage:
   side the guard refuses delimiter-bearing fields structurally under --expect
   (whitespace-mismatched board fields refuse byte-exactly); on the CAPTURE
   side the emitter must refuse to encode a binding whose fields contain ':',
-  ',' or whitespace at what would become an entry's outer edge - a naive
-  concatenation of such fields is ambiguous and can authenticate a
-  differently-shaped board (measured), and no parser of the flat option
-  string can detect that after the fact.
+  ',' or whitespace at what would become an entry's outer edge, and equally a
+  PRESENT-BUT-EMPTY SelfPad/AnchorPad property (it serializes identically to
+  an absent one, so its capture string would authenticate a board with the
+  property deleted; on the board it is a capture defect that refuses E-EXPECT
+  under expectation and E-PADS without) - a naive encoding of any of these is
+  ambiguous and can authenticate a differently-shaped board (measured), and
+  no parser of the flat option string can detect that after the fact.
 
 Two defense layers, both fail-closed:
 

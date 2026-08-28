@@ -451,6 +451,14 @@ CASES = [
     ("expect_leading_comma_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--expect=,S1:Q1:15"], 2, "[E-ARGS]"),
+    # --- round-16: the empty-selector serialization collision, both halves ---
+    ("expect_empty_selector_absent_passes",  # the 5-field '::' string means ABSENT;
+     # paired with expect_empty_selector_requires_absent it pins the documented
+     # emitter residual: a captured SelfPad="" serializes identically and its
+     # string authenticates this (property-deleted) board, so emitters must
+     # refuse to encode present-but-empty selectors
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15::"], 0, "1 binding(s) within budget"),
 ]
 
 

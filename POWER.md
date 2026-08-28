@@ -31,12 +31,13 @@ binding differing from the expectation (selectors byte-exact, an empty selector 
 meaning *absent*, maxdist as a parsed number — `15` and `15.0` are the same budget),
 refuses `--default-max-mm` alongside `--expect`, and without any expectation cannot see
 a binding deleted before the run. The **emitter must refuse to encode** a binding whose
-fields contain `:` or `,` — or whitespace at what would become an entry's outer edge
-(the start of the ref, the end of a final selector): the flat option string cannot
-express these unambiguously (the guard refuses whitespace-edged and empty entries and
-delimiter-bearing board fields), but a naive capture-side concatenation can
-authenticate a differently-shaped board (measured), and no parser of the finished
-string can detect that afterwards. Where pin identity
+fields contain `:` or `,`, whitespace at what would become an entry's outer edge
+(the start of the ref, the end of a final selector), or a present-but-empty
+`SelfPad`/`AnchorPad` property (it serializes identically to an absent one): the flat
+option string cannot express these unambiguously (the guard refuses whitespace-edged
+and empty entries, delimiter-bearing board fields, and declared-empty selectors), but
+a naive capture-side encoding can authenticate a differently-shaped board (measured),
+and no parser of the finished string can detect that afterwards. Where pin identity
 matters (a decoupling cap's supply pin, a gate pad), add `SelfPad`/`AnchorPad` selectors;
 a bare nearest-pad distance can otherwise pass a part parked near the wrong pin. DNP
 provisions carry anchors like populated parts: this is how PCB.md's DNP feasibility
