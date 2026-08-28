@@ -634,7 +634,8 @@ def run(argv) -> int:
             bad_delim = any(c in v for v in (anchor, asp or "", aap or "")
                             for c in ":,")
             # An empty expectation selector means the property must be ABSENT:
-            # grading is presence-sensitive (SelfPad="" filters to zero pads),
+            # grading is presence-sensitive (SelfPad="" filters byte-exactly to
+            # pads numbered "" - real in thermal pads - and E-PADS when none),
             # so authentication must be too - absent and declared-empty are
             # different bindings.
             sp_ok = (asp is None) if esp == "" else (asp == esp)
