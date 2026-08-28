@@ -63,8 +63,10 @@ Usage:
   ',' or whitespace at what would become an entry's outer edge, and equally a
   PRESENT-BUT-EMPTY SelfPad/AnchorPad property (it serializes identically to
   an absent one, so its capture string would authenticate a board with the
-  property deleted; on the board it is a capture defect that refuses E-EXPECT
-  under expectation and E-PADS without) - a naive encoding of any of these is
+  property deleted; on the board it refuses E-EXPECT under any expectation,
+  while without one it grades byte-exactly - an empty selector matches only
+  empty-numbered pads, which are real in KiCad thermal pads, and refuses
+  E-PADS when none exists) - a naive encoding of any of these is
   ambiguous and can authenticate a differently-shaped board (measured), and
   no parser of the flat option string can detect that after the fact.
 

@@ -35,7 +35,9 @@ fields contain `:` or `,`, whitespace at what would become an entry's outer edge
 (the start of the ref, the end of a final selector), or a present-but-empty
 `SelfPad`/`AnchorPad` property (it serializes identically to an absent one): the flat
 option string cannot express these unambiguously (the guard refuses whitespace-edged
-and empty entries, delimiter-bearing board fields, and declared-empty selectors), but
+and empty entries, delimiter-bearing board fields, and — under `--expect` —
+declared-empty selectors; without an expectation an empty selector grades byte-exactly
+against empty-numbered pads, which KiCad thermal pads really use), but
 a naive capture-side encoding can authenticate a differently-shaped board (measured),
 and no parser of the finished string can detect that afterwards. Where pin identity
 matters (a decoupling cap's supply pin, a gate pad), add `SelfPad`/`AnchorPad` selectors;

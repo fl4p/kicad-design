@@ -459,6 +459,13 @@ CASES = [
      # refuse to encode present-but-empty selectors
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--expect=S1:Q1:15::"], 0, "1 binding(s) within budget"),
+    # --- round-17: empty-numbered pads are real (KiCad thermal pads) ---
+    ("empty_selfpad_selects_empty_pad",  # without --expect, SelfPad="" grades
+     # byte-exactly: it selects the pad NAMED "" (20mm, FAIL), never E-PADS here
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "")),
+                      pads=(("1", 0, 0), ("", 0, 10)))),
+     [], 1, "20.0mm > 15.0mm"),
 ]
 
 
