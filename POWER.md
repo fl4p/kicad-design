@@ -23,8 +23,13 @@ At capture/generation time, emit on every satellite footprint:
 
 At layout time, run `scripts/kicad_functional_proximity.py` (fail-closed; a vacuous run
 with zero declared bindings is UNVERIFIED, not a pass). Release invocations pass
-`--expect=<the refdes list the generator emitted bindings for>` — without an expectation
-the guard cannot see a binding that was deleted before the run. Where pin identity
+`--expect=ref:anchor:maxdist[:selfpad:anchorpad],...` — one entry per binding, exactly
+as captured. A bare refdes list is not enough and is refused: the on-board binding
+fields are mutable layout-side state, and a ref-set expectation would still trust a
+`MaxDist` inflated or an `AnchorPad` deleted after capture (measured FAIL→PASS flips).
+The guard refuses any binding whose fields differ from the expectation, refuses
+`--default-max-mm` alongside `--expect`, and without any expectation cannot see a
+binding that was deleted before the run. Where pin identity
 matters (a decoupling cap's supply pin, a gate pad), add `SelfPad`/`AnchorPad` selectors;
 a bare nearest-pad distance can otherwise pass a part parked near the wrong pin. DNP
 provisions carry anchors like populated parts: this is how PCB.md's DNP feasibility
@@ -131,9 +136,13 @@ gate nets as HV and blocked routing at an unmeetable clearance until it reclassi
 actual potential difference. But the *reference itself* must be established, not
 assumed — in an offline or floating system, the bus return and everything referenced to
 it can be hazardous relative to earth or touchable circuits, and that boundary carries
-its own (usually stricter) insulation requirement. Sense-divider midpoints resistively
-tied to HV are elevated in normal operation and single-fault-analyzed like any other
-elevated node, even though they feed logic.
+its own (usually stricter) insulation requirement. Sense-divider midpoints are classified by
+calculation, not by the logic they feed: the divider's output tap sits near its
+reference in normal operation (a 170 V → 3.3 V divider output is ~3.3 V), while nodes
+*within* the divider string are elevated even in normal operation — and the binding
+standard's single-fault analysis (top element short or open, source impedance, any
+redundancy in the chain) decides what the tap must be insulated for, since a relevant
+fault can put it at bus potential.
 
 ## Power loop and placement
 

@@ -29,13 +29,23 @@ never improve the verdict.
 
 Usage:
   kicad_functional_proximity.py BOARD.kicad_pcb [--default-max-mm=MM]
-      [--min-expected=N] [--expect=REF1,REF2,...] [--skip-load-check]
+      [--min-expected=N] [--expect=REF:ANCHOR:MAXDIST[:SELFPAD:ANCHORPAD],...]
+      [--skip-load-check]
 
-  Release invocations MUST pass --expect with the exact set of reference
-  designators the schematic/generator emitted bindings for; any missing or extra
-  declaring footprint is UNVERIFIED. --min-expected is a weaker development-time
-  tripwire only (a count cannot see one binding swapped for another) and is not a
-  release substitute.
+  Release invocations MUST pass --expect with the FULL tuple each binding was
+  captured with - ref, anchor, maxdist, and both pad selectors (3-field entries
+  mean "no selectors declared"; empty 5-field selectors mean the same). The
+  board's binding fields are mutable layout-side state: a ref-set expectation
+  alone would still trust an on-board MaxDist inflated or an AnchorPad deleted
+  after capture, flipping FAIL to PASS under an unchanged --expect (measured).
+  Any missing/extra declaring footprint or any field differing from the
+  expectation is UNVERIFIED [E-EXPECT]. --default-max-mm is refused alongside
+  --expect (budgets under expectation are per-binding by definition), and
+  --min-expected is a weaker development-time tripwire only (a count cannot see
+  one binding swapped for another), not a release substitute. Field values are
+  compared exactly (no trimming); a binding whose fields contain ':' or ','
+  cannot be expressed and therefore cannot pass expectation - refusal, never
+  silence.
 
 Two defense layers, both fail-closed:
 
@@ -403,6 +413,19 @@ def _kicad_loads(cli, board):
 BINDING_FIELDS = ("MaxDist", "SelfPad", "AnchorPad")
 
 
+def _mm(v: float) -> str:
+    """Millimetres at fixed sub-nm display precision, trailing zeros trimmed.
+
+    Coordinates are nm-quantized but a distance (a square root) and an
+    unquantized budget are not; a 2-decimal display once claimed '10.00mm >
+    10.0mm' at a one-nm exceedance - the printed evidence must support the
+    printed comparison, and GUARDS.md requires observed value, limit and
+    margin together."""
+    s = "%.9f" % v
+    s = s.rstrip("0")
+    return s + "0" if s.endswith(".") else s
+
+
 def run(argv) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     default_max = None
@@ -432,15 +455,42 @@ def run(argv) -> int:
                 if min_expected < 0:
                     return verdict(2, "--min-expected must be >= 0", "E-ARGS")
             elif name == "--expect":
-                expect = sorted(set(r.strip() for r in val.split(",") if r.strip()))
+                expect = {}
+                for entry in val.split(","):
+                    entry = entry.strip()
+                    if not entry:
+                        continue
+                    fields = entry.split(":")
+                    if len(fields) == 3:
+                        fields += ["", ""]
+                    if len(fields) != 5:
+                        return verdict(2, "--expect entry %r: want ref:anchor:"
+                                          "maxdist[:selfpad:anchorpad] - a bare "
+                                          "refdes cannot preserve capture intent"
+                                       % entry, "E-ARGS")
+                    eref, eanch, emaxs, esp, eap = fields
+                    if not eref or not eanch:
+                        return verdict(2, "--expect entry %r has an empty ref "
+                                          "or anchor" % entry, "E-ARGS")
+                    emax = float(emaxs)
+                    if not math.isfinite(emax) or emax <= 0:
+                        return verdict(2, "--expect entry %r: maxdist must be "
+                                          "finite and > 0" % entry, "E-ARGS")
+                    if eref in expect:
+                        return verdict(2, "--expect lists %s twice" % eref,
+                                       "E-ARGS")
+                    expect[eref] = (eanch, emax, esp, eap)
                 if not expect:
-                    return verdict(2, "--expect lists no reference designators", "E-ARGS")
+                    return verdict(2, "--expect lists no bindings", "E-ARGS")
             else:
                 return verdict(2, "unknown option %s" % name, "E-ARGS")
         except ValueError:
             return verdict(2, "malformed value in %s" % o, "E-ARGS")
     if len(args) != 1:
         return verdict(2, "want exactly one board file (plus --options)", "E-ARGS")
+    if expect is not None and default_max is not None:
+        return verdict(2, "--default-max-mm is refused with --expect: a release "
+                          "expectation binds each MaxDist explicitly", "E-ARGS")
 
     # Snapshot once: the KiCad load check and the structural parser must grade
     # the SAME bytes - a mutable path between the two would be a TOCTOU hole.
@@ -528,6 +578,21 @@ def run(argv) -> int:
                               "--default-max-mm was given - budgets are "
                               "project-derived, the guard has no built-in number"
                            % ref, "E-BUDGET")
+        if expect is not None:
+            eanch, emax, esp, eap = expect[ref]
+            if (anchor != eanch or "MaxDist" not in fp["props"]
+                    or budget != emax
+                    or fp["props"].get("SelfPad", "") != esp
+                    or fp["props"].get("AnchorPad", "") != eap):
+                return verdict(2, "%s: board binding (anchor=%r maxdist=%r "
+                                  "selfpad=%r anchorpad=%r) does not match the "
+                                  "release expectation %s:%s:%s:%s:%s - a "
+                                  "binding edited after capture must not grade"
+                               % (ref, anchor, fp["props"].get("MaxDist"),
+                                  fp["props"].get("SelfPad", ""),
+                                  fp["props"].get("AnchorPad", ""),
+                                  ref, eanch, "%g" % emax, esp, eap),
+                               "E-EXPECT")
         spads = fp["pads"]
         if "SelfPad" in fp["props"]:
             spads = [p for p in spads if p[0] == fp["props"]["SelfPad"]]
@@ -546,15 +611,17 @@ def run(argv) -> int:
             failures.append((ref, anchor, d, budget, pn, qn))
 
     if failures:
-        detail = "; ".join("%s->%s %.2fmm > %.1fmm (pads %s<->%s)" % f
-                           for f in failures)
+        detail = "; ".join("%s->%s %smm > %smm by %smm (pads %s<->%s)"
+                           % (r_, a_, _mm(d_), _mm(b_), _mm(d_ - b_), p_, q_)
+                           for r_, a_, d_, b_, p_, q_ in failures)
         return verdict(1, "%d of %d binding(s) exceed budget: %s"
                        % (len(failures), len(results), detail), "OVER-BUDGET")
     worst = max(results, key=lambda r: r[2] / r[3])
     note = " (advisory: KiCad load check skipped)" if skip_load else ""
     return verdict(0, "%d binding(s) within budget; tightest margin %s->%s "
-                      "%.2fmm of %.1fmm%s"
-                   % (len(results), worst[0], worst[1], worst[2], worst[3], note))
+                      "%smm of %smm (margin %smm)%s"
+                   % (len(results), worst[0], worst[1], _mm(worst[2]),
+                      _mm(worst[3]), _mm(worst[3] - worst[2]), note))
 
 
 def main(argv) -> int:

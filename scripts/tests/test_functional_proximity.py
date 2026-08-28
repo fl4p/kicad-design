@@ -38,22 +38,24 @@ CASES = [
     # name, board text (None = missing file), argv extras, want exit, want substring
     ("bad_over_budget",
      board(ANCHOR, fp("S1", 100, 115.1, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     [], 1, "S1->Q1 15.10mm > 15.0mm"),
+     [], 1, "S1->Q1 15.1mm > 15.0mm by 0.1mm"),
     ("good_under_budget",
      board(ANCHOR, fp("S1", 100, 114.9, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     [], 0, "14.90mm of 15.0mm"),
+     [], 0, "14.9mm of 15.0mm (margin 0.1mm)"),
     ("rotated_satellite",  # pad (5,0) rotated 90° at (110,100) → (110,95); Q1.D (105,100) → 7.07mm
      board(ANCHOR, fp("R1", 110, 100, rot=90, props=(("Anchor", "Q1"), ("MaxDist", "8")),
                       pads=(("1", 5, 0),))),
-     [], 0, "7.07mm of 8.0mm"),
+     [], 0, "7.071067812mm of 8.0mm"),
     ("backside_satellite",  # B.Cu at (130,100), pad (2,0) → (132,100); Q1.D (105,100) → 27mm
      board(ANCHOR, fp("B1", 130, 100, layer="B.Cu",
                       props=(("Anchor", "Q1"), ("MaxDist", "26")), pads=(("1", 2, 0),))),
-     [], 1, "27.00mm > 26.0mm"),
-    ("pad_selector",  # AnchorPad=G forces the far pad: (100,110)→(100,100)=10 > 8; any-pad would be 5.59
-     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "8"),
+     [], 1, "27.0mm > 26.0mm by 1.0mm"),
+    ("pad_selector",  # AnchorPad=G forces the far pad: (105,107)→G(100,100)=8.60 > 8 FAIL;
+     # without the selector the nearest pad D(105,100) is 7.00 → PASS, so dropping
+     # AnchorPad handling flips this case's verdict (kills selector-loss mutations)
+     board(ANCHOR, fp("S1", 105, 107, props=(("Anchor", "Q1"), ("MaxDist", "8"),
                                              ("AnchorPad", "G")))),
-     [], 1, "10.00mm > 8.0mm"),
+     [], 1, "8.602325267mm > 8.0mm"),
     ("pad_selector_wrong_name",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "8"),
                                              ("AnchorPad", "NOPE")))),
@@ -72,7 +74,7 @@ CASES = [
      [], 2, "[E-BUDGET]"),
     ("no_budget_with_default_ok",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"),))),
-     ["--default-max-mm=12"], 0, "10.00mm of 12.0mm"),
+     ["--default-max-mm=12"], 0, "10.0mm of 12.0mm"),
     ("dangling_anchor",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q9"), ("MaxDist", "15")))),
      [], 2, "[E-ANCHOR]"),
@@ -82,13 +84,13 @@ CASES = [
     ("empty_is_unverified", board(ANCHOR), [], 2, "[E-EMPTY]"),
     ("expect_mismatch_missing",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     ["--expect=S1,S2"], 2, "[E-EXPECT]"),
+     ["--expect=S1:Q1:15,S2:Q2:15"], 2, "[E-EXPECT]"),
     ("expect_mismatch_extra",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     ["--expect=S9"], 2, "[E-EXPECT]"),
+     ["--expect=S9:Q1:15"], 2, "[E-EXPECT]"),
     ("expect_exact_ok",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     ["--expect=S1"], 0, "1 binding(s) within budget"),
+     ["--expect=S1:Q1:15"], 0, "1 binding(s) within budget"),
     ("min_expected_short",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--min-expected=3"], 2, "[E-EXPECT]"),
@@ -108,7 +110,7 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("SelfPad", "2")),
                       pads=(("1", 0, 0), ("2", 0, 10)))),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     ("selfpad_wrong_name",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("SelfPad", "NOPE")))),
@@ -132,14 +134,14 @@ CASES = [
     # --- mutation-killing fixtures (round-3 review) ---
     ("exact_budget_equality_passes",  # kills d > budget -> d >= budget
      board(ANCHOR, fp("S1", 100, 115, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     [], 0, "15.00mm of 15.0mm"),
+     [], 0, "15.0mm of 15.0mm (margin 0.0mm)"),
     ("asymmetric_rotation",  # pad (5,2) rot 90 at (110,100) -> (112,95); Q1.D -> 8.60mm; a sign flip changes this
      board(ANCHOR, fp("R2", 110, 100, rot=90, props=(("Anchor", "Q1"), ("MaxDist", "9")),
                       pads=(("1", 5, 2),))),
-     [], 0, "8.60mm of 9.0mm"),
+     [], 0, "8.602325267mm of 9.0mm"),
     ("footprint_after_root_refused",  # kills root-containment removal
      board(ANCHOR) + " " + fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))),
-     ["--expect=S1"], 2, "[E-PARSE]"),
+     ["--expect=S1:Q1:15"], 2, "[E-PARSE]"),
     ("balanced_trailing_text_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))) + " (x)",
      [], 2, "[E-PARSE]"),
@@ -155,18 +157,18 @@ CASES = [
      [], 0, "FUNC-PROX-PASS"),
     ("maxdist_beats_default",  # kills --default-max-mm overriding a declared MaxDist
      board(ANCHOR, fp("S1", 100, 120, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     ["--default-max-mm=30"], 1, "20.00mm > 15.0mm"),
+     ["--default-max-mm=30"], 1, "20.0mm > 15.0mm"),
     ("two_bindings_one_fails",  # every other distance case grades a single binding
      board(ANCHOR,
            fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))),
            fp("S2", 100, 130, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     [], 1, "1 of 2 binding(s) exceed budget: S2->Q1 30.00mm"),
+     [], 1, "1 of 2 binding(s) exceed budget: S2->Q1 30.0mm"),
     ("tab_separated_property_honored",  # legal KiCad whitespace must not hide a selector
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("SelfPad", "2")),
                       pads=(("1", 0, 0), ("2", 0, 10))).replace(
          '(property "SelfPad" "2"', '(property\t"SelfPad"\t"2"')),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     ("ascii_stdout_on_refusal",  # ascii env on the refusal path too
      "junk " + board(ANCHOR), [], 2, "[E-PARSE]"),
     ("newline_in_option_stays_one_line",
@@ -176,7 +178,7 @@ CASES = [
     ("exponent_and_dot_forms_accepted",  # (at 1e2 110.) == (100,110) -> 10mm of 15
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
      .replace("(at 100 110 0.0)", "(at 1e2 110. 0.0)", 1),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("bare_dot_decimal_accepted",  # (at .5 ...) must parse like KiCad does
      board(ANCHOR, fp("S1", 0.5, 110, props=(("Anchor", "Q1"), ("MaxDist", "150"))))
      .replace("(at 0.5 110 0.0)", "(at .5 110 0.0)", 1),
@@ -184,7 +186,7 @@ CASES = [
     ("negative_coordinate_accepted",  # kills removing the leading '-' from the grammar
      board(ANCHOR, fp("S1", -0.5, 110, props=(("Anchor", "Q1"), ("MaxDist", "150"))))
      .replace("(at -0.5 110 0.0)", "(at -.5 110 0.0)", 1),
-     [], 0, "101.00mm of 150.0mm"),
+     [], 0, "100.99628706mm of 150.0mm"),
     ("underscore_number_refused",  # Python float() accepts 1_00; KiCad rejects it
      board(ANCHOR).replace("(at 100 100 0.0)", "(at 1_00 100 0.0)", 1),
      [], 2, "[E-PARSE]"),
@@ -211,7 +213,7 @@ CASES = [
     ("exponent_plus_and_uppercase_ok",  # KiCad accepts 1e+2 / 1E2; distances must grade
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
      .replace("(at 100 110 0.0)", "(at 1e+2 1.1E2 0.0)", 1),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("underflow_to_zero_refused",  # KiCad rejects 1e-324; Python floats it to 0.0
      board(ANCHOR).replace("(at 100 100 0.0)", "(at 1e-324 100 0.0)", 1),
      [], 2, "[E-PARSE]"),
@@ -221,20 +223,20 @@ CASES = [
     ("multiline_board_ok",  # real newlines between elements (kills CR/LF separator removal)
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
      .replace(") (", ")\n("),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("unicode_in_quoted_string_ok",  # quoted UTF-8 values stay legal
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "1000\u00b5F")))),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     # --- round-6: duplicate (at), separators on SelfPad, variant, atom value ---
     ("duplicate_footprint_at_refused",  # KiCad uses the LAST at; grading the first diverges
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
      .replace('(at 100 110 0.0) ', '(at 100 110 0.0) (at 100 199 0.0) ', 1),
-     ["--expect=S1"], 2, "[E-PARSE]"),
+     ["--expect=S1:Q1:15"], 2, "[E-PARSE]"),
     ("duplicate_pad_at_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"))))
      .replace('(at 0.0 0.0) (size 1 1)', '(at 0.0 0.0) (at 0 89) (size 1 1)', 1),
-     ["--expect=S1"], 2, "[E-PARSE]"),
+     ["--expect=S1:Q1:15"], 2, "[E-PARSE]"),
     ("ff_separator_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("SelfPad", "2")),
@@ -266,7 +268,7 @@ CASES = [
                                              ("SelfPad", "2")),
                       pads=(("1", 0, 0), ("2", 0, 10)))).replace(
          '(property "SelfPad"', '(property "\\x53elfPad"', 1),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     ("unknown_escape_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "a\\qb")))),
@@ -277,11 +279,11 @@ CASES = [
                                              ("SelfPad", "2")),
                       pads=(("1", 0, 0), ("2", 0, 10)))).replace(
          '(property "SelfPad"', '(property "Self\\x50ad"', 1),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     ("utf8_byte_pair_escape_ok",  # \xC3\xA9 must decode to ONE e-acute, not two chars
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "caf\\xC3\\xA9")))),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("lone_high_byte_refused",  # \xE9 alone is invalid UTF-8; KiCad empties it - refuse the divergence
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "a\\xE9b")))),
@@ -292,22 +294,22 @@ CASES = [
     ("backslash_and_quote_escapes_ok",  # kills removal of \\ and \" support
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", 'a\\\\b\\"c')))),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("newline_tab_escapes_ok",  # kills removal of \n \t \r support
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "a\\nb\\tc\\rd")))),
-     [], 0, "10.00mm of 15.0mm"),
+     [], 0, "10.0mm of 15.0mm"),
     ("quantization_matches_kicad",  # 2x 10.6066017mm quantizes to 15.0000004 > 15 (measured)
      board(ANCHOR, fp("S1", 110.6066017, 110.6066017,
                       props=(("Anchor", "Q1"), ("MaxDist", "15"))),
            fp("QA", 100, 100, pads=(("1", 0, 0),))).replace(
          '(property "Anchor" "Q1"', '(property "Anchor" "QA"', 1),
-     [], 1, "15.00mm > 15.0mm"),
+     [], 1, "15.000000399mm > 15.0mm by 0.000000399mm"),
     # --- round-9: rounding rule, angle precision, duplicate options, binding-relevant escapes ---
     ("half_nanometre_rounds_away",  # KiCad rounds .5nm away from zero: 10.000001 > 10.0000005 FAIL
      board(ANCHOR, fp("S1", 100, 110.0000005,
                       props=(("Anchor", "Q1"), ("MaxDist", "10.0000005")))),
-     [], 1, "10.00mm > 10.0mm"),
+     [], 1, "10.000001mm > 10.0000005mm by 0.0000005mm"),
     ("angle_precision_preserved",  # fp rot 45.1234565, pad (10,3), anchor pad (100,89):
      # quantized dist 10.9849918 PASSes budget 10.9849920055; the continuous
      # (unquantized-final) value 10.9849922 and a whole-degree angle 11.0048 both FAIL
@@ -315,20 +317,20 @@ CASES = [
            fp("S1", 100, 100, rot=45.1234565,
               props=(("Anchor", "QA"), ("MaxDist", "10.9849920055")),
               pads=(("1", 10, 3),))),
-     [], 0, "10.98mm of 11.0mm"),
+     [], 0, "10.984991802mm of 10.984992006mm (margin 0.000000204mm)"),
     ("duplicate_option_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
-     ["--expect=S1,S2", "--expect=S1"], 2, "[E-ARGS]"),
+     ["--expect=S1:Q1:15,S2:Q2:15", "--expect=S1:Q1:15"], 2, "[E-ARGS]"),
     ("escaped_utf8_anchor_binds",  # Anchor "Q\xC3\xA9" must bind the far ref "Qe-acute" -> FAIL
      board(ANCHOR,
            fp("QE", 100, 140, pads=(("1", 0, 0),)).replace('"QE"', '"Q\u00e9"'),
            fp("S1", 100, 110, props=(("Anchor", "Q\\xC3\\xA9"), ("MaxDist", "15")))),
-     [], 1, "30.00mm > 15.0mm"),
+     [], 1, "30.0mm > 15.0mm"),
     ("escaped_backslash_anchor_binds",  # Anchor "Q\\X" -> ref "Q\X" (far) -> FAIL
      board(ANCHOR,
            fp("QB", 100, 140, pads=(("1", 0, 0),)).replace('"QB"', '"Q\\\\X"'),
            fp("S1", 100, 110, props=(("Anchor", "Q\\\\X"), ("MaxDist", "15")))),
-     [], 1, "30.00mm > 15.0mm"),
+     [], 1, "30.0mm > 15.0mm"),
     ("escaped_tab_padname_selects",  # SelfPad "a\tb" must select the far pad named a<TAB>b
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("SelfPad", "a\\tb")),
@@ -336,7 +338,7 @@ CASES = [
          '(pad "1" thru_hole circle (at 0 0)',
          '(pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
          '(pad "a\\tb" thru_hole circle (at 0 10)')),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     # --- round-10: qualification closure ---
     ("duplicate_default_max_refused",  # last-wins would weaken 5mm to 15mm
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"),))),
@@ -348,21 +350,54 @@ CASES = [
          '(pad "2" thru_hole circle (at 0 0)',
          '(pad "2" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
          '(pad "\\t2" thru_hole circle (at 0 10)')),
-     [], 1, "20.00mm > 15.0mm"),
+     [], 1, "20.0mm > 15.0mm"),
     ("trailing_space_anchorpad_exact",  # AnchorPad "G " binds the far pad named "G "; .strip() binds near "G"
      board(ANCHOR.replace('(pad "D" thru_hole circle (at 5 0)',
                           '(pad "D" thru_hole circle (at 5 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
                           '(pad "G " thru_hole circle (at 0 40)'),
            fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                      ("AnchorPad", "G ")))),
-     [], 1, "30.00mm > 15.0mm"),
+     [], 1, "30.0mm > 15.0mm"),
     ("input_quantization_independent",  # both fp-at and pad-at carry half-nm: per-input
      # quantization gives 110.000001+0.000001 -> dist 10.000002 FAIL; quantizing only
      # the final sum gives 10.000001 PASS at this budget
      board(ANCHOR, fp("S1", 100, 110.0000005,
                       props=(("Anchor", "Q1"), ("MaxDist", "10.0000015")),
                       pads=(("1", 0, 0.0000005),))),
-     [], 1, "10.00mm > 10.0mm"),
+     [], 1, "10.000002mm > 10.0000015mm by 0.0000005mm"),
+    # --- round-12 (cold review): --expect binds the full captured tuple ---
+    ("expect_tuple_pass",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15"], 0, "1 binding(s) within budget"),
+    ("expect_tuple_selectors_pass",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "1"), ("AnchorPad", "G")))),
+     ["--expect=S1:Q1:15:1:G"], 0, "1 binding(s) within budget"),
+    ("expect_maxdist_inflation_refused",  # board budget 25 would PASS at 20mm; capture said 15
+     board(ANCHOR, fp("S1", 100, 120, props=(("Anchor", "Q1"), ("MaxDist", "25")))),
+     ["--expect=S1:Q1:15"], 2, "[E-EXPECT]"),
+    ("expect_anchorpad_deletion_refused",  # without the selector this board PASSes at 7mm
+     board(ANCHOR, fp("S1", 105, 107, props=(("Anchor", "Q1"), ("MaxDist", "8")))),
+     ["--expect=S1:Q1:8::G"], 2, "[E-EXPECT]"),
+    ("expect_anchor_swap_refused",  # re-anchored to a nearer ref must not grade as captured
+     board(ANCHOR, fp("QA", 100, 108, pads=(("1", 0, 0),)),
+           fp("S1", 100, 110, props=(("Anchor", "QA"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15"], 2, "[E-EXPECT]"),
+    ("expect_with_default_max_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15", "--default-max-mm=15"], 2, "[E-ARGS]"),
+    ("expect_bare_ref_refused",  # the pre-round-12 form cannot preserve capture intent
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1"], 2, "[E-ARGS]"),
+    ("expect_duplicate_ref_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15,S1:Q1:15"], 2, "[E-ARGS]"),
+    ("expect_malformed_maxdist_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:x15"], 2, "[E-ARGS]"),
+    ("expect_four_fields_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15:1"], 2, "[E-ARGS]"),
 ]
 
 
@@ -501,9 +536,32 @@ def main() -> int:
             if not ok:
                 failures.append(("unloadable_board_e_load", 2, "[E-LOAD]",
                                  r.returncode, r.stdout))
+            # Success path of the load layer, release-style: a loadable board
+            # graded WITHOUT --skip-load-check must PASS with no advisory note.
+            # Kills a regression where _kicad_loads() always returns False (the
+            # E-LOAD cases above stay green under it) and proves the E-LOAD
+            # fixture's premise that the uncorrupted skeleton loads in KiCad.
+            goodp = os.path.join(td2, "good.kicad_pcb")
+            with open(goodp, "w") as f:
+                f.write(board(ANCHOR, fp("S1", 100, 110,
+                                         props=(("Anchor", "Q1"),
+                                                ("MaxDist", "15")))))
+            r = subprocess.run([sys.executable, GUARD, goodp,
+                                "--expect=S1:Q1:15"],
+                               capture_output=True, text=True)
+            ok = (r.returncode == 0 and r.stdout.startswith(TAGS[0])
+                  and "advisory" not in r.stdout and "(margin " in r.stdout
+                  and r.stderr == "")
+            print("%-30s %s  (exit %d)  %s" % ("loadcheck_release_pass",
+                                               "ok" if ok else "FAIL",
+                                               r.returncode,
+                                               r.stdout.strip()[:110]))
+            if not ok:
+                failures.append(("loadcheck_release_pass", 0, "PASS",
+                                 r.returncode, r.stdout))
         else:
             print("%-30s skipped (no kicad-cli found)" % "unloadable_board_e_load")
-    total = len(CASES) + 1 + 1 + 2 + 3 + (1 if cli else 0)
+    total = len(CASES) + 1 + 1 + 2 + 3 + (2 if cli else 0)
     if failures:
         print("\n%d/%d cases FAILED" % (len(failures), total))
         return 1

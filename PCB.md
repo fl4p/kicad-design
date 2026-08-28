@@ -207,8 +207,10 @@ function names a partner (a snubber its switch, decoupling its load, a load capa
 crystal, a termination its receiver) is a **functional satellite**: at capture/generation time,
 when the partner is known, emit `Anchor=<refdes>` and `MaxDist=<mm>` fields on the satellite's
 footprint; at layout time run the fail-closed proximity guard
-(`scripts/kicad_functional_proximity.py`) with `--expect=<the refdes list capture emitted>` —
-vacuous runs, binding fields without an Anchor, and expectation mismatches are all UNVERIFIED,
+(`scripts/kicad_functional_proximity.py`) with `--expect=ref:anchor:maxdist[:selfpad:anchorpad],...`
+(the full tuple each binding was captured with — a bare refdes list would still trust
+budgets and selectors edited after capture) — vacuous runs, binding fields without an
+Anchor, and expectation mismatches are all UNVERIFIED,
 never a silent pass. The guard verifies recorded intent only — it cannot invent a binding that
 capture never declared, so the capture-time emission is itself a gate, and the guard is a
 gross-misplacement tripwire, not a substitute for loop/topology audits. Domain catalogs and
