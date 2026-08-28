@@ -60,6 +60,13 @@ bare-dot and exponent forms (explicit exponent sign included) grade; a leading
 zero and any coordinate outside +-2000 mm refuse (KiCad clamps internally near
 2147 mm; the guard refuses rather than diverging silently).
 
+Threat boundary - state it honestly: this guard detects ACCIDENTAL misplacement
+and accidental environmental breakage (wrong tool, unloadable board, mangled
+file). It is not tamper-resistant: an actor who controls the filesystem or the
+environment (a malicious $KICAD_CLI, a same-privilege process racing the CLI's
+snapshot copy) can defeat it - and could equally edit the guard itself. Binding
+provenance beyond tool-identity and content-snapshot checks is out of scope.
+
 Verdicts (every run prints exactly one ASCII, control-scrubbed stdout line;
 refusals carry a stable branch id, FAIL carries [OVER-BUDGET]):
   0  FUNC-PROX-PASS         every declared binding within budget, preconditions
@@ -112,8 +119,24 @@ def _tokenize(s):
                 if s[j] == "\\":
                     if j + 1 >= n:
                         raise ValueError("unterminated escape at offset %d" % j)
-                    buf.append(s[j + 1])
-                    j += 2
+                    e = s[j + 1]
+                    # KiCad's escape semantics (measured: \xHH decodes, so
+                    # "\x53elfPad" IS "SelfPad"); unknown escapes refuse.
+                    if e == "x":
+                        h = s[j + 2:j + 4]
+                        if len(h) != 2 or not re.fullmatch(r"[0-9a-fA-F]{2}", h):
+                            raise ValueError("malformed \\x escape at offset %d" % j)
+                        buf.append(chr(int(h, 16)))
+                        j += 4
+                    elif e in ("\\", '"'):
+                        buf.append(e)
+                        j += 2
+                    elif e in "nrt":
+                        buf.append({"n": "\n", "r": "\r", "t": "\t"}[e])
+                        j += 2
+                    else:
+                        raise ValueError("unsupported escape \\%s at offset %d "
+                                         "(refusing rather than guessing)" % (e, j))
                 else:
                     buf.append(s[j])
                     j += 1
@@ -277,9 +300,7 @@ def _parse_footprint(node):
     return ref, {"pads": gpads, "props": props}
 
 
-def parse_board(path):
-    with open(path, encoding="utf-8") as f:  # strict UTF-8
-        s = f.read()
+def parse_board_text(s):
     root = _read_tree(s)
     if _head(root) != "kicad_pcb":
         raise ValueError("root expression is not (kicad_pcb ...)")
@@ -304,14 +325,21 @@ _KICAD_CLI_CANDIDATES = (
 )
 
 
+_QUALIFIED_MAJOR = 10  # the KiCad major this guard's acceptance is measured against
+
+
 def _authenticated_cli(path):
-    """Return path iff it runs and reports a KiCad version (prove identity)."""
+    """Return path iff --version output IS a bare version string of a qualified
+    major - kicad-cli prints exactly '10.0.5'; git/clang/python3 print prose and
+    refuse. This identifies the tool against accidents, not against an adversary
+    who controls the environment (see the threat boundary in the docstring)."""
     try:
         r = subprocess.run([path, "--version"], capture_output=True, text=True,
                            timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
-    if r.returncode == 0 and re.search(r"\d+\.\d+\.\d+", r.stdout):
+    m = re.fullmatch(r"\s*(\d+)\.\d+\.\d+(?:[-+][\w.]+)?\s*", r.stdout or "")
+    if r.returncode == 0 and m and int(m.group(1)) == _QUALIFIED_MAJOR:
         return path
     return None
 
@@ -407,9 +435,9 @@ def run(argv) -> int:
                               "not grading what the authority rejects", "E-LOAD")
 
     try:
-        fps = parse_board(snap)
-    except OSError as exc:
-        return verdict(2, "cannot read board snapshot: %s" % exc, "E-READ")
+        # Parse the bytes retained in memory - never re-read the writable
+        # snapshot the CLI saw, so both layers grade the identical content.
+        fps = parse_board_text(board_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         return verdict(2, "board not parseable as trusted input: %s" % exc, "E-PARSE")
 

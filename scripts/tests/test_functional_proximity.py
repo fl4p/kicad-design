@@ -253,13 +253,23 @@ CASES = [
                       pads=(("1", 0, 0), ("2", 0, 10)))).replace(
          '(property "SelfPad"', '(property\x7f"SelfPad"', 1),
      [], 2, "[E-PARSE]"),
-    ("variant_block_refused",  # variant overrides can hide bindings; never allowlist blindly
+    ("variant_block_refused",  # genuine KiCad-10 variant syntax; assert the dedicated branch
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))
-           .replace("(pad ", '(variant "V1" (property "Anchor" "QX")) (pad ', 1)),
-     [], 2, "[E-PARSE]"),
+           .replace("(pad ", '(variant (name "V1") (field (name "Anchor") (value "QX"))) (pad ', 1)),
+     [], 2, "variant field overrides"),
     ("atom_property_value_refused",  # (property "Anchor" Q1) unquoted value
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))
            .replace('(property "Anchor" "Q1"', '(property "Anchor" Q1_ATOM_VALUE (at 0 0 0) (layer "F.Fab") hide (effects (font (size 1 1) (thickness 0.15)))) (property "AnchorX" "x"', 1)),
+     [], 2, "[E-PARSE]"),
+    ("hex_escaped_selfpad_honored",  # KiCad decodes \x53elfPad to SelfPad; so must the guard
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property "\\x53elfPad"', 1),
+     [], 1, "20.00mm > 15.0mm"),
+    ("unknown_escape_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "a\\qb")))),
      [], 2, "[E-PARSE]"),
 ]
 
@@ -347,6 +357,37 @@ def main() -> int:
                                                r.returncode, r.stdout.strip()[:110]))
             if not ok:
                 failures.append((name2, 2, "[E-TOOL]", r.returncode, r.stdout))
+        # A shim that reports a qualified bare version but writes no artifact
+        # must fail the load layer (kills artifact-existence-check removal).
+        shim = os.path.join(td2, "shim-kicad-cli")
+        with open(shim, "w") as f:
+            f.write("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 10.0.5; fi\nexit 0\n")
+        os.chmod(shim, 0o755)
+        env3 = dict(os.environ)
+        env3["KICAD_CLI"] = shim
+        r = subprocess.run([sys.executable, GUARD, bp], capture_output=True,
+                           text=True, env=env3)
+        ok = r.returncode == 2 and "[E-LOAD]" in r.stdout and r.stderr == ""
+        print("%-30s %s  (exit %d)  %s" % ("version_shim_no_artifact",
+                                           "ok" if ok else "FAIL", r.returncode,
+                                           r.stdout.strip()[:110]))
+        if not ok:
+            failures.append(("version_shim_no_artifact", 2, "[E-LOAD]",
+                             r.returncode, r.stdout))
+        # Non-KiCad executables with prose version output must fail identity.
+        for fake in ("/usr/bin/git", "/usr/bin/python3"):
+            if not os.path.isfile(fake):
+                continue
+            env4 = dict(os.environ)
+            env4["KICAD_CLI"] = fake
+            r = subprocess.run([sys.executable, GUARD, bp], capture_output=True,
+                               text=True, env=env4)
+            name4 = "prose_version_%s" % os.path.basename(fake)
+            ok = r.returncode == 2 and "[E-TOOL]" in r.stdout and r.stderr == ""
+            print("%-30s %s  (exit %d)  %s" % (name4, "ok" if ok else "FAIL",
+                                               r.returncode, r.stdout.strip()[:110]))
+            if not ok:
+                failures.append((name4, 2, "[E-TOOL]", r.returncode, r.stdout))
         # With a real kicad-cli present, an unloadable synthetic fixture must E-LOAD.
         import importlib.util as _ilu
         spec2 = _ilu.spec_from_file_location("fp_guard2", GUARD)
@@ -370,7 +411,7 @@ def main() -> int:
                                  r.returncode, r.stdout))
         else:
             print("%-30s skipped (no kicad-cli found)" % "unloadable_board_e_load")
-    total = len(CASES) + 1 + 1 + 2 + (1 if cli else 0)
+    total = len(CASES) + 1 + 1 + 2 + 3 + (1 if cli else 0)
     if failures:
         print("\n%d/%d cases FAILED" % (len(failures), total))
         return 1
