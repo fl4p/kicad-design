@@ -303,6 +303,40 @@ CASES = [
            fp("QA", 100, 100, pads=(("1", 0, 0),))).replace(
          '(property "Anchor" "Q1"', '(property "Anchor" "QA"', 1),
      [], 1, "15.00mm > 15.0mm"),
+    # --- round-9: rounding rule, angle precision, duplicate options, binding-relevant escapes ---
+    ("half_nanometre_rounds_away",  # KiCad rounds .5nm away from zero: 10.000001 > 10.0000005 FAIL
+     board(ANCHOR, fp("S1", 100, 110.0000005,
+                      props=(("Anchor", "Q1"), ("MaxDist", "10.0000005")))),
+     [], 1, "10.00mm > 10.0mm"),
+    ("angle_precision_preserved",  # fp rot 45.1234565, pad (10,3), anchor pad (100,89):
+     # quantized dist 10.9849918 PASSes budget 10.9849920055; the continuous
+     # (unquantized-final) value 10.9849922 and a whole-degree angle 11.0048 both FAIL
+     board(fp("QA", 100, 89, pads=(("1", 0, 0),)),
+           fp("S1", 100, 100, rot=45.1234565,
+              props=(("Anchor", "QA"), ("MaxDist", "10.9849920055")),
+              pads=(("1", 10, 3),))),
+     [], 0, "10.98mm of 11.0mm"),
+    ("duplicate_option_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1,S2", "--expect=S1"], 2, "[E-ARGS]"),
+    ("escaped_utf8_anchor_binds",  # Anchor "Q\xC3\xA9" must bind the far ref "Qe-acute" -> FAIL
+     board(ANCHOR,
+           fp("QE", 100, 140, pads=(("1", 0, 0),)).replace('"QE"', '"Q\u00e9"'),
+           fp("S1", 100, 110, props=(("Anchor", "Q\\xC3\\xA9"), ("MaxDist", "15")))),
+     [], 1, "30.00mm > 15.0mm"),
+    ("escaped_backslash_anchor_binds",  # Anchor "Q\\X" -> ref "Q\X" (far) -> FAIL
+     board(ANCHOR,
+           fp("QB", 100, 140, pads=(("1", 0, 0),)).replace('"QB"', '"Q\\\\X"'),
+           fp("S1", 100, 110, props=(("Anchor", "Q\\\\X"), ("MaxDist", "15")))),
+     [], 1, "30.00mm > 15.0mm"),
+    ("escaped_tab_padname_selects",  # SelfPad "a\tb" must select the far pad named a<TAB>b
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "a\\tb")),
+                      pads=(("1", 0, 0),)).replace(
+         '(pad "1" thru_hole circle (at 0 0)',
+         '(pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
+         '(pad "a\\tb" thru_hole circle (at 0 10)')),
+     [], 1, "20.00mm > 15.0mm"),
 ]
 
 

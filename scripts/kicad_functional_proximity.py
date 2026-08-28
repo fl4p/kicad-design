@@ -210,7 +210,9 @@ _RANGE_MM = 2000.0
 
 
 def _quant(v):
-    return round(v * 1e6) / 1e6  # KiCad stores integer nanometres
+    # KiCad stores integer nanometres and rounds exact half-nanometres AWAY FROM
+    # ZERO; Python's round() is ties-to-even and diverges on exact halves.
+    return math.copysign(math.floor(abs(v) * 1e6 + 0.5), v) / 1e6
 
 
 def _coord(tok, what):
@@ -227,11 +229,23 @@ def _coord(tok, what):
     return _quant(v)
 
 
+def _angle(tok, what):
+    if tok[0] != "atom" or not _NUM.match(tok[1]):
+        raise ValueError("%s: non-numeric angle %r" % (what, tok[1]))
+    v = float(tok[1])
+    if not math.isfinite(v) or abs(v) > 36000:
+        raise ValueError("%s: unsupported angle %r" % (what, tok[1]))
+    return v  # angles are NOT nanometre-quantized; KiCad keeps finer precision
+
+
 def _at_args(node, what, want=(2, 3)):
     args = node[1:]
     if len(args) not in want:
         raise ValueError("%s: malformed (at ...)" % what)
-    return [_coord(t, what) for t in args]
+    out = [_coord(args[0], what), _coord(args[1], what)]
+    if len(args) == 3:
+        out.append(_angle(args[2], what))
+    return out
 
 
 # ------------------------------------------------------------------- walker ---
@@ -395,8 +409,13 @@ def run(argv) -> int:
     min_expected = 0
     expect = None
     skip_load = False
+    seen_opts = set()
     for o in (a for a in argv[1:] if a.startswith("--")):
         name, eq, val = o.partition("=")
+        if name in seen_opts:
+            return verdict(2, "duplicate option %s - refusing last-wins ambiguity"
+                           % name, "E-ARGS")
+        seen_opts.add(name)
         if name == "--skip-load-check" and not eq:
             skip_load = True
             continue
