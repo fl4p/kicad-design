@@ -49,17 +49,21 @@ Usage:
   (grading is presence-sensitive, so authentication is too); the anchor compares
   after the guard's own whitespace-strip normalization; maxdist compares as a
   parsed number (15, 15.0 and 1.5e1 are the same budget). A whitespace-edged
-  entry refuses [E-ARGS]: stripping once silently truncated a trailing-space
-  AnchorPad to its space-free neighbour and authenticated a nearer pad
-  (measured FAIL->PASS), so values at the entry edges (the ref, a final
-  anchorpad) cannot carry edge whitespace at all. Fields containing ':' or ','
-  are likewise inexpressible: on the BOARD side the guard refuses delimiter-
-  bearing fields structurally under --expect (edge-whitespace board fields
-  mismatch byte-exactly and refuse the same way); on the CAPTURE side the
-  emitter must refuse to encode a binding whose fields contain ':', ',' or
-  edge whitespace - a naive concatenation of such fields is ambiguous and can
-  authenticate a differently-shaped board (measured), and no parser of the
-  flat option string can detect that after the fact.
+  or empty entry refuses [E-ARGS]: stripping once silently truncated a
+  trailing-space AnchorPad to its space-free neighbour and authenticated a
+  nearer pad (measured FAIL->PASS), and a skipped empty entry would absorb the
+  trailing comma of a naively encoded 'G,' selector. The refusal covers the
+  ENTRY's outer edges - the start of the ref and the end of a final selector
+  cannot carry whitespace; interior field edges (a trailing-space ref before
+  ':', a leading-space final selector) remain expressible and compare
+  byte-exact. Fields containing ':' or ',' are inexpressible: on the BOARD
+  side the guard refuses delimiter-bearing fields structurally under --expect
+  (whitespace-mismatched board fields refuse byte-exactly); on the CAPTURE
+  side the emitter must refuse to encode a binding whose fields contain ':',
+  ',' or whitespace at what would become an entry's outer edge - a naive
+  concatenation of such fields is ambiguous and can authenticate a
+  differently-shaped board (measured), and no parser of the flat option
+  string can detect that after the fact.
 
 Two defense layers, both fail-closed:
 
@@ -446,9 +450,8 @@ def _cmp_display(d: float, b: float):
     rounded TOGETHER: independent 9-decimal rounding once printed
     '10.000000001mm > 10.0mm by 1.8e-15mm' (operands rounded apart by a
     display quantum while the true margin was sub-quantum). Whenever the true
-    difference is within two orders of the display quantum - or the rounded
-    strings collide or flatten the margin to zero - all three fall back to
-    exact shortest-repr."""
+    difference is nonzero and below 1e-7 - or the rounded strings collide or
+    flatten the margin to zero - all three fall back to exact shortest-repr."""
     m = d - b
     sd, sb, sm = _mm(d), _mm(b), _mm(m)
     if m != 0 and (abs(m) < 1e-7 or sd == sb or sm in ("0.0", "-0.0")):
@@ -488,7 +491,12 @@ def run(argv) -> int:
                 expect = {}
                 for entry in val.split(","):
                     if not entry:
-                        continue
+                        # An empty entry is a serialization defect (e.g. a
+                        # trailing comma from a naively encoded 'G,' selector)
+                        # - refuse, never skip.
+                        return verdict(2, "--expect contains an empty entry "
+                                          "(stray or trailing comma)",
+                                       "E-ARGS")
                     if entry != entry.strip():
                         return verdict(2, "--expect entry %r has surrounding "
                                           "whitespace - stripping would "

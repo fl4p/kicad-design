@@ -443,6 +443,14 @@ CASES = [
                       props=(("Anchor", "Q1"), ("MaxDist", "10.000000000499998")),
                       pads=(("1", 0.0001, 0),))),
      [], 1, "mm by 1.7763568394002505e-15mm"),
+    # --- round-15: empty entries are serialization defects, never skipped ---
+    ("expect_trailing_comma_refused",  # a naively encoded 'G,' selector serializes to
+     # '...::G,' whose empty tail entry must refuse, not vanish
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:15,"], 2, "[E-ARGS]"),
+    ("expect_leading_comma_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=,S1:Q1:15"], 2, "[E-ARGS]"),
 ]
 
 
