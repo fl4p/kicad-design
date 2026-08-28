@@ -48,13 +48,18 @@ Usage:
   with an EMPTY expectation selector meaning the property must be ABSENT
   (grading is presence-sensitive, so authentication is too); the anchor compares
   after the guard's own whitespace-strip normalization; maxdist compares as a
-  parsed number (15, 15.0 and 1.5e1 are the same budget); entry-surrounding
-  whitespace is stripped. Fields containing ':' or ',' are inexpressible: on
-  the BOARD side the guard refuses them structurally under --expect; on the
-  CAPTURE side the emitter must refuse to encode such a binding - a naive
-  concatenation of delimiter-bearing fields is ambiguous and can authenticate
-  a differently-shaped board (measured), and no parser of the flat option
-  string can detect that after the fact.
+  parsed number (15, 15.0 and 1.5e1 are the same budget). A whitespace-edged
+  entry refuses [E-ARGS]: stripping once silently truncated a trailing-space
+  AnchorPad to its space-free neighbour and authenticated a nearer pad
+  (measured FAIL->PASS), so values at the entry edges (the ref, a final
+  anchorpad) cannot carry edge whitespace at all. Fields containing ':' or ','
+  are likewise inexpressible: on the BOARD side the guard refuses delimiter-
+  bearing fields structurally under --expect (edge-whitespace board fields
+  mismatch byte-exactly and refuse the same way); on the CAPTURE side the
+  emitter must refuse to encode a binding whose fields contain ':', ',' or
+  edge whitespace - a naive concatenation of such fields is ambiguous and can
+  authenticate a differently-shaped board (measured), and no parser of the
+  flat option string can detect that after the fact.
 
 Two defense layers, both fail-closed:
 
@@ -435,21 +440,20 @@ def _mm(v: float) -> str:
     return s + "0" if s.endswith(".") else s
 
 
-def _pair(d: float, b: float):
-    """Display strings for an observed/limit pair whose comparison must stay
-    visibly true: when 9-decimal display would collide on unequal values
-    (sub-nm float differences are representable in budget text), fall back to
-    exact shortest-repr so the printed evidence never contradicts the printed
-    comparison."""
-    sd, sb = _mm(d), _mm(b)
-    if sd == sb and d != b:
-        sd, sb = repr(d), repr(b)
-    return sd, sb
-
-
-def _margin(m: float) -> str:
-    s = _mm(m)
-    return repr(m) if m != 0 and s in ("0.0", "-0.0") else s
+def _cmp_display(d: float, b: float):
+    """Display strings (first operand, second operand, first-minus-second)
+    whose printed relation must stay visibly true. The three numbers are
+    rounded TOGETHER: independent 9-decimal rounding once printed
+    '10.000000001mm > 10.0mm by 1.8e-15mm' (operands rounded apart by a
+    display quantum while the true margin was sub-quantum). Whenever the true
+    difference is within two orders of the display quantum - or the rounded
+    strings collide or flatten the margin to zero - all three fall back to
+    exact shortest-repr."""
+    m = d - b
+    sd, sb, sm = _mm(d), _mm(b), _mm(m)
+    if m != 0 and (abs(m) < 1e-7 or sd == sb or sm in ("0.0", "-0.0")):
+        sd, sb, sm = repr(d), repr(b), repr(m)
+    return sd, sb, sm
 
 
 def run(argv) -> int:
@@ -483,9 +487,13 @@ def run(argv) -> int:
             elif name == "--expect":
                 expect = {}
                 for entry in val.split(","):
-                    entry = entry.strip()
                     if not entry:
                         continue
+                    if entry != entry.strip():
+                        return verdict(2, "--expect entry %r has surrounding "
+                                          "whitespace - stripping would "
+                                          "silently truncate an edge-"
+                                          "whitespace field" % entry, "E-ARGS")
                     fields = entry.split(":")
                     if len(fields) == 3:
                         fields += ["", ""]
@@ -646,19 +654,19 @@ def run(argv) -> int:
             failures.append((ref, anchor, d, budget, pn, qn))
 
     if failures:
-        detail = "; ".join("%s->%s %smm > %smm by %smm (pads %s<->%s)"
-                           % ((r_, a_) + _pair(d_, b_)
-                              + (_margin(d_ - b_), p_, q_))
-                           for r_, a_, d_, b_, p_, q_ in failures)
+        def _fmt_fail(r_, a_, d_, b_, p_, q_):
+            sd, sb, sm = _cmp_display(d_, b_)
+            return "%s->%s %smm > %smm by %smm (pads %s<->%s)" % (
+                r_, a_, sd, sb, sm, p_, q_)
+        detail = "; ".join(_fmt_fail(*f) for f in failures)
         return verdict(1, "%d of %d binding(s) exceed budget: %s"
                        % (len(failures), len(results), detail), "OVER-BUDGET")
     worst = max(results, key=lambda r: r[2] / r[3])
     note = " (advisory: KiCad load check skipped)" if skip_load else ""
-    wd, wb = _pair(worst[2], worst[3])
+    wb, wd, wm = _cmp_display(worst[3], worst[2])
     return verdict(0, "%d binding(s) within budget; tightest margin %s->%s "
                       "%smm of %smm (margin %smm)%s"
-                   % (len(results), worst[0], worst[1], wd, wb,
-                      _margin(worst[3] - worst[2]), note))
+                   % (len(results), worst[0], worst[1], wd, wb, wm, note))
 
 
 def main(argv) -> int:

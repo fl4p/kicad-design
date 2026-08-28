@@ -417,6 +417,32 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"),
                                              ("MaxDist", "9.999999999999998")))),
      [], 1, "10.0mm > 9.999999999999998mm by 1.7763568394002505e-15mm"),
+    # --- round-14: entry-edge whitespace, joint operand/margin rounding ---
+    ("expect_trailing_space_entry_refused",  # stripping would truncate 'G ' to 'G'
+     # and authenticate the nearer pad (measured FAIL->PASS)
+     board(ANCHOR.replace('(pad "D" thru_hole circle (at 5 0)',
+                          '(pad "D" thru_hole circle (at 5 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
+                          '(pad "G " thru_hole circle (at 0 40)'),
+           fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                     ("AnchorPad", "G ")))),
+     ["--expect=S1:Q1:15::G "], 2, "[E-ARGS]"),
+    ("expect_leading_space_entry_refused",
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect= S1:Q1:15"], 2, "[E-ARGS]"),
+    ("expect_space_stripped_anchorpad_mismatch",  # board 'G ' vs expected 'G' is a
+     # different binding - byte-exact refusal, never normalization
+     board(ANCHOR.replace('(pad "D" thru_hole circle (at 5 0)',
+                          '(pad "D" thru_hole circle (at 5 0) (size 1 1) (drill 0.5) (layers "*.Cu")) '
+                          '(pad "G " thru_hole circle (at 0 40)'),
+           fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                     ("AnchorPad", "G ")))),
+     ["--expect=S1:Q1:15::G"], 2, "[E-EXPECT]"),
+    ("near_quantum_margin_display_joint",  # true margin 1.8e-15 with operands that
+     # round a display-quantum apart: all three must fall back to repr together
+     board(ANCHOR, fp("S1", 100, 110,
+                      props=(("Anchor", "Q1"), ("MaxDist", "10.000000000499998")),
+                      pads=(("1", 0.0001, 0),))),
+     [], 1, "mm by 1.7763568394002505e-15mm"),
 ]
 
 

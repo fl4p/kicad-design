@@ -210,7 +210,8 @@ footprint; at layout time run the fail-closed proximity guard
 (`scripts/kicad_functional_proximity.py`) with `--expect=ref:anchor:maxdist[:selfpad:anchorpad],...`
 (the full tuple each binding was captured with — a bare refdes list would still trust
 budgets and selectors edited after capture; the capture side must refuse to emit fields
-containing `:` or `,`, which the flat option string cannot express unambiguously) —
+containing `:` or `,` or edge whitespace, which the flat option string cannot express
+unambiguously) —
 vacuous runs, binding fields without an Anchor, and expectation mismatches are all
 UNVERIFIED,
 never a silent pass. The guard verifies recorded intent only — it cannot invent a binding that
