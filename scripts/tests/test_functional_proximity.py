@@ -398,6 +398,25 @@ CASES = [
     ("expect_four_fields_refused",
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
      ["--expect=S1:Q1:15:1"], 2, "[E-ARGS]"),
+    # --- round-13: expectation equivalence edges, display collision ---
+    ("expect_empty_selector_requires_absent",  # SelfPad="" is a different binding than
+     # no SelfPad: grading is presence-sensitive, so authentication must be too
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "")))),
+     ["--expect=S1:Q1:15::"], 2, "[E-EXPECT]"),
+    ("expect_board_delimiter_field_refused",  # an AnchorPad containing ':' is
+     # inexpressible in the option grammar - structural refusal, not luck
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("AnchorPad", "G:1")))),
+     ["--expect=S1:Q1:15"], 2, "[E-EXPECT]"),
+    ("expect_numeric_spelling_equivalent",  # 1.5e1 is the same budget as 15
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15")))),
+     ["--expect=S1:Q1:1.5e1"], 0, "1 binding(s) within budget"),
+    ("subpico_budget_display_consistent",  # budget one ulp under 10: the printed
+     # comparison must not read '10.0mm > 10.0mm by 0.0mm' (repr fallback)
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"),
+                                             ("MaxDist", "9.999999999999998")))),
+     [], 1, "10.0mm > 9.999999999999998mm by 1.7763568394002505e-15mm"),
 ]
 
 

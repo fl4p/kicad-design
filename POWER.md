@@ -23,13 +23,18 @@ At capture/generation time, emit on every satellite footprint:
 
 At layout time, run `scripts/kicad_functional_proximity.py` (fail-closed; a vacuous run
 with zero declared bindings is UNVERIFIED, not a pass). Release invocations pass
-`--expect=ref:anchor:maxdist[:selfpad:anchorpad],...` — one entry per binding, exactly
-as captured. A bare refdes list is not enough and is refused: the on-board binding
-fields are mutable layout-side state, and a ref-set expectation would still trust a
-`MaxDist` inflated or an `AnchorPad` deleted after capture (measured FAIL→PASS flips).
-The guard refuses any binding whose fields differ from the expectation, refuses
-`--default-max-mm` alongside `--expect`, and without any expectation cannot see a
-binding that was deleted before the run. Where pin identity
+`--expect=ref:anchor:maxdist[:selfpad:anchorpad],...` — one entry per binding. A bare
+refdes list is not enough and is refused: the on-board binding fields are mutable
+layout-side state, and a ref-set expectation would still trust a `MaxDist` inflated or
+an `AnchorPad` deleted after capture (measured FAIL→PASS flips). The guard refuses any
+binding differing from the expectation (selectors byte-exact, an empty selector field
+meaning *absent*, maxdist as a parsed number — `15` and `15.0` are the same budget),
+refuses `--default-max-mm` alongside `--expect`, and without any expectation cannot see
+a binding deleted before the run. The **emitter must refuse to encode** a binding whose
+fields contain `:` or `,`: the flat option string cannot express them unambiguously —
+the guard refuses such fields board-side, but a naive capture-side concatenation can
+authenticate a differently-shaped board (measured), and no parser of the finished
+string can detect that afterwards. Where pin identity
 matters (a decoupling cap's supply pin, a gate pad), add `SelfPad`/`AnchorPad` selectors;
 a bare nearest-pad distance can otherwise pass a part parked near the wrong pin. DNP
 provisions carry anchors like populated parts: this is how PCB.md's DNP feasibility

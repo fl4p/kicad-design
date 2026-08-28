@@ -42,10 +42,19 @@ Usage:
   expectation is UNVERIFIED [E-EXPECT]. --default-max-mm is refused alongside
   --expect (budgets under expectation are per-binding by definition), and
   --min-expected is a weaker development-time tripwire only (a count cannot see
-  one binding swapped for another), not a release substitute. Field values are
-  compared exactly (no trimming); a binding whose fields contain ':' or ','
-  cannot be expressed and therefore cannot pass expectation - refusal, never
-  silence.
+  one binding swapped for another), not a release substitute.
+
+  Expectation equivalence, stated precisely: selector values compare byte-exact,
+  with an EMPTY expectation selector meaning the property must be ABSENT
+  (grading is presence-sensitive, so authentication is too); the anchor compares
+  after the guard's own whitespace-strip normalization; maxdist compares as a
+  parsed number (15, 15.0 and 1.5e1 are the same budget); entry-surrounding
+  whitespace is stripped. Fields containing ':' or ',' are inexpressible: on
+  the BOARD side the guard refuses them structurally under --expect; on the
+  CAPTURE side the emitter must refuse to encode such a binding - a naive
+  concatenation of delimiter-bearing fields is ambiguous and can authenticate
+  a differently-shaped board (measured), and no parser of the flat option
+  string can detect that after the fact.
 
 Two defense layers, both fail-closed:
 
@@ -426,6 +435,23 @@ def _mm(v: float) -> str:
     return s + "0" if s.endswith(".") else s
 
 
+def _pair(d: float, b: float):
+    """Display strings for an observed/limit pair whose comparison must stay
+    visibly true: when 9-decimal display would collide on unequal values
+    (sub-nm float differences are representable in budget text), fall back to
+    exact shortest-repr so the printed evidence never contradicts the printed
+    comparison."""
+    sd, sb = _mm(d), _mm(b)
+    if sd == sb and d != b:
+        sd, sb = repr(d), repr(b)
+    return sd, sb
+
+
+def _margin(m: float) -> str:
+    s = _mm(m)
+    return repr(m) if m != 0 and s in ("0.0", "-0.0") else s
+
+
 def run(argv) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     default_max = None
@@ -580,17 +606,26 @@ def run(argv) -> int:
                            % ref, "E-BUDGET")
         if expect is not None:
             eanch, emax, esp, eap = expect[ref]
-            if (anchor != eanch or "MaxDist" not in fp["props"]
-                    or budget != emax
-                    or fp["props"].get("SelfPad", "") != esp
-                    or fp["props"].get("AnchorPad", "") != eap):
+            asp = fp["props"].get("SelfPad")
+            aap = fp["props"].get("AnchorPad")
+            # Delimiter-bearing board fields are inexpressible in the option
+            # grammar - refuse structurally, never by incidental inequality.
+            bad_delim = any(c in v for v in (anchor, asp or "", aap or "")
+                            for c in ":,")
+            # An empty expectation selector means the property must be ABSENT:
+            # grading is presence-sensitive (SelfPad="" filters to zero pads),
+            # so authentication must be too - absent and declared-empty are
+            # different bindings.
+            sp_ok = (asp is None) if esp == "" else (asp == esp)
+            ap_ok = (aap is None) if eap == "" else (aap == eap)
+            if (bad_delim or anchor != eanch or "MaxDist" not in fp["props"]
+                    or budget != emax or not sp_ok or not ap_ok):
                 return verdict(2, "%s: board binding (anchor=%r maxdist=%r "
                                   "selfpad=%r anchorpad=%r) does not match the "
                                   "release expectation %s:%s:%s:%s:%s - a "
                                   "binding edited after capture must not grade"
                                % (ref, anchor, fp["props"].get("MaxDist"),
-                                  fp["props"].get("SelfPad", ""),
-                                  fp["props"].get("AnchorPad", ""),
+                                  asp, aap,
                                   ref, eanch, "%g" % emax, esp, eap),
                                "E-EXPECT")
         spads = fp["pads"]
@@ -612,16 +647,18 @@ def run(argv) -> int:
 
     if failures:
         detail = "; ".join("%s->%s %smm > %smm by %smm (pads %s<->%s)"
-                           % (r_, a_, _mm(d_), _mm(b_), _mm(d_ - b_), p_, q_)
+                           % ((r_, a_) + _pair(d_, b_)
+                              + (_margin(d_ - b_), p_, q_))
                            for r_, a_, d_, b_, p_, q_ in failures)
         return verdict(1, "%d of %d binding(s) exceed budget: %s"
                        % (len(failures), len(results), detail), "OVER-BUDGET")
     worst = max(results, key=lambda r: r[2] / r[3])
     note = " (advisory: KiCad load check skipped)" if skip_load else ""
+    wd, wb = _pair(worst[2], worst[3])
     return verdict(0, "%d binding(s) within budget; tightest margin %s->%s "
                       "%smm of %smm (margin %smm)%s"
-                   % (len(results), worst[0], worst[1], _mm(worst[2]),
-                      _mm(worst[3]), _mm(worst[3] - worst[2]), note))
+                   % (len(results), worst[0], worst[1], wd, wb,
+                      _margin(worst[3] - worst[2]), note))
 
 
 def main(argv) -> int:
