@@ -271,6 +271,38 @@ CASES = [
      board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
                                              ("Note", "a\\qb")))),
      [], 2, "[E-PARSE]"),
+    # --- round-8: byte-domain escapes, NUL/invalid-UTF8, 1 nm quantization ---
+    ("escaped_p_in_selfpad_honored",  # "Self\x50ad" IS SelfPad (byte 0x50 = P)
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("SelfPad", "2")),
+                      pads=(("1", 0, 0), ("2", 0, 10)))).replace(
+         '(property "SelfPad"', '(property "Self\\x50ad"', 1),
+     [], 1, "20.00mm > 15.0mm"),
+    ("utf8_byte_pair_escape_ok",  # \xC3\xA9 must decode to ONE e-acute, not two chars
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "caf\\xC3\\xA9")))),
+     [], 0, "10.00mm of 15.0mm"),
+    ("lone_high_byte_refused",  # \xE9 alone is invalid UTF-8; KiCad empties it - refuse the divergence
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "a\\xE9b")))),
+     [], 2, "[E-PARSE]"),
+    ("nul_escape_refused",  # \x00 in the Anchor: KiCad reads empty; we must not read 'Q1'
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "\\x00Q1"), ("MaxDist", "15")))),
+     [], 2, "[E-PARSE]"),
+    ("backslash_and_quote_escapes_ok",  # kills removal of \\ and \" support
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", 'a\\\\b\\"c')))),
+     [], 0, "10.00mm of 15.0mm"),
+    ("newline_tab_escapes_ok",  # kills removal of \n \t \r support
+     board(ANCHOR, fp("S1", 100, 110, props=(("Anchor", "Q1"), ("MaxDist", "15"),
+                                             ("Note", "a\\nb\\tc\\rd")))),
+     [], 0, "10.00mm of 15.0mm"),
+    ("quantization_matches_kicad",  # 2x 10.6066017mm quantizes to 15.0000004 > 15 (measured)
+     board(ANCHOR, fp("S1", 110.6066017, 110.6066017,
+                      props=(("Anchor", "Q1"), ("MaxDist", "15"))),
+           fp("QA", 100, 100, pads=(("1", 0, 0),))).replace(
+         '(property "Anchor" "Q1"', '(property "Anchor" "QA"', 1),
+     [], 1, "15.00mm > 15.0mm"),
 ]
 
 

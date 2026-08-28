@@ -61,7 +61,8 @@ zero and any coordinate outside +-2000 mm refuse (KiCad clamps internally near
 2147 mm; the guard refuses rather than diverging silently).
 
 Threat boundary - state it honestly: this guard detects ACCIDENTAL misplacement
-and accidental environmental breakage (wrong tool, unloadable board, mangled
+and accidental environmental breakage (an ordinary wrong executable that does
+not mimic KiCad's version-and-output shape, an unloadable board, a mangled
 file). It is not tamper-resistant: an actor who controls the filesystem or the
 environment (a malicious $KICAD_CLI, a same-privilege process racing the CLI's
 snapshot copy) can defeat it - and could equally edit the guard itself. Binding
@@ -114,35 +115,46 @@ def _tokenize(s):
             i += 1
         elif c == '"':
             j = i + 1
-            buf = []
+            raw = bytearray()
             while j < n and s[j] != '"':
                 if s[j] == "\\":
                     if j + 1 >= n:
                         raise ValueError("unterminated escape at offset %d" % j)
                     e = s[j + 1]
-                    # KiCad's escape semantics (measured: \xHH decodes, so
-                    # "\x53elfPad" IS "SelfPad"); unknown escapes refuse.
+                    # KiCad's escape semantics operate on BYTES (measured:
+                    # "\x53elfPad" is SelfPad, "\xC3\xA9" is one e-acute).
+                    # Unescape into bytes, strict-decode UTF-8 afterwards;
+                    # unknown escapes refuse.
                     if e == "x":
                         h = s[j + 2:j + 4]
                         if len(h) != 2 or not re.fullmatch(r"[0-9a-fA-F]{2}", h):
                             raise ValueError("malformed \\x escape at offset %d" % j)
-                        buf.append(chr(int(h, 16)))
+                        raw.append(int(h, 16))
                         j += 4
                     elif e in ("\\", '"'):
-                        buf.append(e)
+                        raw += e.encode()
                         j += 2
                     elif e in "nrt":
-                        buf.append({"n": "\n", "r": "\r", "t": "\t"}[e])
+                        raw += {"n": b"\n", "r": b"\r", "t": b"\t"}[e]
                         j += 2
                     else:
                         raise ValueError("unsupported escape \\%s at offset %d "
                                          "(refusing rather than guessing)" % (e, j))
                 else:
-                    buf.append(s[j])
+                    raw += s[j].encode("utf-8")
                     j += 1
             if j >= n:
                 raise ValueError("unterminated string starting at offset %d" % i)
-            yield ("str", "".join(buf))
+            if 0 in raw:
+                raise ValueError("NUL byte inside string at offset %d - KiCad "
+                                 "truncates such strings; refusing the divergence"
+                                 % i)
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("string at offset %d unescapes to invalid UTF-8 "
+                                 "- refusing rather than diverging from KiCad" % i)
+            yield ("str", text)
             i = j + 1
         else:
             j = i
@@ -197,6 +209,10 @@ _NUM = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\Z")
 _RANGE_MM = 2000.0
 
 
+def _quant(v):
+    return round(v * 1e6) / 1e6  # KiCad stores integer nanometres
+
+
 def _coord(tok, what):
     if tok[0] != "atom" or not _NUM.match(tok[1]):
         raise ValueError("%s: non-numeric coordinate %r" % (what, tok[1]))
@@ -208,7 +224,7 @@ def _coord(tok, what):
     if abs(v) > _RANGE_MM:
         raise ValueError("%s: coordinate %r outside the supported +-%g mm range"
                          % (what, tok[1], _RANGE_MM))
-    return v
+    return _quant(v)
 
 
 def _at_args(node, what, want=(2, 3)):
@@ -294,8 +310,8 @@ def _parse_footprint(node):
     for pname, pat in pads:
         pn = _at_args(pat, "%s pad %r" % (ref, pname))
         x, y = pn[0], pn[1]
-        gx = fx + x * math.cos(th) + y * math.sin(th)
-        gy = fy - x * math.sin(th) + y * math.cos(th)
+        gx = _quant(fx + x * math.cos(th) + y * math.sin(th))
+        gy = _quant(fy - x * math.sin(th) + y * math.cos(th))
         gpads.append((pname, gx, gy))
     return ref, {"pads": gpads, "props": props}
 
