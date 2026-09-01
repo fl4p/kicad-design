@@ -192,6 +192,20 @@ resolves at a distributor and ships in the package the footprint draws, per the 
 [`SKILL.md`](SKILL.md); a check that only asks whether the MPN field is non-empty tests
 completeness and reads as correctness.
 
+Hold the class vocabulary in the gate, not in the file the gate reads. A gate that accepts whatever
+classes its input declares lets the next class name declare itself legitimate and walk past every
+rule written about the last one, so key each rule on what a class permits — buys to value, covers a
+whole footprint — rather than on its spelling. Adding a way to buy a part means adding a rule
+saying what it may and may not cover.
+
+Carry the gate across the boundary where the parts actually go missing. Classifying the BOM proves
+only that the design could be bought; it says nothing about what was. Reconcile the released BOM
+against the order snapshot — every fitted reference, its exact MPN or class artefact, and its
+quantity — and require that snapshot rather than accepting its absence: a missing snapshot is an
+unevaluable input, and an audit that passes without one stops one step short of transcription, which
+is where a hand-built basket loses parts. With nothing ordered yet, reconcile against an empty
+snapshot and read the outstanding list.
+
 For every procured line, verify these as separate facts:
 
 - exact manufacturer ordering code and package;
