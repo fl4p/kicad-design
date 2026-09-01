@@ -17,6 +17,7 @@ that do not depend on device evidence.
 - [Escalate through web defenses](#escalate-through-web-defenses)
 - [Validate every downloaded PDF](#validate-every-downloaded-pdf)
 - [Read the complete document](#read-the-complete-document)
+- [Equip a reviewer before it reviews](#equip-a-reviewer-before-it-reviews)
 - [Study reference implementations](#study-reference-implementations)
 - [Fail closed](#fail-closed)
 
@@ -312,8 +313,62 @@ When same-net lands are merged or notched, derive the union from the drawing and
 cross-check pin pairing against the pin-function table. Stop when geometry and pin mapping disagree;
 do not renumber until the independent sources agree.
 
+**A prose sentence naming signals is not a pinout, and text extraction is not a pinout source.**
+`pdftotext` output orders words, not pins, so a sentence like "a 3-pin configuration (Counter,
+Reference and Working electrodes)" is the first plausible-looking pin order a text-first search
+finds and the easiest to promote silently. Take pin identity only from a pin drawing or a numbered
+pin-function table; see `FOOTPRINTS.md`, "Verify pin identity, not only the land pattern", for the
+tracing, view, and provenance rules.
+
+**Where a part has no pin-function table, the drawing is the sole authority — do not fall through
+to hardware.** A one- or two-page datasheet often carries pin identity only as labels on the
+mechanical drawing. A workflow built around locating the pin table will silently produce no result
+for such a part. That absence is a documentary gap to escalate, never a reason to reclassify pin
+identity as a mechanical property needing a physical sample: a fact printed in a figure is not
+made unknowable by not having opened the figure. Extract it from the drawing, and treat a genuinely
+unobtainable pin map as a blocked read under `Fail closed`.
+
 An absence claim needs evidence. Cite the pages and vocabulary checked, or say “not found in this
 search; full-sheet absence not established.”
+
+## Equip a reviewer before it reviews
+
+A reviewer without the primary sources is not a reviewer. Before dispatching any independent design
+review — subagent, Codex, or a fresh session — establish and record two preconditions:
+
+1. **A working browser surface**, per the `online-research` browser gate. A review that cannot fetch
+   cannot verify, and a fetch failure inside a review becomes a claim rather than a blocker.
+   Attach the browser explicitly; never assume the reviewer can obtain one.
+2. **Every datasheet for every component in scope**, resolved to local files before the review
+   starts, listed by MPN with document revision and hash. Do not leave working copies in a
+   temporary directory: archive them, because the review's conclusions are only as durable as the
+   documents that ground them.
+
+**Enumerate the components in scope and diff that list against the sources held.** Any component
+without a primary source is stated up front as out of scope, not discovered later in a footnote.
+This is the check that matters: reviews cover the parts they have documents for, and a defect
+migrates to the part nobody could check.
+
+### Discard a source-less review
+
+If a completed review turns out to have had no primary source for a component, its findings on that
+component are **void — discard them**. Do not downgrade them to low confidence, do not annotate
+them as provisional, and do not let a "verified" or "no findings" line stand with a caveat. A
+review of a component against the project's own artefacts is the design agreeing with itself, and
+it carries no evidence in either direction. Mark the review discarded for that component at the top
+of the document, restate what is now unverified, and re-review with the source in hand.
+
+Watch for the specific way this hides: a missing source is rarely written as "not available". It is
+written as an engineering judgement — "requires a physical sample", "deferred to first article",
+"mechanical gate" — that reads as a decision and gets carried forward through downstream documents
+as though it were one. When a review defers an item, record **why**: "unread source" and "needs
+measurement" are different states with different remedies, and only one of them is closed by
+building hardware.
+
+**A deferral must keep costing something.** An open gate recorded only as prose migrates from
+review, to readiness doc, to assembly notes, losing urgency at each hop until it is furniture. Bind
+it to a machine check that fails, or to a named artefact status that propagates into the schematic,
+BOM and fabrication package, so carrying it forward stays visible.
 
 ## Study reference implementations
 

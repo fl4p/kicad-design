@@ -7,12 +7,72 @@ in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 
 ## Contents
 
+- [Verify pin identity, not only the land pattern](#verify-pin-identity-not-only-the-land-pattern)
 - [Verify the land pattern, not the name](#verify-the-land-pattern-not-the-name)
 - [Qualify external spacing and lead fit](#qualify-external-spacing-and-lead-fit)
 - [Classify via-in-pad by process](#classify-via-in-pad-by-process)
 - [Treat copper, mask, and paste independently](#treat-copper-mask-and-paste-independently)
 - [Test package substitutions on a copy](#test-package-substitutions-on-a-copy)
 - [Enumerate placement candidates](#enumerate-placement-candidates)
+
+## Verify pin identity, not only the land pattern
+
+Every other rule in this file checks land *geometry*. Geometry being right is not evidence that the
+right signal reaches the right pad, and the two fail independently: a footprint can carry perfect
+pad sizes, pitch, and body outline while its pin map is wrong on every pad.
+
+**Derive a pin map only from a pin drawing or a numbered pin-function table. Never from prose.**
+A datasheet sentence naming the signals — "a 3-pin configuration (Counter, Reference and Working
+electrodes)", "pins are VIN, GND, EN" — is a list of names, not an order. It is also exactly what
+`pdftotext` returns, so it is the first thing a text-first workflow finds and the easiest thing to
+promote silently to a pin map. Treat a prose list as evidence that the pinout exists somewhere
+else in the document.
+
+**Trace each leader line individually and record the pin it terminates on.** Do not read labels in
+the order they appear on the page. Leader lines cross, and callout labels are stacked to fit the
+drawing, not to match pin order. For the same reason, a nearest-label or proximity heuristic is not
+a shortcut here — on a crossed-leader figure it returns the wrong answer with high confidence,
+which is worse than no answer.
+
+**State the view, and perform the mirror as a written step.** A KiCad footprint on `F.Cu` is drawn
+in top view. A package drawing that shows the pins as visible features on a solid body is a bottom
+view, and its left-to-right order reverses when transcribed. Through-hole and bottom-terminated
+parts die here. Record the result of the mirror explicitly, because an unstated view is an
+unperformed mirror.
+
+**Record the provenance in the footprint's `descr`**, where it travels with the artefact instead of
+in a review document that gets superseded:
+
+```
+pinmap: <document, revision, date, figure or table name and page>
+view:   TOP | BOTTOM (+ the mirrored result if BOTTOM)
+leaders: <label -> pin> for each pin        # drawing-derived
+table:   <numbered pin-function table cited> # table-derived; use instead of leaders:
+```
+
+Require it wherever pin order can be wrong — three pads or more — and make it a machine check that
+fails the audit, not a convention. The four fields are chosen because none can be written down
+without doing the work: naming the figure forces the document open, `view:` forces the top/bottom
+decision, and `leaders:`/`table:` forces per-pin attribution.
+
+**An unkeyed part cannot be validated by inspection.** When pins are on uniform pitch with no key,
+notch, or asymmetric body, every insertion looks correct, so no first-article visual gate can
+detect a wrong map — including a gate that says "verify pin identity from the PCB side". For those
+parts, establish identity **electrically on the real part before the board is populated**, or from
+a second independent document. Note also that a wrong map is not always rescuable by rotation:
+rotating an odd-pin-count inline part exchanges only its outer pins, so an error in the centre pin
+survives every orientation.
+
+**A pin map with a single source is an unverified pin map.** Cross-check against the vendor's own
+CAD model, an application note, an evaluation-board schematic, or a measurement. Where only one
+source exists and it cannot be corroborated, mark the footprint unverified in its own name so the
+status propagates into the schematic, BOM, and fabrication package, and gate release on it.
+
+(Measured failure this section closes: a 3-pin electrochemical cell whose pin map was taken from
+the datasheet's prose sentence while its drawing said otherwise. All six geometric dimensions were
+correct and sourced; the pin order was wrong in the centre position, so no rotation could fix it,
+and the part was destroyed-by-mis-biasing on a populated first article. Four review passes cleared
+it, and the project's own audits encoded the wrong map as their expected value.)
 
 ## Verify the land pattern, not the name
 
