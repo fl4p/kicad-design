@@ -107,6 +107,18 @@ intended boundary, and the legal mutation must include a value just inside it. G
 values such as zero, full scale, infinity or `NaN` may test parser and arithmetic behavior, but
 they do not prove that the intended threshold is current or correctly placed.
 
+Use the guard's own behavioural prose as a test inventory. This is not the sequence above — that
+mutates the guard's subject — but it ends in the same place: for every load-bearing claim a guard
+makes about itself, add a named case that drives a subject through the claimed branch and fails
+when the claim is false. Name the case as the claim rather than as the function it exercises, and
+put it in the guard's `test_*.py`, or in an embedded `--selftest` where the guard ships as a single
+file. A docstring asserting what the guard cannot be fooled by is self-certification: later
+readers, the author included, read the docstring instead of the branch. Required for new guards and
+for every *negative* claim — that something cannot pass, cannot be silenced, cannot outlive a
+change — and those come first, because ordinary use never visits those paths, so a board on which
+every real part matches correctly proves nothing about the guard's discrimination. Canonical:
+`~/dev/kb/tooling/guard-docstring-claims-need-fixtures.md`.
+
 Match the mutation to the tier:
 
 | tier | calibration mutates |

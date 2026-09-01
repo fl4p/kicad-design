@@ -180,6 +180,18 @@ row must resolve to fitted references. Exempt only deliberate non-procured objec
 features, and make the exemption explicit. Reject fitted placeholder values such as a bare `R` or a
 library symbol name.
 
+A sourcing defect recorded only as review prose is not closed. A review that correctly identifies
+parts carrying a value family instead of an orderable MPN, writes the finding into a document, and
+stops there leaves nothing that fails when the basket is next transcribed by hand — the named parts
+then reach no purchase order at all, and the board arrives unbuildable with a clean review on file.
+Convert every such finding into an executable gate that fails: each fitted component resolves to an
+exact MPN or to one explicitly declared sourcing class with a written rationale, and a class meaning
+"bought to value from stock" may not be claimed for a value carrying a load-bearing specification
+such as a tolerance, dielectric, voltage, trip current or shielding. Then verify that each MPN
+resolves at a distributor and ships in the package the footprint draws, per the MPN rule in
+[`SKILL.md`](SKILL.md); a check that only asks whether the MPN field is non-empty tests
+completeness and reads as correctness.
+
 For every procured line, verify these as separate facts:
 
 - exact manufacturer ordering code and package;

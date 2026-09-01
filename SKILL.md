@@ -349,11 +349,21 @@ Then:
 - Validate models against datasheet tables and charts at every load-bearing operating point.
 - Verify exact orderable MPN, package, performance grade, manufacturer lifecycle status, and stock
   as separate questions. Distributor availability does not override manufacturer lifecycle state.
+  A populated MPN field is a completeness fact, not a correctness one. Resolve the exact string at a
+  distributor and confirm the package it actually ships in against the assigned footprint: an MPN
+  can name no orderable part at all, or name one only in a package the land cannot take. A tape or
+  packaging suffix bolted onto a family that has no such variant reads as entirely plausible and is
+  not — check the family's real package list, not the string's shape.
   Follow [`RELEASE.md`](RELEASE.md) for BOM and sourcing evidence.
-- Query value, voltage rating, dielectric, package, and other coupled constraints together. Sweep
-  the BOM by predicate after fixing one instance of a defect class.
+- Query value, voltage rating, dielectric, package, and other coupled constraints together. After
+  fixing one instance of a defect class, run the same filter over every fitted component, and
+  record the filter and its complete result beside the finding.
 - Compare every selected land pattern with the datasheet's pad size, pad centres, and pin-1 corner.
   Follow [`FOOTPRINTS.md`](FOOTPRINTS.md); matching vendor and body size is only a hypothesis.
+- For every clamp, limiter, or other protective element, prove its guaranteed worst-case bound at
+  the actual operating current and temperature stays inside the limit it protects, with the
+  required margin. A typical value, or one specified only at another current, does not establish
+  that bound.
 - Inspect the whole PDF before claiming information is absent. Render raster drawings and use only
   printed callouts as datasheet values; label dimensions scaled from a picture as models.
 - Record the source and page/table beside each load-bearing constant.
