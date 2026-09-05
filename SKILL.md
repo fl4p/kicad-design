@@ -49,6 +49,7 @@ Read only the companions required by the task:
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing generators, validators, audits, or calibration harnesses |
 | [`THERMALS.md`](THERMALS.md) | heat, dissipation, temperature, gradients, thermal pads/vias, or temperature-dependent accuracy matter |
 | [`POWER.md`](POWER.md) | the board switches meaningful power — inverter/converter stages, HV rails, gate drive, snubbers, current sense; satellite anchor budgets, creepage decision framework, HV domain classification |
+| [`LOOPS.md`](LOOPS.md) | you are deriving a commutation- or gate-loop budget, defending a loop-geometry number in review, or deciding whether a published loop result applies to your regime — the measurements and simulations behind [`POWER.md`](POWER.md), with their scope and sources |
 | [`VARIANTS.md`](VARIANTS.md) | one generator must emit multiple boards without changing a qualified incumbent |
 
 Prefer the helpers in [`scripts/`](scripts/README.md) when they fit the project's existing

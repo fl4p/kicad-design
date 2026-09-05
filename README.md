@@ -23,6 +23,7 @@ guard detail it does not need:
 | `RELEASE.md` | DRC severity, fab output or release readiness |
 | `THERMALS.md` | dissipation, junction/ambient limits, heat paths, gradients, thermal pads/vias or validation |
 | `POWER.md` | switching-power boards — satellite anchor bindings, creepage decision framework, HV domain classification, power-loop placement |
+| `LOOPS.md` | a loop budget must be derived or a loop-geometry claim defended — scoped, sourced evidence behind `POWER.md`'s loop rules |
 | `VARIANTS.md` | one generator must emit more than one board |
 | `MODELS.md` | choosing or delegating to an AI model/agent for schematic generation, review, or KiCad automation |
 
