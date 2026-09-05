@@ -69,7 +69,7 @@ Usage:
   kicad_route_shape.py BOARD.kicad_pcb --report-only
   kicad_route_shape.py BOARD.kicad_pcb \\
       --layer-direction F.Cu=v,In1.Cu=h,B.Cu=v \\
-      --max-vias-per-net 2.0 --max-full-stack-via-fraction 0.5 \\
+      --max-vias-on-any-net 2 --max-full-stack-via-fraction 0.5 \\
       --max-short-segment-fraction 0.15 --min-direction-conformance 0.70
 """
 
@@ -100,16 +100,46 @@ class Unevaluable(Exception):
 
 def _fail_unevaluable(message, json_out=None, board=None):
     if json_out:
-        _write_json(json_out, board, "unevaluable", {"error": message})
+        try:
+            _write_json(json_out, board, "unevaluable", {"error": message})
+        except (Unevaluable, OSError) as error:
+            print(f"{_UNEVALUABLE_LINE}: {error}", file=sys.stderr)
     print(f"{_UNEVALUABLE_LINE}: {message}", file=sys.stderr)
     return 1
 
 
+_REPORT_MARKER = "kicad_route_shape"
+
+
+def _is_own_report(path):
+    """True only if `path` is absent, or is a JSON document this tool wrote.
+
+    The report writer replaces its target outright, so it must never be aimed
+    at a file it does not own. `BOARD --json BOARD` destroyed the board under
+    review (measured 2026-09-05, codex review of 0aefe5b): the pre-parse
+    invalidation fired before argparse could reject anything, and the board
+    became a two-line placeholder."""
+    if not os.path.exists(path):
+        return True
+    try:
+        with open(path, encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(document, dict) and document.get("tool") == _REPORT_MARKER
+
+
 def _write_json(path, board, verdict, payload):
     """Atomically replace `path`. A crash leaves the pre-written placeholder,
-    never a stale clean report."""
+    never a stale clean report. Refuses a target this tool does not own."""
     import tempfile
+    if not _is_own_report(path):
+        raise Unevaluable(
+            f"--json {path} exists and is not a {_REPORT_MARKER} report; "
+            "refusing to overwrite a file this audit does not own"
+        )
     document = {
+        "tool": _REPORT_MARKER,
         "verdict": verdict,
         "board": os.path.abspath(board) if board else None,
         "pid": os.getpid(),
@@ -258,6 +288,7 @@ def measure(board_path, short_segment_mm, layer_directions):
             "p90": round(_percentile(lengths, 0.9), 3),
         },
         "short_segment_threshold_mm": short_segment_mm,
+        "short_segments": short,
         "short_segment_fraction": short / len(lengths),
         "per_layer": {
             layer: {
@@ -301,10 +332,20 @@ def grade(metrics, args):
     # 2026-09-05). A maximum cannot be lowered by adding nets.
     check("max_vias_on_a_net", metrics["max_vias_on_a_net"],
           args.max_vias_on_any_net, lambda v, l: v > l)
+    # Every fraction here is dilutable: adding compliant copper lowers it
+    # without removing any offending geometry (codex review of 0aefe5b flipped
+    # 1.0 FAIL -> 0.5 PASS with one added via, and again with one added
+    # segment). The absolute companions below cannot be diluted that way, so a
+    # gate that must survive a growing board pairs each fraction with its
+    # count.
     check("full_stack_via_fraction", metrics["full_stack_via_fraction"],
           args.max_full_stack_via_fraction, lambda v, l: v > l)
+    check("full_stack_vias", metrics["full_stack_vias"],
+          args.max_full_stack_vias, lambda v, l: v > l)
     check("short_segment_fraction", metrics["short_segment_fraction"],
           args.max_short_segment_fraction, lambda v, l: v > l)
+    check("short_segments", metrics["short_segments"],
+          args.max_short_segments, lambda v, l: v > l)
 
     if args.min_direction_conformance is not None:
         declared = metrics["declared_directions"]
@@ -316,6 +357,20 @@ def grade(metrics, args):
                 "preferred direction)"
             )
         else:
+            # Grading only the declared layers let a board with noncompliant
+            # copper on an undeclared layer PASS (codex review of 0aefe5b).
+            # A layer carrying copper is part of the route whether or not the
+            # caller remembered to declare it.
+            for layer in sorted(metrics["per_layer"]):
+                if layer in declared:
+                    continue
+                graded += 1
+                findings.append(
+                    f"direction_conformance[{layer}]: UNEVALUABLE (layer "
+                    f"carries {metrics['per_layer'][layer]['length_mm']} mm of "
+                    "copper but --layer-direction declares no direction for "
+                    "it; declare it or route no copper on it)"
+                )
             for layer in sorted(declared):
                 value = metrics["direction_conformance"].get(layer)
                 check(f"direction_conformance[{layer}]", value,
@@ -342,6 +397,15 @@ def _parse_layer_directions(raw):
         if value not in ("h", "v"):
             raise Unevaluable(
                 f"--layer-direction {layer}={value!r}: direction must be h or v"
+            )
+        if layer in directions and directions[layer] != value:
+            raise Unevaluable(
+                f"--layer-direction declares {layer} as both "
+                f"{directions[layer]!r} and {value!r}"
+            )
+        if layer in directions:
+            raise Unevaluable(
+                f"--layer-direction declares {layer} more than once"
             )
         directions[layer] = value
     if not directions:
@@ -472,7 +536,12 @@ def build_parser():
                              "this; the per-net maximum is used because the "
                              "mean is diluted by via-free nets")
     parser.add_argument("--max-full-stack-via-fraction", type=float)
+    parser.add_argument("--max-full-stack-vias", type=float,
+                        help="absolute companion to the fraction above; a "
+                             "fraction alone is diluted by added copper")
     parser.add_argument("--max-short-segment-fraction", type=float)
+    parser.add_argument("--max-short-segments", type=float,
+                        help="absolute companion to the fraction above")
     parser.add_argument("--min-direction-conformance", type=float)
     parser.add_argument("--report-only", action="store_true",
                         help="print metrics and exit 0 without grading; NOT a "
@@ -490,25 +559,33 @@ def main(argv=None):
     # argument used to leave a previous "pass" artefact standing (measured
     # 2026-09-05). Best effort by design -- a malformed command line still
     # gets its stale report replaced.
+    target = None
     for index, token in enumerate(argv):
-        target = None
+        # argparse keeps the LAST occurrence, so invalidate that one; stopping
+        # at the first left the effective report standing (codex review of
+        # 0aefe5b).
         if token == "--json" and index + 1 < len(argv):
             target = argv[index + 1]
         elif token.startswith("--json="):
             target = token.split("=", 1)[1]
-        if target:
-            try:
-                _write_json(target, None, "unevaluable",
-                            {"error": "audit did not complete (pre-parse)"})
-            except OSError:
-                pass
-            break
+    if target:
+        if not _is_own_report(target):
+            print(f"{_UNEVALUABLE_LINE}: --json {target} exists and is not a "
+                  f"{_REPORT_MARKER} report; refusing to overwrite a file this "
+                  "audit does not own", file=sys.stderr)
+            return 1
+        try:
+            _write_json(target, None, "unevaluable",
+                        {"error": "audit did not complete (pre-parse)"})
+        except (Unevaluable, OSError):
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
 
     thresholds = [
         args.max_vias_on_any_net, args.max_full_stack_via_fraction,
-        args.max_short_segment_fraction, args.min_direction_conformance,
+        args.max_full_stack_vias, args.max_short_segment_fraction,
+        args.max_short_segments, args.min_direction_conformance,
     ]
     given = [value for value in thresholds if value is not None]
     if args.report_only and given:
@@ -523,25 +600,36 @@ def main(argv=None):
         return _fail_unevaluable(
             f"--short-segment-mm must be finite and positive, got "
             f"{args.short_segment_mm}", args.json_out, args.board)
-    for name, value, lo, hi in (
-        ("--max-vias-on-any-net", args.max_vias_on_any_net, 0.0, None),
-        ("--max-full-stack-via-fraction", args.max_full_stack_via_fraction, 0.0, 1.0),
-        ("--max-short-segment-fraction", args.max_short_segment_fraction, 0.0, 1.0),
-        ("--min-direction-conformance", args.min_direction_conformance, 0.0, 1.0),
+    for name, value, lo, hi, integral in (
+        ("--max-vias-on-any-net", args.max_vias_on_any_net, 0.0, None, True),
+        ("--max-full-stack-via-fraction", args.max_full_stack_via_fraction, 0.0, 1.0, False),
+        ("--max-full-stack-vias", args.max_full_stack_vias, 0.0, None, True),
+        ("--max-short-segment-fraction", args.max_short_segment_fraction, 0.0, 1.0, False),
+        ("--max-short-segments", args.max_short_segments, 0.0, None, True),
+        ("--min-direction-conformance", args.min_direction_conformance, 0.0, 1.0, False),
     ):
         if value is None:
             continue
         if not math.isfinite(value):
             return _fail_unevaluable(
                 f"{name}={value} is not finite", args.json_out, args.board)
-        # A fraction threshold outside [0,1], or a negative count, cannot be
-        # violated by any board: it is a vacuous gate, which is a configuration
-        # error, not a pass.
+        # A threshold outside its metric's range is a configuration error
+        # either way: above the range it can never fail, below it can never
+        # pass. Neither is a gate, and neither is a verdict about the board.
         if value < lo or (hi is not None and value > hi):
             return _fail_unevaluable(
-                f"{name}={value} is outside its domain "
-                f"[{lo}, {'inf' if hi is None else hi}] and could never fail; "
-                "a vacuous threshold is a configuration error, not a pass",
+                f"{name}={value} is outside its metric's range "
+                f"[{lo}, {'inf' if hi is None else hi}]; a threshold that can "
+                "never fail, or never pass, is a configuration error, not a "
+                "verdict about the board",
+                args.json_out, args.board)
+        # These metrics are counts. `--max-vias-on-any-net 2.9` silently means
+        # 2, which reads as a limit the board never had (codex review of
+        # 0aefe5b).
+        if integral and value != int(value):
+            return _fail_unevaluable(
+                f"{name}={value} is not an integer, but the metric it grades "
+                "is a count; give a whole number",
                 args.json_out, args.board)
 
     try:

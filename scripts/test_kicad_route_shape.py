@@ -226,7 +226,9 @@ class GradingIsFailClosed(unittest.TestCase):
     class Args:
         max_vias_on_any_net: float | None = None
         max_full_stack_via_fraction: float | None = None
+        max_full_stack_vias: float | None = None
         max_short_segment_fraction: float | None = None
+        max_short_segments: float | None = None
         min_direction_conformance: float | None = None
 
     def test_unevaluable_metric_named_by_a_threshold_fails(self):
@@ -235,9 +237,14 @@ class GradingIsFailClosed(unittest.TestCase):
         args = self.Args()
         args.min_direction_conformance = 0.7
         findings, graded = audit.grade(metrics, args)
-        self.assertEqual(graded, 1)
-        self.assertEqual(len(findings), 1)
-        self.assertIn("UNEVALUABLE", findings[0])
+        # Two unevaluable layers, not one: F.Cu is declared and carries no
+        # copper, and In1.Cu carries copper with no declaration. Grading only
+        # the declared set let the second one pass silently (codex review of
+        # 0aefe5b).
+        self.assertEqual(graded, 2)
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(all("UNEVALUABLE" in f for f in findings))
+        self.assertTrue(any("In1.Cu" in f for f in findings))
 
     def test_conformance_threshold_without_any_declaration_fails(self):
         metrics = measure([FakeTrack("/A", F_CU, 0, 0, 5, 0)])
@@ -397,11 +404,56 @@ class CliContract(unittest.TestCase):
             with self.subTest(argv=argv):
                 self.assertEqual(self.run_cli(argv), 1)
 
+    def test_json_refuses_a_target_it_does_not_own(self):
+        """`BOARD --json BOARD` destroyed the board under review before the
+        ownership marker existed (codex review of 0aefe5b)."""
+        import tempfile, os as _os
+        handle, path = tempfile.mkstemp(suffix=".kicad_pcb")
+        with _os.fdopen(handle, "w") as stream:
+            stream.write("(kicad_pcb (version 20240108))\n")
+        try:
+            self.assertEqual(
+                self.run_cli([path, "--json", path, "--report-only"]), 1)
+            with open(path) as stream:
+                self.assertIn("kicad_pcb", stream.read())
+        finally:
+            _os.unlink(path)
+
+    def test_last_json_is_the_one_invalidated(self):
+        """argparse keeps the last --json; stopping at the first left the
+        effective report standing."""
+        import json as _json, tempfile, os as _os
+        paths = []
+        for _ in range(2):
+            handle, path = tempfile.mkstemp(suffix=".json")
+            with _os.fdopen(handle, "w") as stream:
+                _json.dump({"tool": "kicad_route_shape", "verdict": "pass",
+                            "metrics": {}}, stream)
+            paths.append(path)
+        try:
+            with self.assertRaises(SystemExit):
+                self.run_cli(["b.kicad_pcb", "--max-vias-on-any-net",
+                              "notanumber", "--json", paths[0],
+                              "--json", paths[1]])
+            with open(paths[1]) as stream:
+                self.assertEqual(_json.load(stream)["verdict"], "unevaluable")
+        finally:
+            for path in paths:
+                _os.unlink(path)
+
+    def test_count_thresholds_must_be_whole_numbers(self):
+        for argv in (["b.kicad_pcb", "--max-vias-on-any-net", "2.9"],
+                     ["b.kicad_pcb", "--max-short-segments", "1.5"],
+                     ["b.kicad_pcb", "--max-full-stack-vias", "0.5"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.run_cli(argv), 1)
+
     def test_parse_error_invalidates_a_previous_clean_report(self):
         import json as _json, tempfile, os as _os
         handle, path = tempfile.mkstemp(suffix=".json")
         with _os.fdopen(handle, "w") as stream:
-            _json.dump({"verdict": "pass", "metrics": {}}, stream)
+            _json.dump({"tool": "kicad_route_shape", "verdict": "pass",
+                        "metrics": {}}, stream)
         try:
             with self.assertRaises(SystemExit):
                 self.run_cli(["b.kicad_pcb", "--max-vias-on-any-net",

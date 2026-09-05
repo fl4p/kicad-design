@@ -28,7 +28,7 @@ evidence, `origin: measured`, `transformation: calculated` (counts and Euclidean
 | track length by layer | F.Cu 896.5 mm, B.Cu 606.7 mm, In1.Cu 503.2 mm, In2.Cu 119.4 mm |
 | vias | 197, **all 197 spanning `F.Cu`→`B.Cu`** — zero blind/buried, zero terminating on an inner layer |
 | routed nets | 61; vias/routed net **3.23**; 10 nets carry no via |
-| segment length | median **0.500 mm**, mean 1.186 mm, p90 3.00 mm; **31 %** below 0.2 mm |
+| segment length | median **0.500 mm**, mean 1.186 mm, p90 3.00 mm; **32 %** below 0.2 mm |
 | worst nets | `/GND` 25 vias / 427 segments / 243 mm; `/3V3D` 21 / 167 / 167 mm; `/I2C_SDA` 12 / 105 / 116 mm |
 | signal-net share of vias | 172 of 197 |
 
@@ -37,10 +37,12 @@ Two signatures matter, and neither is a matter of taste:
 - **Every layer change is a full through-via.** The board has two inner layers and 623 mm of
   inner-layer routing, yet not one via terminates there. Layer transitions are being spent as
   undifferentiated F→B hops rather than as a planned escape to a chosen routing layer.
-- **1793 segments for 2126 mm of copper.** 31 % of all segments are shorter than
-  0.2 mm. That is a per-cell grid path emitted verbatim, not a routed polyline. Human routing
-  produces long runs joined at few corners; this produces the opposite.
-- **No layer has an orthogonal partner.** Measuring the axis-aligned share of copper *length* per
+- **1793 segments for 2126 mm of copper.** 32 % of all segments are shorter than
+  0.2 mm. The hypothesis this suggests is a per-cell grid path emitted verbatim rather than a
+  routed polyline — human routing produces long runs joined at few corners. It stays a hypothesis
+  until the collinearity-merge test in §4 runs: a file that merely records a straight run as many
+  collinear segments would show the same distribution with identical copper.
+- **Three of four layers run the same way, and the fourth carries almost nothing.** Measuring the axis-aligned share of copper *length* per
   layer (±5° tolerance) gives horizontal/vertical of 20 %/38 % on F.Cu, 19 %/45 % on B.Cu,
   10 %/57 % on In1.Cu and 30 %/14 % on In2.Cu. Three of the four layers run predominantly
   lengthwise, and In1.Cu — the only real inner routing layer, with 503 mm of copper — is the most
@@ -69,14 +71,15 @@ you diagnose after the fact — it is a dial, and if you do not set it, the tool
 for you.
 
 ### F2. Routing is net-by-net, and the net order is arbitrary
-He 2024's Figure 3.2 (p. 48) shows the main routing cycle as *"Randomly select a net → global
+He 2024's Figure 3.2 (p. 49) shows the main routing cycle as *"Randomly select a net → global
 routing → detailed routing → all nets connected & all rules met? → rip-up and reroute"*; §3.5.1
 names the three phases as main routing, rip-up-and-reroute, and post-processing. In the
 experiments the net order used is "the default order provided by each PCB design" (p. 60).
 Direct evidence.
 
-*(Page numbers corrected 2026-09-05 after an independent reviewer re-fetched the same PDF: the
-printed pages are 48 / 59 / 60, not 49 / 60 / 61. The quoted wording was confirmed unchanged.)*
+*(Page numbers corrected 2026-09-05 after two independent reviewers re-fetched the same PDF: the
+objective statement is on printed p. 48, Eq. 3.3 on p. 59, the experimental net order on p. 60, and
+Figure 3.2 with "Randomly select a net" on p. 49. The quoted wording was confirmed unchanged.)*
 
 TritonRoute-WXL states the consequence for the DRC-clean-up phase plainly: *"Use of
 ripup-and-reroute to resolve DRC can rely heavily on net ordering"* — accepted manuscript p. 9,
@@ -119,9 +122,9 @@ commit `749cfa83`):
 Move costs are orthogonal 1000, diagonal 1414, via `via_cost × 1000`
 (`docs/routing-architecture.md`, "Cost Function"). Direct evidence.
 
-Arithmetic (`transformation: calculated`, recomputed once): **a corner costs 1/75 of a via**,
-and off-axis travel breaks even against a via only after 300 off-axis moves — 30 mm at a
-0.1 mm grid. So under these weights the router has almost no reason to keep a run straight
+Arithmetic (`transformation: calculated`, recomputed once): the turn cost scales with the turn
+angle, so **a 90° corner costs 1/75 of a via and a 45° corner 1/150**, and off-axis travel breaks
+even against a via only after 300 off-axis moves — 30 mm at a 0.1 mm grid. So under these weights the router has almost no reason to keep a run straight
 and no reason to detour laterally instead of diving to another layer. Fragmentation and via
 population are the priced-in outcome.
 
@@ -221,7 +224,7 @@ bounded by having searched only the open web and not the ACM/IEEE full-text corp
 
 - **Whether the fragmentation is cosmetic or electrical.** Segment count does not change copper
   geometry if the segments are collinear. A collinearity-merge pass over the o2-probe board would
-  settle it: if merging collapses 1773 segments to a few hundred without moving copper, the
+  settle it: if merging collapses the authoritative 1793 segments to a few hundred without moving copper, the
   fragmentation is a file-hygiene finding; if it does not, the paths genuinely wander.
 - **Whether the via population is placement or configuration.** Re-running one dense cluster with
   `direction_preference_cost` unchanged but `via_cost` raised, on identical placement, separates

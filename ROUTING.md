@@ -30,7 +30,7 @@ The most common PCB routing objective is a weighted sum of total wirelength and 
 p. 48); the same objective appears explicitly as `g(x) = C_wl + γ·N_via` in its post-processing
 A* (Eq. 3.3, p. 59). That is a prevalent formulation, not a universal one. What matters here is
 that it contains no term for "makes sense to a human", and that it is evaluated **per net, in an
-arbitrary order** — He 2024's own main loop reads *"Randomly select a net"* (Fig. 3.2, p. 48),
+arbitrary order** — He 2024's own main loop reads *"Randomly select a net"* (Fig. 3.2, p. 49),
 and its experiments use "the default order provided by each PCB design" (p. 60).
 
 So the thing you own, and the router does not, is **topology**: which net goes on which layer,
@@ -147,16 +147,21 @@ edge findings — then locked and handed to the backend. Only the escapes differ
 | U7 + U8 only, where package geometry forbids anything else | 21 | 33 |
 | U7 + U8 + U6 | 68 | 37 |
 
-**Every stub cost connectivity, and the cost was linear in stub count** — 0.095 and 0.088
-unconnected items per stub. There was no subset that helped, *including the two packages where
+**Both escape sets cost connectivity, at a similar rate per stub** — 0.095 and 0.088
+unconnected items per stub. Two nonzero treatments cannot establish that the relationship is
+linear, that each individual stub carries a cost, or that the mechanism below is the operative
+one rather than something specific to these packages; what they show is that the aggregate
+penalty was roughly proportional across the two sets measured. There was no subset that helped, *including the two packages where
 radial escape is the only physically possible option*: U8's 0.32 mm pads on 0.5 mm pitch leave an
 0.18 mm gap against the 0.48 mm a track needs, and U7's exposed pad fills its body.
 
-Linearity is the tell. If the authored topology were merely *wrong*, the cost would concentrate on
-the pads that were sent the wrong way. Instead each locked stub cost about the same, which is what
-you see when the constraint, not the topology, is what hurts: a sequential router at the edge of
-completion has fewer choices after every piece of copper it did not choose, and it cannot trade
-your escape away when it needs that channel.
+The proportionality is suggestive, not diagnostic. If the authored topology were merely *wrong*,
+you would expect the cost to concentrate on the pads that were sent the wrong way; instead the
+two sets cost about the same per stub, which is at least consistent with the constraint rather
+than the topology being what hurts — a sequential router at the edge of completion has fewer
+choices after every piece of copper it did not choose, and cannot trade your escape away when it
+needs that channel. Separating that from a package-specific effect needs a third treatment level
+and per-net attribution, neither of which was run.
 
 So:
 
@@ -166,6 +171,15 @@ So:
   escape *plan*, verify it is feasible, and then let the router realise it — or route the whole
   board by hand. Locking a plan into copper spends the router's remaining freedom on your
   hypothesis.
+
+  This is the one case where the escape *design* is yours and the escape *copper* is not, so say
+  which explicitly. Fanout stays generator-owned by default
+  ([`AUTOROUTING.md`](AUTOROUTING.md)); relaxing that for one board is a project decision recorded
+  with the layer plan, not a silent handover. Record the plan (which pad leaves on which layer, in
+  what order), leave the copper unauthored, and grade the router's realisation against that plan
+  afterwards rather than treating whatever it emitted as the design. Note that Freerouting's own
+  fanout must still be disabled for track-width correctness, so "let the router realise it" means
+  the area router realising it in passing, not a fanout pass.
 - **Measure it rather than assuming either way**, with a control that changes one variable. The
   run that produced the table above initially changed two — it also had to drop
   `--rip-existing-nets '*'`, because the backend deletes locked geometry under that flag — and the
@@ -176,7 +190,7 @@ So:
 [`AUTOROUTING.md`](AUTOROUTING.md) already requires scouting first and authoring the critical
 skeleton by hand. The ordering rule is the reason it works: sequential routers are order-dependent
 by construction — *"Use of ripup-and-reroute to resolve DRC can rely heavily on net ordering"*
-(TritonRoute-WXL, IEEE TCAD 2021) — so whichever nets you route first are the ones that get the
+(TritonRoute-WXL, IEEE TCAD 41(4), 2022) — so whichever nets you route first are the ones that get the
 good channels.
 
 Route in this order, and stop to re-place rather than to widen the search:
@@ -293,10 +307,15 @@ scripts/kicad_route_shape.py BOARD.kicad_pcb \
    built-in defaults (0.20 mm track, 0.30 mm hole, 0.20 mm clearance) instead of the project
    netclass. One board read 322 clearance + 199 each of `drill_out_of_range`, `track_width` and
    `via_diameter` without it, and 10 clearance with it.
-2. **`pcbnew.BOARD.Save()` overwrites that `.kicad_pro`** with a default project — netclass
-   0.18/0.45 became 0.20/0.60. This is the worse of the two, because the file still exists and
-   looks right; only the numbers changed. **Re-copy the project and DRU after every scripted
-   save**, or save through a helper that preserves them.
+2. **`pcbnew.BOARD.Save()` writes the sibling `.kicad_pro` too**, and if the board was *loaded*
+   without one, what it writes is KiCad's defaults — netclass 0.18/0.45 became 0.20/0.60. This is
+   the worse of the two, because the file still exists and looks right; only the numbers changed.
+   The dependency is on the load, not the save: in KiCad 10.0.5 `Save()` delegates to
+   `pcbnew.SaveBoard(path, board, aSkipSettings=False)`, which writes the project attached to the
+   board by `LoadBoard`. Copy the project **before** loading, so the project that gets written back
+   is yours; `pcbnew.SaveBoard(path, board, True)` suppresses the project write outright. Re-copying
+   after every save also works, but it treats a lifecycle dependency as a ritual and will not save
+   you when something else reads the project between the save and the re-copy.
 3. **Stale zone fill** — a zone filled before you added copper still carries its old polygons, so
    every new track reads as a clearance violation against the pour. Sixty-eight escape stubs
    produced exactly sixty-eight phantom violations this way. Refill (`pcbnew.ZONE_FILLER`) after
@@ -305,9 +324,12 @@ scripts/kicad_route_shape.py BOARD.kicad_pcb \
 
 **Measure connectivity, not violation counts, when comparing routes.** On the board this file
 was written against, three runs of one identical recipe on one identical seed gave the identical
-unconnected count (30, 30, 30) but clearance-violation counts of 4, 18 and 4. Connectivity was
-deterministic; the violation tally was not. Comparing two routing strategies on a noisy metric
-invents differences that are not there.
+unconnected count (30, 30, 30) but clearance-violation counts of 4, 18 and 4. The scalar
+unconnected count repeated; the violation tally did not. That is repeatability of one number
+across three runs, not a proof that the router is deterministic — the runs were not compared net
+by net or by copper hash, so the same count may cover different unresolved nets. It is enough to
+justify comparing strategies on connectivity and not on the violation tally, which is what the
+rule is for; it is not enough to claim a deterministic router.
 
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —
@@ -333,9 +355,11 @@ or kill it:
 
 The measured baseline that motivated this file, so the numbers above are not abstract: a 20 × 107 mm
 4-layer board, 61 routed nets, **197 vias all spanning F.Cu→B.Cu**, 3.23 vias per routed net,
-1793 segments for 2126 mm of copper, median segment 0.500 mm with 31 % below 0.2 mm, and — with a
-±5° axis tolerance — **no layer having an orthogonal partner**: F.Cu 20 % h / 38 % v, B.Cu 19 % / 45 %,
-In1.Cu 10 % / 57 %, In2.Cu 30 % / 14 %, i.e. every routing layer running lengthwise. Full derivation
+1793 segments for 2126 mm of copper, median segment 0.500 mm with 32 % below 0.2 mm, and — with a
+±5° axis tolerance — **three of four layers running the same way**: F.Cu 20 % h / 38 % v,
+B.Cu 19 % / 45 %, In1.Cu 10 % / 57 %, In2.Cu 30 % / 14 %. In2.Cu is the one predominantly
+horizontal layer, so an orthogonal partner does exist on paper; it carries about 6 % of the
+copper, which is why the board reads as running lengthwise throughout. Full derivation
 in [`reviews/2026-09-05-routing-methodology-research.md`](reviews/2026-09-05-routing-methodology-research.md) §1.
 
 ## Lane capacity is not routability — measured, twice
@@ -358,10 +382,13 @@ Both "improvements" made the board route worse, and the second was the *targeted
 per-part sensitivity analysis that named R40 (+9 lanes) and R17 (+4) out of 23 candidates, moved
 only those two, and doubled the row's lane count. Connectivity got worse anyway.
 
-So: **an aggregate capacity metric — lanes per cut, persistent corridors, free width — is a
-description of a board, not a prediction about it.** Use it to understand *where* a board is
-tight and to argue about a floorplan. Do not use it as an objective to optimise, and never
-report a lane gain as a routing improvement without routing the board.
+So, on the evidence of these two interventions on this one board and backend: **a lane gain is
+not by itself a routing improvement.** Both times the capacity metric improved and connectivity
+got worse. That refutes "more lanes, therefore better route" as an inference; it does not
+establish that capacity is never predictive, and two treatments on one board could not. Treat an
+aggregate capacity metric as a description of a board rather than a prediction about it, use it
+to understand *where* a board is tight, and never report a lane gain as a routing improvement
+without routing the board.
 
 Two things it is still good for, both diagnostic rather than predictive: finding a genuine hard
 wall (on that board, a thermal neck where the only corridor on either layer was 4.4 mm wide —
@@ -369,10 +396,12 @@ which turned out to be *comfortable*, 26 lanes against 9 crossing nets, and so w
 ruled out as the constraint), and naming which specific parts gate a corridor, which is a far
 better question to bring to a floorplan review than "which region looks crowded".
 
-The mechanism behind the failures is worth stating, because it is the same one twice: moving a
-part to free a corridor **moves its pads**, and therefore its own escape geometry and its
-neighbours'. The lanes are gained where no net wanted to go, and paid for at the pins. Which is
-the argument for doing the escape stage first and the corridor arithmetic second.
+The likeliest mechanism — untested, because no experiment here separated pad movement from the
+other effects of moving a part — is that moving a part to free a corridor **moves its pads**, and
+therefore its own escape geometry and its neighbours'. On that reading the lanes are gained where
+no net wanted to go and paid for at the pins, which would be an argument for doing the escape
+stage first and the corridor arithmetic second. Testing it needs a treatment that changes corridor
+capacity without moving pads, or per-net attribution of where the new failures landed.
 
 ## Do not generalise the anti-autorouter folklore
 
