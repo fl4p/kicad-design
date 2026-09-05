@@ -257,13 +257,22 @@ was taken mid-session from an agent's manual-routing attempt, all copper strippe
   the stricter collision audit — different metrics, reported separately); as
   placement-feasibility evidence the scout was decisive either way.
 
-Measured caveats — all three bit during the scout:
+Measured caveats — the first three bit during the scout, the fourth on a later reroute:
 
 1. **Zones are saved unfilled.** KRT's own completion oracle refills in memory, but the
    artifact on disk has no `filled_polygon`; `kicad-cli pcb drc` on it reported 24
    unconnected GND items that a `pcbnew.ZONE_FILLER` refill reduced to 0. Refill before
    any DRC, audit, or fab export of KRT output.
-2. **It rewrites the sibling `.kicad_pro`.** In one run it relaxed the copper-to-hole
+2. **It needs the sibling `.kicad_pro` to route correctly in the first place.** With no
+   same-stem project the router resolves clearances from the *stock* netclass, not the board's,
+   and KRT says so in a banner: "CLI and GUI runs will route DIFFERENT copper from this same
+   board." Measured 2026-09-05: one recipe on one byte-identical seed gave 30 unconnected items
+   routed without the project and 39 with it, because the stock netclass supplied hole-to-hole
+   0.2 mm against the board's 0.25 mm and no edge constraint. The looser rules route easier and
+   the resulting board is plausible, not obviously broken. Copy the project and DRU beside every
+   scratch board **before routing**, not only before DRC, and re-copy after each stage — see
+   caveat 3.
+3. **It rewrites the sibling `.kicad_pro`.** In one run it relaxed the copper-to-hole
    floor 0.25 → 0.2 mm (disclosed loudly as "FAB FLOOR RELAXED"), downgraded DRC
    severities to ignore (`solder_mask_bridge`, `pth`/`npth_inside_courtyard`,
    `annular_width`, `malformed_courtyard`, `lib_footprint_*`; `courtyards_overlap` and
@@ -278,7 +287,7 @@ Measured caveats — all three bit during the scout:
    severities, or accept them as recorded project decisions. The measured consequence
    is in the verdict above: four hole-clearance violations invisible under the relaxed
    floor, real under the original one.
-3. **The version pair diverges** (repo `VERSION` vs binary self-report — see the install
+4. **The version pair diverges** (repo `VERSION` vs binary self-report — see the install
    paragraph); pin the tag + self-report + digest triple.
 
 ## Inputs required for a promotable run

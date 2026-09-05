@@ -20,7 +20,7 @@ Read it before changing a rule here.
 - [A router's defaults are tuned for completion, not for legibility](#a-routers-defaults-are-tuned-for-completion-not-for-legibility)
 - [A sequence of per-net passes is not a routing pass](#a-sequence-of-per-net-passes-is-not-a-routing-pass)
 - [Grade the shape of the route, not only its DRC](#grade-the-shape-of-the-route-not-only-its-drc)
-- [Lane capacity is not routability — measured, twice](#lane-capacity-is-not-routability--measured-twice)
+- [Lane capacity is not routability — measured three times, and the third one agreed](#lane-capacity-is-not-routability--measured-three-times-and-the-third-one-agreed)
 - [Do not generalise the anti-autorouter folklore](#do-not-generalise-the-anti-autorouter-folklore)
 
 ## Route the topology, not the copper
@@ -301,6 +301,17 @@ scripts/kicad_route_shape.py BOARD.kicad_pcb \
     --min-direction-conformance 0.70
 ```
 
+**The sibling project governs the router, not only DRC.** The same trap has a routing-side
+half that is worse, because it produces a plausible board instead of a bad report: a router
+invoked on a board with no same-stem `.kicad_pro` resolves clearances from the *stock* netclass.
+KiCadRoutingTools says so in its own banner — "CLI and GUI runs will route DIFFERENT copper from
+this same board" — and it is right. Measured 2026-09-05 on the o2-probe: the identical recipe on a
+byte-identical seed produced **30 unconnected items routed without the project and 39 with it**
+(the stock netclass gave hole-to-hole 0.2 mm against the board's 0.25 mm, and no edge constraint).
+Every earlier number in this file's own experiment log was collected the first way, so the
+comparisons between them survived — all were equally wrong — and none of the absolute values did.
+**Copy the project and the DRU beside the board before routing it, not only before grading it.**
+
 **Three ways a DRC result lies about a scratch board, all measured on one session:**
 
 1. **No same-stem `.kicad_pro` beside the board** — `kicad-cli` silently grades against KiCad's
@@ -325,11 +336,16 @@ scripts/kicad_route_shape.py BOARD.kicad_pcb \
 **Measure connectivity, not violation counts, when comparing routes.** On the board this file
 was written against, three runs of one identical recipe on one identical seed gave the identical
 unconnected count (30, 30, 30) but clearance-violation counts of 4, 18 and 4. The scalar
-unconnected count repeated; the violation tally did not. That is repeatability of one number
-across three runs, not a proof that the router is deterministic — the runs were not compared net
-by net or by copper hash, so the same count may cover different unresolved nets. It is enough to
-justify comparing strategies on connectivity and not on the violation tally, which is what the
-rule is for; it is not enough to claim a deterministic router.
+unconnected count repeated; the violation tally did not.
+
+A later pair of runs settled what those three could not. **Compare the copper, not the file.**
+Hashing the saved `.kicad_pcb` says the two runs differ — UUIDs and timestamps differ on every
+save. Hashing the sorted track and via *geometry* (start, end, width, layer, net) showed two runs
+of one recipe producing **identical copper**: 3449 items, same hash, on the baseline placement,
+and 3641 items, same hash, on a rotated one. So on this board, backend and recipe the router is
+deterministic in fact, and the earlier "three identical counts" was weaker evidence for a claim
+that happens to be true. Do the geometry hash when determinism matters; a repeated scalar is
+consistent with different nets failing each time.
 
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —
@@ -362,7 +378,7 @@ horizontal layer, so an orthogonal partner does exist on paper; it carries about
 copper, which is why the board reads as running lengthwise throughout. Full derivation
 in [`reviews/2026-09-05-routing-methodology-research.md`](reviews/2026-09-05-routing-methodology-research.md) §1.
 
-## Lane capacity is not routability — measured, twice
+## Lane capacity is not routability — measured three times, and the third one agreed
 
 The tempting move on a congested board is to count lanes: how many tracks can cross this row,
 how many nets must. It is easy to compute, it feels like the channel-routing theory it borrows
@@ -389,6 +405,46 @@ establish that capacity is never predictive, and two treatments on one board cou
 aggregate capacity metric as a description of a board rather than a prediction about it, use it
 to understand *where* a board is tight, and never report a lane gain as a routing improvement
 without routing the board.
+
+**A third intervention on the same board then improved both**, which is why the rule above is
+about the inference and not about capacity itself. Rotating 19 flat B.Cu passives 90 degrees in
+place — no part moved to a new location, mean displacement 0.68 mm — took B.Cu persistent lanes
+from 2 to 12 through y=70..76 and unconnected items from **39 to 25**, the only intervention here
+that ever improved connectivity, and repeatable to identical copper.
+
+The difference worth carrying is *what the intervention did to the pads*:
+
+| intervention | what moved | lanes | connectivity |
+|---|---|---|---:|
+| spread 12 passives out of the dense row | parts, to new locations | up | 39 → 68 |
+| move the 2 parts a sensitivity analysis named | parts, to new locations | up | 39 → 63 |
+| rotate 19 passives in place | footprint aspect; pads stay put | up | **39 → 25** |
+
+A flat 0603 land is 3.05 x 1.55; rotated it is 1.55 x 3.05. On a long narrow board whose useful
+lanes run lengthwise, that hands back 1.5 mm of the scarce axis per part without relocating
+anything. That is a placement change that does not disturb escape geometry, and it is a different
+lever from moving a part. **The hypothesis this supports — that the two failures cost more in
+pad-local geometry than they bought in corridor width — is consistent with all three results and
+is not established by them**; no experiment here varied corridor capacity while holding pad
+positions fixed except this one, and one confirming case is not a separation.
+
+Rotation is not free, and two of its costs are invisible to a capacity metric:
+
+- **A pad that terminates authored copper cannot be rotated.** Turning the part moves the pad out
+  from under the track endpoint. Nothing overlaps, so no clearance or courtyard check fires; the
+  net simply comes apart. Rotating all 24 candidates silently disconnected `/GUARD_REPLICA` — the
+  guard rails carrying the AFE's leakage budget — and only a diff of unconnected counts against
+  the unrotated seed caught it. Exclude any candidate whose pad contains a track endpoint.
+- **Courtyards are not a copper model.** They are not even self-consistent: two comparable 0603
+  lands on this board declare 1.91 x 1.01 and 3.05 x 1.55. Rotating against courtyards alone put
+  four shorts on `/VA_MON`, `/GUARD_REPLICA`, `/CELL_WE` and `/RE_BUF`. Union the courtyard with
+  the pad copper plus clearance, and include existing tracks and vias as obstacles — with real
+  segment geometry, since a 45-degree track's bounding box claims its whole diagonal envelope and
+  will exclude parts that in fact have room.
+
+And rotation changes the part's own electrical geometry: which pad faces the pin it decouples,
+and therefore the decoupling loop. That is a separate question from routability and this
+experiment did not ask it.
 
 Two things it is still good for, both diagnostic rather than predictive: finding a genuine hard
 wall (on that board, a thermal neck where the only corridor on either layer was 4.4 mm wide —
