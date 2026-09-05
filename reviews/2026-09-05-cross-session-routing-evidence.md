@@ -21,11 +21,14 @@ canonical `critical_routes.py`.
 |---|---:|---|---|
 | host baseline, no rotation (`rt-base`) | 39 | hole_clearance 4 | 57/57 present, locked |
 | host, 19 passives rotated (`rt-rot`) | 25 | hole_clearance 6 | 57/57 present, locked |
-| codex `final-best/o2-probe.kicad_pcb` | **22** | **none** | 1 missing: `/GUARD_REPLICA` B.Cu 0.25 mm (102.17..110.885, 129.35) — codex edited `critical_routes.py` (228 diff lines) to open a 1 mm F.Cu doorway at x=7..8 for U7 pin 11 |
+| codex `final-best/o2-probe.kicad_pcb` (snapshot graded 17:20 local, while the session was still running) | 22 | none | 1 missing: `/GUARD_REPLICA` B.Cu 0.25 mm (102.17..110.885, 129.35) — codex edited `critical_routes.py` (228 diff lines: 221 added, 7 deleted) to open a 1 mm F.Cu doorway at x=7..8 for U7 pin 11 |
+| codex `final-best-21/o2-probe.kicad_pcb` (written 18:24 local, after this commit's parent; the board `FINAL-RESULT.md` now names) | **21** | **none** | same single `/GUARD_REPLICA` change as above |
 | pi `route-pi.kicad_pcb` (bg-12) | 25 | clearance 2, copper_edge_clearance 2 | 4 missing: `/CELL_WE` B.Cu trunk (110.0,132.3)→(110.4,131.9), (110.0,132.3)→(110.0,134.5), F.Cu (110.0,134.5)→(110.0,141.0), via (110.0,134.5) — pi's `critical_routes.py` is byte-identical to canonical, so the board copper was edited directly |
 
-Self-reports against this regrade: host 25 ✔. Codex 22 and copper-clean ✔, "all 154 authored
-items intact" ✔ *against its own modified generator*. Pi reported "25, 2 clearance, 2 edge, 16
+Self-reports against this regrade: host 25 ✔. Codex 22 then 21, copper-clean ✔, "all 154
+authored items intact" ✔ *against its own modified generator*. The codex session was still
+running when this file was first written; the 22 row is the state at 17:20 and the 21 row was
+added after review. Pi reported "25, 2 clearance, 2 edge, 16
 hole_clearance"; the regrade finds 0 hole_clearance — its counts do not reproduce and I did not
 find out why.
 
@@ -37,11 +40,19 @@ find out why.
    (`KICAD_INRUN_FLOOR_SYNC`, default on), not by `--no-fix-drc-settings` (that flag gates
    `main()`'s final writeback at ~6281). Observed: pi's stage-1 log line 1 shows
    `--fab-overrides krt_fab_floor.txt --no-fix-drc-settings` and line 1403 shows
-   `In-run DRC floors (#650): lowered 1 value(s) in route-pi.kicad_pro`. Codex observed the same
-   as `min_hole_clearance 0.20→0.15` and built `run_krt_staged.sh`: `shasum -a 256` of pro+dru
-   before, `cp` back and `shasum -c` after each stage.
-2. **KRT layer-swaps locked stubs.** Codex observation only (11:31: "layer-swapped seven locked
-   F.Cu stubs onto B.Cu"); I did not reproduce it. Flags verified to exist in `route.py`:
+   `In-run DRC floors (#650): lowered 1 value(s) in route-pi.kicad_pro` followed by
+   `rules.min_hole_clearance: 0.2 -> 0.15 mm`. Codex observed the same and built
+   `run_krt_staged.sh`: `shasum -a 256` of pro+dru before, `cp` back and `shasum -c` after each
+   stage. Review correction: the call sits at ~3701 on the routed-output path and again at ~3151
+   in the oracle staging (one invocation can write twice); the no-valid-nets and
+   already-connected passthrough exits (~1146, ~1254) do not reach it; it clamps rule floors plus
+   the Default netclass only (`clamp_nondefault_netclasses=False`); it prints a summary line plus
+   one line per change.
+2. **KRT layer-swaps locked stubs.** Codex observation (11:31: "layer-swapped seven locked
+   F.Cu stubs onto B.Cu"), confirmed by the reviewer from the `escapes-c` experiment: its
+   verifier lists seven missing locked F.Cu tracks and all seven exact geometries are present,
+   still flagged locked, on B.Cu; the stub-swap code mutates the segment layer without consulting
+   `locked`. I did not reproduce it myself. Flags verified to exist in `route.py`:
    `--no-stub-layer-swap` (5571), `--no-smoothing` (5594), alongside `--can-swap-to-top-layer`,
    `--swappable-nets`, `--mps-layer-swap`. Codex's runner passes `--keep-input-copper
    --no-stub-layer-swap --no-smoothing` on every stage.
@@ -59,13 +70,20 @@ find out why.
    "accepted foreign traces now form complete barriers between them" (12:25). Flipping alternate
    parts so shared pads face each other, ordering the CE divider as a chain, and pre-authoring the
    row-local links took the *unrouted* seed from 173 to 161 opens and the routed result from 26 to
-   24, copper-clean. Its isolated fine-grid probe (0.09 mm / 0.05 mm grid) on the simplest
-   adjacent-pad gap still reported "boxed in", which is what identifies the blocker as topology
-   rather than resolution.
+   24. Review correction: that `topology-locked-route` board grades at 24 with two
+   `copper_edge_clearance` findings; the copper-clean 24 is the later `guarddoor-route`, which
+   also changed the guard copper. "1.75 mm" is the row pitch, centre to centre, from codex's
+   `critical_routes.py` comment, not a gap. Its isolated fine-grid probe (0.09 mm / 0.05 mm grid)
+   on the simplest adjacent-pad gap still reported "boxed in", which is what identifies the blocker
+   as topology rather than resolution.
 6. **Router incompletes are not unconnected items, on Freerouting too.** Codex's Freerouting 2.3.0
-   scouts on the bare placement: 178 → 67 → 55 → 50 → 47 → … → 16 at pass 17 → 19 at pass 18
-   (workspace log, 17:10 local). Nothing graded; the SES was not imported. Recorded as the
-   generalisation of the KRT `JSON_SUMMARY` rule, not as a result.
+   scout on the bare placement, `experiments/freerouting-bare/workspace/router-logs/freerouting.log`,
+   passes 1–20: 178, 51, 37, 34, 31, 25, 29, 23, 22, 21, 24, 21, 20, 17, 18, 18, 16, 19, 16, 16.
+   Its SES was imported and the board graded: `candidate-drc.rpt` reports **42 unconnected pads**.
+   Review correction: my first draft spliced the 67 → 55 → 50 → 47 prefix from a different run
+   (`freerouting-scout/workspace7`, fixed critical skeleton, starting at 162) and wrongly said the
+   bare run was never graded. The corrected pair, 16 live vs 42 graded on one board, is the
+   stronger evidence for the rule.
 7. **Selective GND stitch pruning.** Codex: removing the two stitching vias that terminated in
    isolated B.Cu fragments took 24 → 22; removing every stitch gave 23. Single measurement, kept
    as a hypothesis in the write-up, not promoted to a rule.

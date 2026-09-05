@@ -67,13 +67,14 @@ topological reading of the same board, because it is what predicts routing effor
 - **When you consolidate passives into a row, align the shared pads.** Standing a row of 0603s
   up (see the rotation result below) frees lanes, but if two parts that share a net end up with
   that net's pads at opposite ends of the row, every foreign trace the router later accepts
-  between them is a wall. The router then reports the 1.75 mm gap between two adjacent pads as
-  "boxed in", and a finer grid does not fix it — one session's isolated 0.09 mm / 0.05 mm probe
-  on the simplest such gap still failed, which is what identifies the blocker as topology rather
-  than resolution. Flip alternate parts so shared pads face each other, order a divider chain as
-  a chain, and pre-author the short row-local links before area routing. Measured once, by one
-  agent, on the o2-probe: the unrouted seed went 173 → 161 opens on topology alone and the routed
-  result 26 → 24, copper-clean
+  between them is a wall. The router then reports two adjacent pads only 1.75 mm apart (centre
+  to centre, the row pitch) as "boxed in", and a finer grid does not fix it — one session's
+  isolated 0.09 mm / 0.05 mm probe on the simplest such gap still failed, which is what
+  identifies the blocker as topology rather than resolution. Flip alternate parts so shared pads
+  face each other, order a divider chain as a chain, and pre-author the short row-local links
+  before area routing. Measured once, by one agent, on the o2-probe: the unrouted seed went
+  173 → 161 opens on topology alone, and the routed result 26 → 24 with two copper-edge findings
+  still open (the later copper-clean 24 came from a separate change to the guard copper)
   ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
   §5). Not replicated; treat the rule as a design check, the numbers as one board's.
 - **Fix the aspect-ratio trap explicitly.** On a long, narrow board the layer whose preferred
@@ -196,15 +197,17 @@ So:
   run that produced the table above initially changed two — it also had to drop
   `--rip-existing-nets '*'`, because the backend deletes locked geometry under that flag — and the
   control showed the flag was worth 1 and the escapes 6.
-- **"Locked" protects against rip-up only, not against layer swap or smoothing.** A second
-  session handing KRT the same kind of locked F.Cu escapes, without the rip flag, found seven of
-  them moved to B.Cu by the router's stub layer-swap pass — the copper survived, the layer
-  assignment you authored did not. `--no-stub-layer-swap --no-smoothing` (both exist in
-  `py_router/route.py`, alongside `--can-swap-to-top-layer`, `--swappable-nets` and
-  `--mps-layer-swap`) held them in place on every later stage. Single observation, not
-  reproduced here; the flags are verified, the mechanism is the reporter's. Either way, check the
-  layer of every authored item after the run, not only its presence — the subsection below says
-  how.
+- **"Locked" is not a preservation contract.** This KRT build has two measured paths that
+  alter locked geometry: the rip path above, which deletes it, and the stub layer-swap pass,
+  which moves it. A second session handing KRT the same kind of locked F.Cu escapes, with
+  `--keep-input-copper` and without the rip flag, found seven of them on B.Cu afterwards — the
+  exact geometries survived and still carried the locked flag, on the wrong layer, because the
+  swap mutates a segment's layer without consulting `locked`. `--no-stub-layer-swap
+  --no-smoothing` (both in `py_router/route.py`, alongside `--can-swap-to-top-layer`,
+  `--swappable-nets` and `--mps-layer-swap`) held them in place on every later stage. So: pass
+  `--keep-input-copper --no-stub-layer-swap`, decide smoothing explicitly, and verify every
+  authored item's geometry *and layer* after the run rather than trusting the flag — the
+  subsection below says how.
 
 ## Author the skeleton by hand, in priority order
 
@@ -408,9 +411,11 @@ the same runner, and compare copper produced the same way
 **A router's own incomplete count is not an unconnected count, on any backend.**
 [`AUTOROUTING.md`](AUTOROUTING.md) says this of KRT's `JSON_SUMMARY`; it is equally true of
 Freerouting's per-pass `N incompletes across M items` lines. One scout on a bare placement ran
-178 → 67 → 55 → 50 → … → 16 at pass 17 and back to 19 at pass 18 — a live search count that
-oscillates, of a board never imported, refilled or graded. Quote it as what it is, a router's
-progress line, and never beside a KiCad-graded number in the same table.
+178 → 51 → 37 → 34 → 31 → 25 → 29 → 23 → 22 → 21 → 24 → 21 → 20 → 17 → 18 → 18 → 16 → 19 →
+16 → 16 over twenty passes (`router-logs/freerouting.log`) — a live search count that oscillates
+— and when its SES was imported and the board refilled and graded by `kicad-cli`, the same run
+read **42 unconnected pads**. Sixteen and forty-two are the same board. Quote the progress line
+as what it is, and never beside a KiCad-graded number in the same table.
 
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —

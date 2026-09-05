@@ -59,14 +59,17 @@ For each load-bearing check, record at least:
   visits. Text, symbol properties, labels, pads, tracks, vias, zone settings, zone fills and
   drawing-sheet items are separate classes. A calibration built from a class already visited
   cannot expose an omitted class.
-- Take the expectation from the authority, never from the artefact's own directory. A verifier
-  that imports its expected geometry from the generator sitting beside the board it checks
-  certifies that board against whatever produced it, so an edited generator passes its own output
-  and a board edited by hand passes an unedited generator only if someone runs the check from
-  elsewhere. Measured 2026-09-05: two of three candidate boards had altered locked critical copper,
-  one via the generator and one via the board, and neither candidate's own verification saw it
-  ([`ROUTING.md`](ROUTING.md), "The authored skeleton is a design artefact"). Pin the authority as
-  an explicit input — a path, a commit, a digest — and print it beside the verdict.
+- Take the expectation from the authority, never from the artefact's own directory, and make
+  running the check part of the result. These are two separate failures. A verifier that imports
+  its expected geometry from the generator sitting beside the board it checks certifies that board
+  against whatever produced it, so an edited generator passes its own output — pin the authority
+  as an explicit input, a path, a commit or a digest, and print it beside the verdict. Separately,
+  a board edited by hand fails even the local verifier, but only if someone runs it: a candidate
+  whose provenance carries no verifier output is unverified, not passing. Measured 2026-09-05: two
+  of three candidate boards had altered locked critical copper, one through the generator (its own
+  verifier passed it) and one directly on the board (its verifier would have failed it, and no run
+  was recorded) ([`ROUTING.md`](ROUTING.md), "The authored skeleton is a design artefact, and the
+  board cannot certify it").
 - Derive names, membership, layer sets, endpoint nets and inventory counts from the model or
   reparsed artefact that defines them. A literal name must assert its subject exists; prefer a
   structural identity such as a refdes/pad relation when a rename should not require a code edit.
