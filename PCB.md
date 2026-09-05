@@ -28,6 +28,7 @@ pays only for what it needs:
 - [Prove placement is route-ready and define completion](#prove-placement-is-route-ready-and-define-completion)
 - [Use the incremental footprint-swap path](#use-the-incremental-footprint-swap-path)
 - [Scope external autorouting](#scoped-external-autorouting-scout-by-default-promote-by-opt-in)
+- Routing method, layer plan, escape stage and route-shape audit: [`ROUTING.md`](ROUTING.md)
 - [Record and share layout experience](#record-and-share-layout-experience)
 - [Place board annotations from board geometry](#place-board-annotations-from-board-geometry)
 - [Validate decoupling loops](#decoupling-is-a-current-loop-not-a-placement-radius)
@@ -107,6 +108,15 @@ drilled-hole and side-specific geometry:
   layer strategy. Long cross-board ratsnests from an IC to its critical support parts are direct
   evidence of bad placement. Diagnose the cause rather than adding unsafe jumpers or lowering
   completion criteria.
+
+Read this audit topologically as well as geometrically, and commit the board's layer plan before
+detailed routing starts: crossing count, per-layer preferred direction, the escape pattern for each
+dense cluster, and the intended via classes are placement-time decisions, not routing-time ones.
+[`ROUTING.md`](ROUTING.md) carries that method. Its `scripts/kicad_route_shape.py` audit measures
+the *shape* of the finished copper — via counts and spans, segment fragmentation, per-layer length,
+and conformance to a declared per-layer direction — which is what DRC and the copper-collision
+guard cannot see. It does not measure crossing count or escape patterns, and it takes no plan as
+input: those stay a review judgement against the layer plan you wrote down.
 
 This audit is prose plus one executable backstop, and the backstop is not optional for
 generator-owned copper: after every generated or scripted routing pass, run

@@ -1,5 +1,13 @@
 # Scoped external autorouting
 
+Method first: [`ROUTING.md`](ROUTING.md) covers what a good route *is* — layer plan, escape stage,
+net priority, and why a backend's shipped cost weights are tuned for completion rate rather than
+legibility. Set those weights explicitly and record them with the run; a default you did not choose
+is a design decision you did not make. Be aware that `autoroute.json` cannot hold them for a KRT
+run — its schema is Freerouting-only and rejects unknown root keys — so KRT weights go in the
+project's routing provenance and on the command line. This file covers the pipeline around the
+run.
+
 Operational companion for external autorouting. The exploratory scout is the default pre-pass
 step for every board (`PCB.md`); *promotion* of external geometry remains a per-project opt-in
 under the routing-ownership policy in [`PCB.md`](PCB.md): the exploratory/critical/routine classification,

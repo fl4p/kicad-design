@@ -42,6 +42,7 @@ Read only the companions required by the task:
 | [`SCHEMATIC.md`](SCHEMATIC.md) | the task captures, generates, edits, reviews, or declares completion of a schematic, or begins PCB work from one |
 | [`SETUP.md`](SETUP.md) | before any task that will read a datasheet, schematic capture included; when the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires reference-design, eval-board, lifecycle, inventory, stock, or distributor evidence |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or routing ownership and completion |
+| [`ROUTING.md`](ROUTING.md) | any routing pass is planned, by hand or by machine — layer plan, escape stage, net priority, router cost weights, and the routing-shape audit; read it before [`AUTOROUTING.md`](AUTOROUTING.md), and whenever a routed board is reviewed or a route looks arbitrary |
 | [`AUTOROUTING.md`](AUTOROUTING.md) | any routing pass is planned — the default pre-pass scout lives here (with [`PCB.md`](PCB.md)); promotion of external geometry (Freerouting/KRT candidates, route manifests) additionally needs the project opt-in |
 | [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |

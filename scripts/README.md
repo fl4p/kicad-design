@@ -24,6 +24,7 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_netlist.py` | parse KiCad netlists across supported pretty-print formats and reject empty or inconsistent exports |
 | `kicad_symlib.py` | resolve inherited symbols, common unit 0, body styles, and pin transforms |
 | `kicad_verify.py` | run ERC/DRC safely and resolve ignored checks from reports plus project configuration |
+| `kicad_route_shape.py` | routing-shape audit on a saved board: per-net via maximum and total, via layer-span histogram, segment-length distribution and short-segment fraction, arc count, per-layer copper length, and per-layer direction conformance against a declared `--layer-direction`. Grades the per-net **maximum** (`--max-vias-on-any-net`), never the mean — the mean over nets-carrying-copper is diluted by via-free nets and is report-only. Arc length comes from `GetLength()`, not the chord. Full-stack via fraction is `unevaluable` on a 2-layer board, where every ordinary via spans the outer pair by construction. Fail closed: `--report-only` grades nothing (exit 0, explicit NOT-GRADED line, never valid as a gate); a gating run needs at least one threshold; a threshold naming an unevaluable metric FAILS; an out-of-domain threshold (a fraction outside [0,1], a negative count) is a vacuous gate and is rejected as a configuration error; and any pre-existing `--json` report is invalidated before argparse can reject the command line. Ships no default thresholds — none are corpus-calibrated; see [`../ROUTING.md`](../ROUTING.md). Calibration record in the tool docstring and `test_kicad_route_shape.py` |
 | `kicad_copper_collisions.py` | fail-closed certain-short audit: tracks/arcs/vias/pads of different nets whose effective shapes touch or overlap on a shared copper layer |
 | `kicad_functional_proximity.py` | fail-closed satellite→anchor placement tripwire: verifies every footprint declaring an `Anchor` binding (with per-binding `MaxDist`, optional `SelfPad`/`AnchorPad` selectors) sits within its pad-to-pad budget; binding fields without `Anchor`, vacuous runs, and `--expect` mismatches are all UNVERIFIED — release runs pass `--expect=ref:anchor:maxdist[:selfpad:anchorpad],...` binding the full captured tuple, never a bare refdes list, and the capture side must refuse to emit fields containing `:` or `,`, whitespace at an entry's outer edge, or a present-but-empty selector property (see [`POWER.md`](../POWER.md)); calibration harness: `tests/test_functional_proximity.py` |
 | `kicad_footprint_swap.py` | orchestrate a deadline-bound, adapter-owned multi-target footprint migration and recoverable promotion |
@@ -36,8 +37,8 @@ Run command examples from the skill repository root unless a section says otherw
 | `kicad_autoroute_scaffold.py` | generate and verify project-owned autoroute configuration, adapters, applicators, and audits |
 
 Use `--help` on the argparse CLIs: `kicad_repro.py`, `kicad_footprint_swap.py`,
-`kicad_autoroute_tools.py`, `kicad_route_candidate.py`, `kicad_route_manifest.py`, and
-`kicad_autoroute_scaffold.py`.
+`kicad_autoroute_tools.py`, `kicad_route_candidate.py`, `kicad_route_manifest.py`,
+`kicad_autoroute_scaffold.py`, and `kicad_route_shape.py`.
 The remaining modules expose a small positional diagnostic or are import-only:
 
 ```sh
