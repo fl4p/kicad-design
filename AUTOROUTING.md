@@ -289,6 +289,24 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    floor, real under the original one.
 4. **The version pair diverges** (repo `VERSION` vs binary self-report — see the install
    paragraph); pin the tag + self-report + digest triple.
+5. **It also rewrites the sibling `.kicad_pro` *mid-run*, and `--no-fix-drc-settings` does not
+   stop it.** Caveat 3 is `main()`'s final writeback, which that flag gates. A second, separate
+   write happens every time the run saves an output board: `py_router/route.py` (v0.21.3, around
+   line 3672, issue #650) calls `fix_kicad_drc_settings.apply_routed_floors()` to lower the
+   project's *copper* floors — clearance and hole-to-copper, and the netclasses that follow
+   them — to what the run routed to, so that its own in-run pour audit grades the way the shipped
+   board will. It is gated only by the environment knob `KICAD_INRUN_FLOOR_SYNC` (default on),
+   not by any CLI flag, and it prints one line: `In-run DRC floors (#650): lowered N value(s) in
+   <stem>.kicad_pro`. Measured 2026-09-05 on a stage-1 log whose command line carried both
+   `--fab-overrides krt_fab_floor.txt` and `--no-fix-drc-settings`; a second session saw the same
+   write as `min_hole_clearance 0.20 → 0.15`. In a staged recipe this fires **at every stage**,
+   so the project stage 2 routes against is already the one stage 1 lowered. The discipline that
+   held: `shasum -a 256` the project and DRU before the first stage, copy the originals back after
+   *each* stage, and `shasum -c` before starting the next and before grading — a re-copy without
+   the check is the ritual `ROUTING.md` warns about. `KICAD_INRUN_FLOOR_SYNC=0` should suppress
+   the write; that path was not measured.
+   ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
+   §1.)
 
 ## Inputs required for a promotable run
 

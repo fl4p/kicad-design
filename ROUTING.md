@@ -64,6 +64,18 @@ topological reading of the same board, because it is what predicts routing effor
 - **Read the long ratsnest lines as placement defects, not routing work.** A line from an IC to
   its own decoupling or reference part crossing the board is already a finding
   ([`PCB.md`](PCB.md)); so is a bundle whose lines all cross the same neck.
+- **When you consolidate passives into a row, align the shared pads.** Standing a row of 0603s
+  up (see the rotation result below) frees lanes, but if two parts that share a net end up with
+  that net's pads at opposite ends of the row, every foreign trace the router later accepts
+  between them is a wall. The router then reports the 1.75 mm gap between two adjacent pads as
+  "boxed in", and a finer grid does not fix it — one session's isolated 0.09 mm / 0.05 mm probe
+  on the simplest such gap still failed, which is what identifies the blocker as topology rather
+  than resolution. Flip alternate parts so shared pads face each other, order a divider chain as
+  a chain, and pre-author the short row-local links before area routing. Measured once, by one
+  agent, on the o2-probe: the unrouted seed went 173 → 161 opens on topology alone and the routed
+  result 26 → 24, copper-clean
+  ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
+  §5). Not replicated; treat the rule as a design check, the numbers as one board's.
 - **Fix the aspect-ratio trap explicitly.** On a long, narrow board the layer whose preferred
   direction runs across the short axis has almost no run length to offer, so the router pays vias
   to escape it. Freerouting's own geometry heuristic makes this concrete: it seeds preferred
@@ -184,6 +196,15 @@ So:
   run that produced the table above initially changed two — it also had to drop
   `--rip-existing-nets '*'`, because the backend deletes locked geometry under that flag — and the
   control showed the flag was worth 1 and the escapes 6.
+- **"Locked" protects against rip-up only, not against layer swap or smoothing.** A second
+  session handing KRT the same kind of locked F.Cu escapes, without the rip flag, found seven of
+  them moved to B.Cu by the router's stub layer-swap pass — the copper survived, the layer
+  assignment you authored did not. `--no-stub-layer-swap --no-smoothing` (both exist in
+  `py_router/route.py`, alongside `--can-swap-to-top-layer`, `--swappable-nets` and
+  `--mps-layer-swap`) held them in place on every later stage. Single observation, not
+  reproduced here; the flags are verified, the mechanism is the reporter's. Either way, check the
+  layer of every authored item after the run, not only its presence — the subsection below says
+  how.
 
 ## Author the skeleton by hand, in priority order
 
@@ -209,6 +230,32 @@ manual), Walk Around, and Shove — and Shove and Walk Around *"always create ho
 and 45-degree (H/V/45) track segments"* (KiCad 9 PCB Editor docs, "Routing Tracks"). Use Shove for
 the skeleton; reserve Highlight Collisions with Free Angle for the rare geometry that needs it,
 and never with Allow DRC Violations left on.
+
+### The authored skeleton is a design artefact, and the board cannot certify it
+
+Once the skeleton is authored, it is the one part of the board whose geometry carries a
+requirement — a leakage budget, a via ban, a guard topology — rather than a routing outcome. Two
+things follow, both measured on one board in one day
+([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
+§3):
+
+- **A change to the skeleton is a design change, whoever makes it and however it is made.** Of
+  three candidate boards produced for the same brief, two had altered the locked critical copper.
+  One agent edited the generator (`critical_routes.py`, 228 diff lines) to open a 1 mm F.Cu
+  "doorway" through the guard-replica wall so a blocked pin could escape, and reported all
+  authored items intact — which was true against *its* generator. The other left the generator
+  untouched and straightened a locked electrometer trunk directly on the board, so the generator
+  and the board silently disagreed. Both boards routed better for it. Neither change was wrong to
+  try; both are decisions for the person who owns the leakage budget, and both were reported as
+  routing results. Surface a skeleton diff as its own finding, before the unconnected count.
+- **Verify the skeleton against the canonical generator, never against whatever generator sits
+  beside the board.** A `verify_critical.py` that does `from critical_routes import
+  CRITICAL_TRACKS` in its own directory certifies the board against the copy of the generator that
+  produced it, so a modified generator always passes its own board. Run the verifier from the
+  upstream project checkout, or make it take the generator path as an explicit pinned input and
+  record that path in the result. This is [`GUARDS.md`](GUARDS.md)'s source-of-truth rule: the
+  expectation must come from the authority, not from the artefact's neighbourhood. Check the layer
+  as well as the coordinates — see the layer-swap caveat above.
 
 ## A router's defaults are tuned for completion, not for legibility
 
@@ -346,6 +393,24 @@ and 3641 items, same hash, on a rotated one. So on this board, backend and recip
 deterministic in fact, and the earlier "three identical counts" was weaker evidence for a claim
 that happens to be true. Do the geometry hash when determinism matters; a repeated scalar is
 consistent with different nets failing each time.
+
+**Reproduce the baseline in your own harness before quoting a delta.** The project-file trap
+above has a comparison-side consequence that caught a careful session: it *regraded* the inherited
+best board (30 unconnected, routed without a project) under the correct rules and adopted 30 as
+its baseline, then ran all of its own experiments with the project present. Its 22 was therefore
+reported as 30 → 22 when the same recipe with the project present starts at 39. Regrading a saved
+board re-measures its copper; it cannot re-route it, so a baseline you did not route in your own
+harness is not the same experiment as your candidates. Route it again, under the same rules and
+the same runner, and compare copper produced the same way
+([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
+§4).
+
+**A router's own incomplete count is not an unconnected count, on any backend.**
+[`AUTOROUTING.md`](AUTOROUTING.md) says this of KRT's `JSON_SUMMARY`; it is equally true of
+Freerouting's per-pass `N incompletes across M items` lines. One scout on a bare placement ran
+178 → 67 → 55 → 50 → … → 16 at pass 17 and back to 19 at pass 18 — a live search count that
+oscillates, of a board never imported, refilled or graded. Quote it as what it is, a router's
+progress line, and never beside a KiCad-graded number in the same table.
 
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —
