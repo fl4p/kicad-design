@@ -317,9 +317,12 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    the input copper read-only to the dead-end, orphan, redundancy and re-bend prunes (its help
    text says exactly that); it does not disable stub layer swapping, which is on by default, and
    "already routed" is KRT's own connectivity model, not KiCad's DRC. A pass re-run on its own
-   output with `--keep-input-copper --no-stub-layer-swap` re-attacks what that model still
-   reports open: measured on one board, the two-stage recipe read 24 unconnected, the next two
-   passes 19 and 16, and a variant reading 46 read 17 on its seventh further pass. Iterate under a
+   output re-attacks what that model still reports open. Measured on one board with
+   `--keep-input-copper` alone (stub swap left on; the authored copper was verified intact and
+   on its layers afterwards): the two-stage recipe read 24 unconnected, the next two passes 19
+   and 16, and a variant reading 46 read 17 on its seventh further pass. The prescription is
+   to add `--no-stub-layer-swap`, from the source and the locked-copper caveat, and the
+   trajectory under that pair is unmeasured. Iterate under a
    stopping rule declared in advance, keep the best board rather than the last, and treat a fixed
    small budget as a scout unless that budget was shown to stabilise the metric on the board in
    hand — [`ROUTING.md`](ROUTING.md)'s convergence rule; the sequences are in

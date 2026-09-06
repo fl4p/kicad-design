@@ -422,14 +422,15 @@ search count — and when its SES was imported and the board refilled and graded
 read **42 unconnected pads**. Sixteen and forty-two are the same board. Quote the progress line
 as what it is, and never beside a KiCad-graded number in the same table.
 
-**A fixed pass budget is not convergence, and a two-pass A/B is a scout.** A router that can take
+**A fixed pass budget is not convergence, and a two-pass A/B is a scout until that budget has been
+shown to stabilise the metric on the board in hand.** A router that can take
 its previous output as input defines a search that can simply be run again — KRT's
 `--keep-input-copper` re-routes the nets its *own* connectivity model still reports open and leaves
 the rest — and a recipe that stops after a fixed number of such passes reports wherever that budget
 happened to land. Measured on one board, one recipe, one seed ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8): the two-stage recipe
 read 24 unconnected and the next two further passes read 19 and 16; a variant that read 46 after
 the recipe read 17 on its seventh further pass; four variants spanning 22 to 46 after the recipe had
-best values of 16, 17, 17 and 17 over seven to thirteen further passes; and the control's own
+best values of 16, 17, 17 and 17 over six to twelve further passes; and the control's own
 sequence wandered 16 → 22 → 17. So the sequence is not monotone, and these are best-of readings
 over a bounded number of passes, not a converged plateau. The fixed-budget readings ranked one
 variant as catastrophic and another as a small win; the best-of readings separated none of them
@@ -443,10 +444,13 @@ from the untouched seed. So:
 2. Declare the pass budget and stopping rule before running the arms — a maximum, or N passes
    without a new best — and apply it to every arm, the control included.
 3. Record the whole sequence and keep the **best** valid board, not the last.
-4. An arm whose best lies inside the control's own range has not shown separation, and one
-   trajectory per arm cannot show equivalence either. Claim a winner or a tie only from
-   replication declared in advance — more seeds, or repeated runs where the router is not
-   deterministic — never from the minimum and maximum of a single run.
+4. Say exactly what one trajectory per arm supports. Where the router is deterministic (the
+   geometry-hash paragraph above), "A's best was X and B's best was Y on this seed under this
+   stopping rule" is a valid scoped statement. It is not a generalisation, and an arm whose best
+   lies inside the control's own range of pass values has not shown a difference — a serial
+   sequence is timepoints, not a noise distribution. A claim that one layout *generally* routes
+   better, or that two are equivalent, needs replication declared in advance: more seeds, or
+   repeated runs where the router is not deterministic.
 
 This downgrades every A/B in this file whose evidence is an unconnected count from a fixed one- or
 two-pass recipe — the escape table, the rotation-in-place result, the row-alignment result and the

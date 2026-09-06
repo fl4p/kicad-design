@@ -105,7 +105,7 @@ find out why.
    previous output (`iterate.sh`, which passes `--keep-input-copper` only, not
    `--no-stub-layer-swap`; the canonical verifier nevertheless found all 57 authored items present,
    locked and on their layers on `b39base3` and `b39base4`). After the recipe the variants span
-   22–46; their best values over 7–13 further passes are 16, 17, 17, 17; the control's own range
+   22–46; their best values over 6–12 further passes are 16, 17, 17, 17; the control's own range
    is 16–22. These are best-of readings over a bounded number of passes — fable's own write-up
    says "best-of over passes, not a run-to-plateau" — not a converged plateau. Review
    correction: the first draft of `ROUTING.md` called 16 "a third pass" (it is the second further
@@ -133,7 +133,7 @@ find out why.
    of the verifier output and reported "four `/CELL_WE` items". Plus declared hand edits: J105/J106 swapped to no-relief wire footprints, C34 moved 0.8 mm, three
    power nets hand-detoured. It is the only board that meets the brief's literal gate, and it does
    so with a rewritten electrometer topology that is the owner's decision. **Owner's decision,
-   2026-09-06:** Fab: "i never put these CELL_WE and guard rules, i dont care. if it works." The
+   2026-09-06:** Fab, verbatim: `i never put these "CELL_WE and guard" rules, i dont care. if it works..` The
    CELL_WE and guard-replica locks were agent-authored (host session's generator); the owner has
    waived them in words. CELL_RE's via ban stands and Codex's board honours it. This is the
    amendment `ROUTING.md`'s completion-gate rule asks for, and `final-bom39-zero` meets the brief. Pi's `b39clean-best`
@@ -149,7 +149,9 @@ find out why.
     legal escape, `kicad_copper_collisions.py` 0, DRC 0 clearance and 0 edge. Because
     `--rip-existing-nets '*'` deletes locked geometry, the escape runs used `--keep-input-copper`
     on both stages, and a control isolated that change. Identical two-stage recipe throughout,
-    graded as unconnected items (these runs predate the signal/island split):
+    **all routed without the project file beside the board** (the C row's 39 is the later
+    project-present re-run of the same recipe; G, H and F were never re-run with it), graded as
+    unconnected items (these runs predate the signal/island split):
 
     | id | escapes | stage 1 | unconnected |
     |---|---|---|---:|
@@ -158,9 +160,9 @@ find out why.
     | H | U7 + U8 only (0.5 mm-pitch pads and an exposed pad force radial) | 21 stubs | 33 |
     | F | U7 + U8 + U6 (LQFP-48) | 68 stubs | 37 |
 
-    Two-pass readings, not re-run beyond that budget. Escapes were refuted the same way by three
-    other sessions on the same board (codex 30 → 31; fable 26 → 29 on a U7 south row; the pi
-    session's contrary 28 → 25 is in "Not promoted").
+    Two-pass readings, not re-run beyond that budget. Three sessions measured escapes as a loss
+    on this board — host (this table), codex 30 → 31, and the Opus-resumed session 26 → 29 on a
+    U7 south row; the pi session's contrary 28 → 25 is in "Not promoted".
 11. **Rotation in place (host session Experiment I, 2026-09-05, old BOM).** `rotate_relax2.py`
     rotates every flat two-terminal B.Cu passive in the band 90° and relaxes in both axes against
     an obstacle model of courtyard ∪ pad copper + clearance plus existing tracks with real segment
