@@ -14,9 +14,13 @@ import sys
 import tempfile
 import unittest
 
-import copper_guards
-
-GUARD = copper_guards.__file__
+# Deliberately NOT `import copper_guards`: that module needs numpy and
+# shapely, and importing it here made the whole suite uncollectable on a
+# stdlib interpreter (codex review of 7b00165 -- 269 tests, 1 error). These
+# tests drive the CLI as a subprocess, so the path is all they need, and the
+# CLI boundary itself is required to work without the measurement stack.
+GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "copper_guards.py")
 
 
 def run(argv, board=None):
