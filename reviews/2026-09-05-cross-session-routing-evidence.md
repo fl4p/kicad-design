@@ -8,6 +8,13 @@ session (`codex-7699`), a pi session on gemini-3.8-flash (`custom-7704`), and tw
 sessions. Nobody reached zero. What follows is what generalises, with who measured it and how far
 I re-verified it. Full narrative: `~/dev/ee/hw/o2-probe-2layer-work/SESSION-ANALYSIS-2026-09-05.md`.
 
+**Model attribution, corrected 2026-09-06.** The transcripts' `model` field: host = claude-opus-5
+throughout; codex = gpt-5.6-sol; pi = gemini-3.8-flash; the session called "fable" below ran
+claude-fable-5-1 from 13:08 to 15:12 local on the 5th (baseline reproduction, first standing-column
+runs) and claude-opus-5 from 15:45 on, after a `claude --continue` resume in a terminal tile — so the
+signal/island split, the Freerouting comparison and the convergence measurement (§8, §9) are Opus
+work under that session's name.
+
 ## Regrade under one harness
 
 Each candidate copied to scratch, zones refilled with `pcbnew.ZONE_FILLER`, the canonical
