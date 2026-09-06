@@ -4,11 +4,14 @@ Scope: this repository (`kicad-design` skill) at `swig-to-ipc`, base `7b00165`. 
 `grep -rn "pcbnew" scripts/ *.md` on 2026-09-07 plus a read of each call site. This file records
 **what the code does today through SWIG** — that half is read off the source and is settled.
 
-The third column is the **port question**, not an answer. At the time this file was committed no
-cell in it had been checked against `kicad-python`; a cell reading "exposed" is the author's
-expectation, which is exactly the kind of claim this repo does not let stand unmeasured. Treat
-every such cell as UNVERIFIED until the migration note built on this inventory replaces it with a
-measured result and names the version it was measured against.
+The third column is the **port question**, not an answer. No cell in it was checked against
+`kicad-python` when this file was written; a cell reading "exposed" was the author's expectation.
+The answers are in [`SWIG-to-IPC-migration.md`](SWIG-to-IPC-migration.md), which reads
+`kicad-python` 0.8.0's source and KiCad's own binaries and settles it: **the released IPC API
+cannot open a saved board without a running KiCad GUI**, which makes every row here moot until
+KiCad 11. Two of the four decisive operations below — `GetEffectiveShape`+`Collide` and the
+Specctra DSN/SES boundary — have no IPC equivalent in any version examined, release or master.
+Where this file's third column and that one disagree, that one is measured and this one is not.
 
 Why this file exists: KiCad deprecated the SWIG `pcbnew` bindings in 9.0 and its developer
 documentation names removal in a future major release. Everything this skill measured about
