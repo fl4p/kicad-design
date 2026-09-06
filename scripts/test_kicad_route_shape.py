@@ -409,17 +409,25 @@ class CliContract(unittest.TestCase):
                 self.assertIn("ROUTE-SHAPE-UNEVALUABLE", proc.stderr)
 
     def test_vacuous_short_segment_definition_is_unevaluable(self):
-        """`--short-segment-mm` defines the metric, so it dilutes both
+        """`--short-segment-mm` defines the metric, so it can dilute both
         short-segment gates without touching the board: 1e-9 turned a
         measured 1.000-vs-0.15 FAIL into ROUTE-SHAPE-OK (codex review of
-        7a99de9). A ceiling is the same error in the other direction."""
-        for value in ("1e-9", "0.0001", "1000"):
+        7a99de9). Vacuity is judged against the board's own shortest
+        segment, not a constant window -- a review of 7b00165 found a real
+        board with four segments below 0.05 mm, which a fixed floor refused
+        to grade at all. The fixture's only track is 10 mm long."""
+        for value in ("1e-9", "0.0001", "10"):
             with self.subTest(value=value):
                 self.assertEqual(
                     self.run_cli(["b.kicad_pcb", "--short-segment-mm", value,
                                   "--max-short-segment-fraction", "0.15"]), 1)
-        # The default and the bounds themselves stay usable.
-        for value in ("0.05", "0.2", "10"):
+        # Above the shortest segment the gate can fire, so it is a real gate.
+        self.assertIn(
+            self.run_cli(["b.kicad_pcb", "--short-segment-mm", "20",
+                          "--max-short-segment-fraction", "0.15"]), (0, 2))
+        # A report-only run may measure with any positive definition: it
+        # grades nothing, so nothing can be vacuous.
+        for value in ("1e-9", "0.03", "0.2", "1000"):
             with self.subTest(value=value):
                 self.assertEqual(
                     self.run_cli(["b.kicad_pcb", "--short-segment-mm", value,

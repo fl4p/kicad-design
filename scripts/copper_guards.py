@@ -43,6 +43,11 @@ Calibration record:
   - vias: kimi3-r2 GND_BR pour-stitch sliver vias (half inside a pad's
     fill carve) FAIL at contact fractions 0.02/0.07 vs the 0.6 default
     threshold; qwen3p8max 66-via known-good board grades clean (2026-09).
+Dependencies: the MEASUREMENT paths need numpy and shapely, and
+`resistance` additionally needs scipy; the CLI boundary does not. An absent
+measurement stack exits 1 FAIL-CLOSED at the point of use, never a pass and
+never an import traceback (codex review of 7b00165).
+
   - resistance: gemini3p8flash incident board /AC_N Q1.3<->J_AC1.2
     measured 185.9 mOhm at 2 oz (the 0.4 mm autorouted neck), /GND_PWR
     plane 0.80 mOhm; grid convergence 0.2->0.05 mm moved a synthetic
@@ -50,17 +55,111 @@ Calibration record:
 """
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import re
 import sys
+import tempfile
 import time
 
-import numpy as np
-import shapely
-import shapely.affinity
-from shapely.geometry import Point, LineString, Polygon, box
-from shapely.ops import unary_union
+# The measurement code needs numpy/shapely (and scipy for `resistance`), but
+# the CLI boundary must not: a usage error that dies in an import never
+# reaches GuardArgumentParser and so escapes the exit contract, and the
+# repository's default test invocation is a stdlib interpreter. Import
+# lazily and refuse explicitly at the point of use.
+try:
+    import numpy as np
+    import shapely
+    import shapely.affinity
+    from shapely.geometry import Point, LineString, Polygon, box
+    from shapely.ops import unary_union
+    _GEOMETRY_IMPORT_ERROR = None
+except ImportError as _import_error:      # pragma: no cover - env dependent
+    np = shapely = None
+    Point = LineString = Polygon = box = unary_union = None
+    _GEOMETRY_IMPORT_ERROR = _import_error
+
+GEOMETRY_REQUIREMENT = "numpy and shapely (plus scipy for `resistance`)"
+
+
+def require_geometry():
+    """Fail closed when the measurement stack is absent.
+
+    An absent dependency is unevaluable, never a pass and never a crash
+    traceback that a caller might read as a tool bug rather than a verdict.
+    """
+    if _GEOMETRY_IMPORT_ERROR is not None:
+        raise SystemExit(
+            f"FAIL-CLOSED: this check needs {GEOMETRY_REQUIREMENT}, and "
+            f"importing it failed ({_GEOMETRY_IMPORT_ERROR}). An absent "
+            f"measurement stack is unevaluable, not a clean board")
+
+
+# --------------------------------------------------------- report ownership
+
+_REPORT_MARKER = "copper_guards"
+
+
+def _is_own_report(path):
+    """True only if `path` is absent, or is a JSON document this tool wrote.
+
+    The writer replaces its target outright, so it must never be aimed at a
+    file it does not own. Measured 2026-09-07: `vias BOARD --json BOARD`
+    exited 0 and replaced a 343,731-byte board with 6,687 bytes of JSON.
+    `kicad_route_shape.py` already held this contract; this guard did not.
+    """
+    if not os.path.exists(path):
+        return True
+    try:
+        with open(path, encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(document, dict) and document.get("tool") == _REPORT_MARKER
+
+
+def _board_digest(board):
+    """SHA-256 of the graded bytes, so a report cannot outlive its board."""
+    if not board or not os.path.isfile(board):
+        return None
+    digest = hashlib.sha256()
+    with open(board, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_report(path, check, board, verdict, payload):
+    """Atomically replace `path`. A crash leaves the pre-written placeholder,
+    never a stale clean report. Refuses a target this tool does not own."""
+    if not _is_own_report(path):
+        raise SystemExit(
+            f"FAIL-CLOSED: --json {path} exists and is not a "
+            f"{_REPORT_MARKER} report; refusing to overwrite a file this "
+            f"guard does not own")
+    document = {
+        "tool": _REPORT_MARKER,
+        "check": check,
+        "verdict": verdict,
+        "board": os.path.abspath(board) if board else None,
+        "board_sha256": _board_digest(board),
+        "pid": os.getpid(),
+        "rows": payload,
+    }
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    handle, temp = tempfile.mkstemp(dir=directory, prefix=".copper-guards-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(document, stream, indent=1, sort_keys=True)
+        os.replace(temp, path)
+    except BaseException:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
 
 CU_LAYERS = ("F.Cu", "B.Cu")
 
@@ -606,7 +705,7 @@ class GuardArgumentParser(argparse.ArgumentParser):
             f"line is unevaluable, not a verdict about the board")
 
 
-def main():
+def main(argv=None):
     ap = GuardArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -642,7 +741,30 @@ def main():
                       "from the current budget (I2R/drop bound), and pass "
                       "an explicit large bound for a diagnostic-only read")
 
-    args = ap.parse_args()
+    # Invalidate any pre-existing report BEFORE argparse can exit: a bad
+    # argument used to leave a previous all-PASS artefact standing (codex
+    # review of 7b00165). Refuse a target we do not own first, so a
+    # malformed command line can never damage the board it names.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    target = None
+    for index, token in enumerate(argv):
+        if token == "--json" and index + 1 < len(argv):
+            target = argv[index + 1]
+        elif token.startswith("--json="):
+            target = token.split("=", 1)[1]
+    if target:
+        if not _is_own_report(target):
+            raise SystemExit(
+                f"FAIL-CLOSED: --json {target} exists and is not a "
+                f"{_REPORT_MARKER} report; refusing to overwrite a file "
+                f"this guard does not own")
+        try:
+            write_report(target, None, None, "unevaluable",
+                         {"error": "guard did not complete (pre-parse)"})
+        except (SystemExit, OSError):
+            pass
+
+    args = ap.parse_args(argv)
 
     def pos_finite(val, name, lo=0.0, hi=None):
         if val is None or not math.isfinite(val) or val <= lo or \
@@ -659,18 +781,21 @@ def main():
     if args.cmd == "vias":
         pos_finite(args.min_zone_frac, "--min-zone-frac", lo=0.0, hi=1.0)
         pos_finite(args.min_contact_mm, "--min-contact-mm", lo=0.0, hi=5.0)
+        require_geometry()
         board = parse_board(args.board)
         nets = set(norm_net(n) for n in args.net) if args.net else None
         findings, rows = check_vias(board, nets, args.min_zone_frac,
                                     args.min_contact_mm, args.verbose)
         if args.json:
-            json.dump(rows, open(args.json, "w"), indent=1)
+            write_report(args.json, "vias", args.board,
+                         "fail" if findings else "pass", rows)
         print(f"vias graded: {len(rows)//2} ({len(rows)} via-layer "
               f"subjects), FAIL rows: {len(findings)}, threshold "
               f"{args.min_zone_frac} ({time.time()-t0:.1f}s)")
         sys.exit(2 if findings else 0)
 
     if args.cmd == "resistance":
+        require_geometry()
         pos_finite(args.grid, "--grid", lo=0.0, hi=5.0)
         pos_finite(args.oz, "--oz", lo=0.0, hi=20.0)
         pos_finite(args.via_mohm, "--via-mohm", lo=0.0, hi=100.0)

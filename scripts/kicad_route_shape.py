@@ -81,14 +81,6 @@ import os
 import subprocess
 import sys
 
-# `--short-segment-mm` defines a metric rather than grading one, so it needs
-# its own domain: the floor is below any manufacturable segment KiCad's own
-# minimum track width admits, the ceiling above any length a "short" segment
-# could plausibly mean. Neither bound is corpus-calibrated -- they exist to
-# reject a vacuous metric, not to express a routing opinion.
-_MIN_SHORT_SEGMENT_MM = 0.05
-_MAX_SHORT_SEGMENT_MM = 10.0
-
 _OK_LINE = "ROUTE-SHAPE-OK"
 _NOT_GRADED_LINE = "ROUTE-SHAPE-REPORTED-NOT-GRADED"
 _FAIL_LINE = "ROUTE-SHAPE-FAIL"
@@ -291,6 +283,7 @@ def measure(board_path, short_segment_mm, layer_directions):
         "segments": len(segments),
         "copper_length_mm": round(sum(lengths), 2),
         "segment_length_mm": {
+            "min": round(lengths[0], 5),
             "median": round(_percentile(lengths, 0.5), 3),
             "mean": round(sum(lengths) / len(lengths), 3),
             "p90": round(_percentile(lengths, 0.9), 3),
@@ -557,10 +550,11 @@ def build_parser():
              "have no declared direction and their conformance is unevaluable",
     )
     parser.add_argument("--short-segment-mm", type=float, default=0.2,
-                        help=f"segments shorter than this count as short "
-                             f"(default 0.2, allowed range "
-                             f"[{_MIN_SHORT_SEGMENT_MM}, "
-                             f"{_MAX_SHORT_SEGMENT_MM}] mm)")
+                        help="segments shorter than this count as short "
+                             "(default 0.2 mm). Must be finite and > 0, and "
+                             "when a short-segment gate is graded it must "
+                             "also exceed the board's shortest segment, or "
+                             "the metric is vacuous for that board")
     parser.add_argument("--max-vias-on-any-net", type=float,
                         help="fail if any single net carries more vias than "
                              "this; the per-net maximum is used because the "
@@ -630,24 +624,18 @@ def main(argv=None):
         return _fail_unevaluable(
             f"--short-segment-mm must be finite and positive, got "
             f"{args.short_segment_mm}", args.json_out, args.board)
-    # This parameter DEFINES the short-segment metric, so it dilutes both
-    # short-segment gates without touching the board: `--short-segment-mm
-    # 1e-9` turned a measured `short_segment_fraction 1.000 vs limit 0.15`
-    # FAIL into ROUTE-SHAPE-OK (codex review of 7a99de9). The threshold
-    # range check below rejects a gate that can never fire; a metric
-    # definition that can never fire is the same configuration error one
-    # level up. Below the floor no manufacturable segment is short; above
-    # the ceiling essentially all copper is, and neither is a gate.
-    if not (_MIN_SHORT_SEGMENT_MM <= args.short_segment_mm
-            <= _MAX_SHORT_SEGMENT_MM):
-        return _fail_unevaluable(
-            f"--short-segment-mm={args.short_segment_mm} is outside "
-            f"[{_MIN_SHORT_SEGMENT_MM}, {_MAX_SHORT_SEGMENT_MM}] mm; it "
-            "defines the short-segment metric, so a value no real segment "
-            "can fall below (or one nearly all copper falls below) makes "
-            "both short-segment gates vacuous -- a configuration error, not "
-            "a verdict about the board",
-            args.json_out, args.board)
+    # `--short-segment-mm` defines the metric rather than grading one, so it
+    # can dilute both short-segment gates without touching the board:
+    # `1e-9` turned a measured 1.000-vs-0.15 FAIL into ROUTE-SHAPE-OK
+    # (codex review of 7a99de9). A FIXED window was the wrong remedy and is
+    # gone: a review of 7b00165 found a real board carrying four segments
+    # below 0.05 mm (0.01437 mm shortest, on 0.2 mm copper), so a constant
+    # floor refuses a legitimate definition -- subdividing a track does not
+    # make its copper unmanufacturable, and segment length is not track
+    # width. The ceiling was reversed outright: a threshold nearly every
+    # segment falls below makes the fraction maximally STRICT, not vacuous.
+    # Vacuity is a property of the board, not of a constant, so it is
+    # checked against the measured minimum after `measure()` instead.
     for name, value, lo, hi, integral in (
         ("--max-vias-on-any-net", args.max_vias_on_any_net, 0.0, None, True),
         ("--max-full-stack-via-fraction", args.max_full_stack_via_fraction, 0.0, 1.0, False),
@@ -717,6 +705,26 @@ def main(argv=None):
             _write_json(args.json_out, args.board, "reported", metrics)
         print(f"{_NOT_GRADED_LINE}: metrics only, no threshold applied")
         return 0
+
+    # Vacuity is a property of THIS board, not of a constant. A
+    # short-segment gate whose definition sits at or below the board's
+    # shortest segment can never select anything, so its fraction is
+    # identically 0 and its count identically 0: the gate cannot fail
+    # whatever the routing does. That is a configuration error, not a clean
+    # board. (Checked only when such a gate is actually graded -- a
+    # report-only run may legitimately measure with any definition.)
+    grades_short = (args.max_short_segment_fraction is not None
+                    or args.max_short_segments is not None)
+    shortest = metrics.get("segment_length_mm", {}).get("min")
+    if grades_short and shortest is not None \
+            and args.short_segment_mm <= shortest:
+        return _fail_unevaluable(
+            f"--short-segment-mm={args.short_segment_mm} is at or below this "
+            f"board's shortest segment ({shortest} mm), so no segment can "
+            f"ever count as short and both short-segment gates are "
+            f"identically 0 -- a gate that cannot fail is a configuration "
+            f"error, not a verdict about the board",
+            args.json_out, args.board)
 
     findings, graded = grade(metrics, args)
     if not graded:
