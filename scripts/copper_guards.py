@@ -592,8 +592,22 @@ def check_resistance(board, net, pair_a, pair_b, grid=0.2, oz=2.0,
 
 # --------------------------------------------------------------------- cli
 
+class GuardArgumentParser(argparse.ArgumentParser):
+    """argparse's default usage-error exit code is 2, which collides with
+    this guard's FAIL=2; a malformed invocation is unevaluable, not a board
+    that failed its gate. Ported from `loop_inductance_guard.py`, which
+    fixed the same collision. `add_subparsers` defaults `parser_class` to
+    `type(self)`, so `vias` and `resistance` inherit this."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        raise SystemExit(
+            f"FAIL-CLOSED: bad invocation: {message} - a malformed command "
+            f"line is unevaluable, not a verdict about the board")
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
+    ap = GuardArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
