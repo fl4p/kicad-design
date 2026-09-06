@@ -199,7 +199,7 @@ def kicad_holding(path):
         exists = lock.exists()
         parent_ok = parent.is_dir() and os.access(parent, os.R_OK)
     except OSError as e:
-        return UNKNOWN, "cannot stat %s (%s)" % (lock, e)
+        return UNKNOWN, ("cannot stat %s (%s); a read that failed is not an observation" % (lock, e))
 
     if exists:
         return _read_lock(lock)
