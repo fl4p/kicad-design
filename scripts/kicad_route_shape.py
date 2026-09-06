@@ -525,8 +525,22 @@ def _run_worker(interpreter, argv, timeout):
     return proc.returncode
 
 
+class _GuardArgumentParser(argparse.ArgumentParser):
+    """argparse's default usage-error exit code is 2, which collides with
+    this tool's FAIL=2; a malformed command line is a bad CLI value, which
+    the exit contract above already places at 1. Ported from
+    `loop_inductance_guard.py`. The pre-parse invalidator in main() has
+    already replaced any `--json` target with an unevaluable report by the
+    time this fires."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        raise SystemExit(
+            f"{_UNEVALUABLE_LINE}: bad invocation: {message}")
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = _GuardArgumentParser(
         description="Routing-shape audit for a saved .kicad_pcb",
         # The pre-parse invalidator in main() matches the literal `--json`
         # only. With abbreviation on, `--jso stale.json --bogus` was accepted

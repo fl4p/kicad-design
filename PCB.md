@@ -130,6 +130,58 @@ or in the same channel are the congestion evidence above, so return to placement
 layer strategy. Do not substitute this check for DRC, and do not weaken its unevaluable path — an
 empty or unloadable board is a failed audit, not a clean one.
 
+The second executable backstop is DC copper capacity, and it is part of the Completed-PCB gate on
+any board with declared power or high-current paths: geometric DRC and connectivity prove nothing
+about current capacity — an electrically clean DRC is fully compatible with copper that burns.
+**Declared is defined by the completion record, and the declaration is itself gated:** enumerate,
+from the design's current budget, every net whose worst-case current exceeds what the default
+track width carries within the project's temperature-rise budget; for each such net record the
+worst-case RMS current, the derived resistance bound, and terminal pairs covering **every
+source-to-load branch** — a multi-terminal net needs a pair per branch (a bank of N bulk
+capacitors is N branches, not one), and a convenient single pair does not cover a net. On a
+power-electronics board an empty enumeration is a missing enumeration, never a clean one. Then
+run `scripts/copper_guards.py resistance` on the saved **filled** board for each recorded pair
+(`--net <exact-net-name> --pair SRC.PAD LOAD.PAD`, `--oz` from the board's real stackup) with the
+recorded bound as `--max-mohm` — an I²R dissipation or voltage-drop bound at the worst-case RMS
+current, never a number chosen to pass — and `copper_guards.py vias` on the same nets. The tool
+enforces its own preconditions (mandatory threshold, finite in-domain parameters, exact net
+names, 2-layer scope, per-net fill freshness, zero-subject refusal): an unevaluable run is a
+failed gate, and its refusals are correctness, not friction. Upstream
+of the guard, never hand power nets to an autorouter at the global or default signal width: name
+them with explicit per-net widths (KRT `--power-nets '<pattern>' --power-nets-widths <mm>`) or own
+them as critical pours in generator source — the resistance guard then verifies that the intent
+survived to the saved copper, including necks the router or zone placement introduced. (Measured
+incident, 2026-09-04: a 500 W / 1500 W-burst inverter bridge was declared complete with zero
+electrical DRC findings (cosmetic silk findings open) while every power net was autorouted at a
+global 0.4 mm and the bus pour stopped 20 mm
+short of the FET pads — one AC path measured 185.9 mΩ, ~21 W dissipation at its 10.7 A burst RMS
+current, on a board whose every geometric gate passed.)
+
+The third backstop is **loop inductance**, for the copper whose failure mode is di/dt, not I²R:
+half-bridge commutation loops, gate-drive loops and their common-source inductance, and snubber
+mount loops. DC resistance and width prove nothing about these — a wide, low-resistance loop can
+still ring destructively if its area is large. When the project's loop catalog
+([`POWER.md`](POWER.md)) or a datasheet ringing/overshoot analysis assigns a numeric loop-L
+budget, gate it with `scripts/loop_inductance_guard.py` on the saved filled board: it drives the
+validated KiCad→FastHenry extractor (`dcdc-tools/parasitics`, `$DCDC_PARASITICS`) and applies
+explicit nH budgets (`--max-nh L_loop=<nH> csi_hs=<nH> probe:<name>=<nH> ...`; snubber and other
+mount loops are `probe_ports` REF.PAD pairs). Budgets are derived values the caller must record —
+the guard refuses to run without them, fails any budget whose quantity the extraction did not
+produce, and accepts a reused extraction only when its recorded board hash matches the board
+being gated. A coarse mesh is adequate for L (measured drift pitch 3.0→2.0 mm: 0.1 % on a 28.7 nH
+commutation loop); resistance from this tool is mesh-sensitive — the DC-R gate above stays with
+`copper_guards.py`. **Declining to derive a budget does not skip this gate.** On any board with a
+hard-switched half-bridge or other declared high-di/dt loop, deriving the loop-L budgets
+(L ≤ V_margin/(di/dt) with the device dv/dt, overshoot margin and ring analysis per
+[`POWER.md`](POWER.md)) is itself part of the completion record. An inapplicability record is
+valid only when it enumerates each candidate loop considered (endpoints by refdes/pad), states
+per loop why no numeric budget applies, and names the analysis or decision it rests on — a bare
+"no budget defined" note leaves the gate open, and a budget without its recorded derivation
+(source, formula, values) is a number chosen to pass, not a bound. Bind the extractor config
+(committed YAML; `meta.extract_config_sha256`) in the same record so the gated quantity and the
+budgeted loop are demonstrably the same loop, and gate `*_ring` quantities when the budget comes
+from a ring-frequency analysis.
+
 Represent board-level routed slots and cutouts as closed `Edge.Cuts` contours under a declared
 mechanical authority. Direct board drawings are valid; an intentional board-only footprint is also
 valid when it owns a reusable local contour, is marked not-in-schematic, is protected from
@@ -142,7 +194,7 @@ Classify the requested outcome before routing:
 | outcome | permissible residual |
 |---|---|
 | **Placement or routing draft** | May retain ratsnests and named DRC findings when the user explicitly requested a draft; enumerate them and do not call the board complete or fabrication-ready |
-| **Completed PCB implementation** | Zero electrical unconnected items; zero unresolved applicable electrical, copper, outline or other completion-critical DRC findings when graded against the authoritative rule map, regardless of an accidental or unapproved warning/ignore severity; a valid closed outline; applicable schematic parity and project-critical route/return/guard audits passing; every inapplicable check, exclusion or approved waiver explicit and scoped |
+| **Completed PCB implementation** | Zero electrical unconnected items; zero unresolved applicable electrical, copper, outline or other completion-critical DRC findings when graded against the authoritative rule map, regardless of an accidental or unapproved warning/ignore severity; a valid closed outline; applicable schematic parity and project-critical route/return/guard audits passing, including the DC copper-capacity backstop (`copper_guards.py resistance`/`vias`) on every declared power path and the loop-inductance backstop (`loop_inductance_guard.py`) wherever a numeric loop-L budget exists; every inapplicable check, exclusion or approved waiver explicit and scoped |
 | **Fabrication release** | Completed PCB gate plus the release evidence in [`RELEASE.md`](RELEASE.md), relevant physical-sample and enclosure decisions, fabrication outputs and bound reports |
 
 An operational limit—router pass count, time budget, flattening search progress, tool failure or
@@ -290,7 +342,11 @@ A uniform trace width and clearance can remain routine when those dimensions are
 the whole requirement and the exact class/style is checked after import. If the
 requirement is really current density, temperature rise, impedance, inductance,
 loop area, creepage, or return continuity, DRC-clean width/spacing is insufficient
-and the route is critical. For thermal cases, apply [`THERMALS.md`](THERMALS.md).
+and the route is critical. For current-carrying nets this is not advisory: route
+them at named per-net widths (KRT `--power-nets`/`--power-nets-widths`) or as
+generator-owned pours, and close them with the DC copper-capacity backstop
+(`copper_guards.py resistance`) from the route-readiness section before the
+Completed-PCB gate. For thermal cases, apply [`THERMALS.md`](THERMALS.md).
 For generated boards, “manual” means deliberately authoring the route in generator
 source—not editing the generated `.kicad_pcb`.
 

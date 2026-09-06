@@ -393,6 +393,21 @@ class CliContract(unittest.TestCase):
             self.run_cli(["b.kicad_pcb", "--short-segment-mm", "0",
                           "--max-vias-on-any-net", "2"]), 1)
 
+    def test_usage_errors_are_unevaluable_not_a_failed_gate(self):
+        """argparse exits 2 by default, which collides with FAIL=2: a typo in
+        a CI wrapper then reads as a board that failed its threshold. The
+        exit contract already places a bad CLI value at 1."""
+        import subprocess
+        for argv in (["--bogus-flag"],
+                     ["--max-vias-on-any-net", "notanumber"],
+                     []):
+            with self.subTest(argv=argv):
+                proc = subprocess.run(
+                    [sys.executable, audit.__file__] + argv,
+                    capture_output=True, text=True)
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("ROUTE-SHAPE-UNEVALUABLE", proc.stderr)
+
     def test_vacuous_short_segment_definition_is_unevaluable(self):
         """`--short-segment-mm` defines the metric, so it dilutes both
         short-segment gates without touching the board: 1e-9 turned a
