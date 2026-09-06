@@ -88,6 +88,34 @@ find out why.
    isolated B.Cu fragments took 24 → 22; removing every stitch gave 23. Single measurement, kept
    as a hypothesis in the write-up, not promoted to a rule.
 
+8. **A fixed pass budget is not convergence (measured 2026-09-06, fable session, reduced BOM: 100
+   footprints, 85 nets).** Recipe C runs KRT's `--keep-input-copper` residue stage once. Re-run
+   repeatedly on the same board (`iterate.sh`), signal opens per pass:
+   `b39base` (untouched generator) 24 19 16 16 17 16 18 16 17 22 17 18 17; `b39c` (standing
+   columns) 22 19 19 19 17 17 17 17 17 17; `b39no` (neck rewrite alone) 46 24 21 21 19 18 23 17;
+   `b39n1` (both) 42 17 17 20 17 23 22. At two passes the variants span 22–46; at plateau all four
+   sit at 16–17; the control's own band is 16–22. My regrade (ZONE_FILLER refill, canonical
+   project, canonical verifier): fable `b39base1` 24 signal / 2 islands with the identical signal-net
+   set to host's `rt-bom2` (same seed, same recipe, independent harness); `b39base3` and
+   `b39base4` both 16 signal / 4 islands, copper clean apart from one `hole_clearance` inherited
+   from the seed, 57/57 authored items present and locked. Fable's own write-up:
+   `~/dev/ee/hw/o2-probe-2layer-fable-b39/RESULTS-BOM39.md`. Consequence recorded in `ROUTING.md`:
+   every two-pass A/B in the file (escapes, rotation, row alignment, baseline deltas) is a
+   fixed-budget reading, not a plateau result.
+9. **Signal opens vs pour islands (measured 2026-09-05, fable session).** One Freerouting board
+   graded 16 signal / 36 islands / 52 total under `pcbnew.ZONE_FILLER` and 16 / 26 / 42 under
+   `kicad-cli --refill-zones`; another 21 / 5 / 26 under both. Signal opens are refill-invariant,
+   islands are not. Codex's `final-zero-signal` (113 footprints) then reached 0 signal opens with
+   43 islands (my harness: 47) and reported the task complete; its later `final-bom39-zero`
+   (100 footprints, 2026-09-06 01:34) grades in my harness at **0 signal / 3 islands / no copper
+   violations** (0 / 0 / 0 under codex's `kicad-cli` refill), with the same four canonical
+   `/CELL_WE` items missing as before (generator byte-identical to `final-zero-signal`'s), plus
+   declared hand edits: J105/J106 swapped to no-relief wire footprints, C34 moved 0.8 mm, three
+   power nets hand-detoured. It is the only board that meets the brief's literal gate, and it does
+   so with a rewritten electrometer topology that is the owner's decision. Pi's `b39clean-best`
+   (00:28): 15 signal / 6 islands, dangling only, 57/57 canonical items intact — its first board
+   to pass the canonical verifier. Host's `rt-bomrot2` (two passes, 19 rotated): 20 / 5, 57/57.
+
 ## Not promoted
 
 - Pi's placement ideas (U8 rotated 270° to face U7; WE_BUF filter R37/C30 moved under U8 pin 5

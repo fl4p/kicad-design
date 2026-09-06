@@ -312,6 +312,12 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    run was not.
    ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
    §1.)
+6. **`--keep-input-copper` is re-runnable, and a recipe that runs it a fixed number of times
+   stops wherever that budget lands.** Measured: a staged recipe's two passes read 24 unconnected,
+   one more pass read 16, and a variant reading 46 at two passes read 17 at eight. Iterate under a
+   stopping rule declared in advance, keep the best board rather than the last, and never A/B two
+   variants on their two-pass numbers — [`ROUTING.md`](ROUTING.md)'s convergence rule; the
+   sequences are in [`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8.
 
 ## Inputs required for a promotable run
 

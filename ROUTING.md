@@ -64,19 +64,16 @@ topological reading of the same board, because it is what predicts routing effor
 - **Read the long ratsnest lines as placement defects, not routing work.** A line from an IC to
   its own decoupling or reference part crossing the board is already a finding
   ([`PCB.md`](PCB.md)); so is a bundle whose lines all cross the same neck.
-- **When you consolidate passives into a row, align the shared pads.** Standing a row of 0603s
-  up (see the rotation result below) frees lanes, but if two parts that share a net end up with
-  that net's pads at opposite ends of the row, every foreign trace the router later accepts
-  between them is a wall. The router then reports two adjacent pads only 1.75 mm apart (centre
-  to centre, the row pitch) as "boxed in", and a finer grid does not fix it — one session's
-  isolated 0.09 mm / 0.05 mm probe on the simplest such gap still failed, which is what
-  identifies the blocker as topology rather than resolution. Flip alternate parts so shared pads
-  face each other, order a divider chain as a chain, and pre-author the short row-local links
-  before area routing. Measured once, by one agent, on the o2-probe: the unrouted seed went
-  173 → 161 opens on topology alone, and the routed result 26 → 24 with two copper-edge findings
-  still open (the later copper-clean 24 came from a separate change to the guard copper)
-  ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
-  §5). Not replicated; treat the rule as a design check, the numbers as one board's.
+- **When you consolidate passives into a row, align the shared pads.** Standing a row of chip
+  passives up (see the rotation result below) frees lanes, but if two parts that share a net end
+  up with that net's pads at opposite ends of the row, every foreign trace the router later
+  accepts between them is a wall. The router then reports two pads one row pitch apart as
+  "boxed in", and a finer routing grid does not fix it — an isolated fine-grid probe on the
+  simplest such gap still failed, which is what identifies the blocker as topology rather than
+  resolution. Flip alternate parts so shared pads face each other, order a divider chain as a
+  chain, and pre-author the short row-local links before area routing. Measured once, by one
+  agent, as a two-pass reading (see the convergence rule below); not replicated. Treat the rule
+  as a design check and the measurement as one board's ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §5).
 - **Fix the aspect-ratio trap explicitly.** On a long, narrow board the layer whose preferred
   direction runs across the short axis has almost no run length to offer, so the router pays vias
   to escape it. Freerouting's own geometry heuristic makes this concrete: it seeds preferred
@@ -157,16 +154,22 @@ edge findings — then locked and handed to the backend. Only the escapes differ
 | escapes | stubs | unconnected items |
 |---|---:|---:|
 | none | 0 | **31** |
-| U7 + U8 only, where package geometry forbids anything else | 21 | 33 |
-| U7 + U8 + U6 | 68 | 37 |
+| the two finest-pitch packages only, where package geometry forbids anything else | 21 | 33 |
+| those two plus the third IC | 68 | 37 |
 
 **Both escape sets cost connectivity, at a similar rate per stub** — 0.095 and 0.088
 unconnected items per stub. Two nonzero treatments cannot establish that the relationship is
 linear, that each individual stub carries a cost, or that the mechanism below is the operative
 one rather than something specific to these packages; what they show is that the aggregate
 penalty was roughly proportional across the two sets measured. There was no subset that helped, *including the two packages where
-radial escape is the only physically possible option*: U8's 0.32 mm pads on 0.5 mm pitch leave an
-0.18 mm gap against the 0.48 mm a track needs, and U7's exposed pad fills its body.
+radial escape is the only physically possible option*: one package's 0.32 mm pads on 0.5 mm pitch
+leave an 0.18 mm gap against the 0.48 mm a track needs, and the other's exposed pad fills its
+body.
+
+Every count in this table is a fixed two-pass reading. The convergence rule below was measured
+after it, on a board where a variant reading 46 at two passes reached 17 at plateau, so the table
+shows that escapes did not help *at that budget*; re-run both arms to plateau before citing it as
+more.
 
 The proportionality is suggestive, not diagnostic. If the authored topology were merely *wrong*,
 you would expect the cost to concentrate on the pads that were sent the wrong way; instead the
@@ -244,17 +247,17 @@ things follow, both measured on one board in one day
 
 - **A change to the skeleton is a design change, whoever makes it and however it is made.** Of
   three candidate boards produced for the same brief, two had altered the locked critical copper.
-  One agent edited the generator (`critical_routes.py`, 228 diff lines) to open a 1 mm F.Cu
-  "doorway" through the guard-replica wall so a blocked pin could escape, and reported all
-  authored items intact — which was true against *its* generator. The other left the generator
-  untouched and straightened a locked electrometer trunk directly on the board, so the generator
+  One agent edited the generator to open a 1 mm doorway through a guard wall so a blocked pin
+  could escape, and reported all authored items intact — which was true against *its* generator.
+  The other left the generator untouched and straightened a locked trunk of the guarded net
+  directly on the board, so the generator
   and the board silently disagreed. Both boards routed better for it. Neither change was wrong to
   try; both are decisions for the person who owns the leakage budget, and both were reported as
   routing results. Surface a skeleton diff as its own finding, before the unconnected count.
 - **Verify the skeleton against the canonical generator, never against whatever generator sits
-  beside the board.** A `verify_critical.py` that does `from critical_routes import
-  CRITICAL_TRACKS` in its own directory certifies the board against the copy of the generator that
-  produced it, so a modified generator always passes its own board. Run the verifier from the
+  beside the board.** A verifier that imports the expected geometry from the generator in its own
+  directory certifies the board against the copy of the generator that produced it, so a modified
+  generator always passes its own board. Run the verifier from the
   upstream project checkout, or make it take the generator path as an explicit pinned input and
   record that path in the result. This is [`GUARDS.md`](GUARDS.md)'s source-of-truth rule: the
   expectation must come from the authority, not from the artefact's neighbourhood. Check the layer
@@ -355,7 +358,7 @@ scripts/kicad_route_shape.py BOARD.kicad_pcb \
 half that is worse, because it produces a plausible board instead of a bad report: a router
 invoked on a board with no same-stem `.kicad_pro` resolves clearances from the *stock* netclass.
 KiCadRoutingTools says so in its own banner — "CLI and GUI runs will route DIFFERENT copper from
-this same board" — and it is right. Measured 2026-09-05 on the o2-probe: the identical recipe on a
+this same board" — and it is right. Measured on one board: the identical recipe on a
 byte-identical seed produced **30 unconnected items routed without the project and 39 with it**
 (the stock netclass gave hole-to-hole 0.2 mm against the board's 0.25 mm, and no edge constraint).
 Every earlier number in this file's own experiment log was collected the first way, so the
@@ -411,45 +414,45 @@ the same runner, and compare copper produced the same way
 **A router's own incomplete count is not an unconnected count, on any backend.**
 [`AUTOROUTING.md`](AUTOROUTING.md) says this of KRT's `JSON_SUMMARY`; it is equally true of
 Freerouting's per-pass `N incompletes across M items` lines. One scout on a bare placement ran
-178 → 51 → 37 → 34 → 31 → 25 → 29 → 23 → 22 → 21 → 24 → 21 → 20 → 17 → 18 → 18 → 16 → 19 →
-16 → 16 over twenty passes (`router-logs/freerouting.log`) — a live search count that oscillates
-— and when its SES was imported and the board refilled and graded by `kicad-cli`, the same run
+178 incompletes in its first pass and oscillated between 16 and 19 over passes 17–20 — a live
+search count — and when its SES was imported and the board refilled and graded by `kicad-cli`, the same run
 read **42 unconnected pads**. Sixteen and forty-two are the same board. Quote the progress line
 as what it is, and never beside a KiCad-graded number in the same table.
 
-**Equal pass count is not equal convergence.** A router that accepts its previous copper as input
-defines an iterative search trajectory, and its objective can improve, regress, then recover. Treat
-one- or two-pass readings as scouts, not A/B verdicts. Before claiming that a placement, authored
-copper topology, or cost setting wins:
+**A fixed pass budget is not convergence, and a two-pass A/B is a scout.** A router that accepts
+its previous copper as input (KRT's `--keep-input-copper`) defines a search that can simply be run
+again, and a recipe that stops after a fixed number of such passes reports wherever that budget
+happened to land. Measured on one board, one recipe, one seed: two passes read 24 unconnected and a
+third read 16; a variant that read 46 at two passes read 17 at eight; four variants spanning 22 to
+46 at two passes all sat at 16–17 at plateau; and the control's own trajectory over thirteen passes
+wandered 16 → 22 → 17, so the sequence is not monotone ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8). The two-pass
+readings ranked one variant as catastrophic and another as a small win; at plateau nothing
+separated any of them from the untouched seed. So:
 
-1. Hold seed, router/tool versions, rules, refill path, and per-pass command constant within every
-   arm.
-2. Choose the same pass budget and stopping rule before running the arms (for example, stop after a
-   fixed maximum or after a stated number of passes without a new best).
-3. Record the complete objective sequence and retain the best valid artifact, not merely the last.
-4. If the arms' best results overlap the control's own within-trajectory range, report no measured
-   separation. Do not turn a transient early reversal into a layout conclusion.
+1. Hold seed, tool versions, rules, refill path and per-pass command constant within every arm.
+2. Declare the pass budget and stopping rule before running the arms — a maximum, or N passes
+   without a new best — and apply it to every arm, the control included.
+3. Record the whole sequence and keep the **best** valid board, not the last.
+4. If an arm's best lies inside the control's own band, report no separation.
 
-This is separate from repeated grading of one saved board: its connectivity may be deterministic
-while the router's evolving sequence is non-monotone. A comparison is not mature merely because
-both arms ran the same small number of passes.
+This downgrades every A/B in this file whose evidence is an unconnected count from a fixed one- or
+two-pass recipe — the escape table, the rotation-in-place result, the row-alignment result and the
+baseline deltas. Each was measured honestly and none has been re-run to plateau; read them as "did
+not help at that budget" until someone does. Repeated *grading* of one saved board is a different
+question — that is deterministic (the geometry-hash paragraph above); the router's sequence is not.
 
-**Keep comparison metrics and the completion gate separate.** A DRC aggregate may itself combine
-different mechanisms. When evidence splits it, retain and report both the component counts and the
-original total. Use only the stable, routing-owned component to compare routing strategies, but do
-not substitute that comparison score for [`PCB.md`](PCB.md)'s Completed-PCB predicate. In
-particular, refill-dependent unconnected records between same-net zone components are not signal
-routing results, yet they remain unfinished electrical CAD until stitched, eliminated by valid zone
-topology, or explicitly removed from the project acceptance criteria by its owner. A statement that
-changes how results are ranked is not such a waiver.
-
-Before declaring completion, copy the task's original definition of done into a fail-closed ledger
-and evaluate every clause from the final artifacts. Later metric-semantic findings go in a separate
-amendment/history section. Any false or unevaluable clause makes the task-level verdict
-`INCOMPLETE`, even when a named routing sub-phase is complete. This prevents a technically correct
-reclassification from silently weakening the requested outcome; the measured failure and required
-report shape are recorded in
-[`reviews/2026-09-05-ranking-metric-is-not-completion.md`](reviews/2026-09-05-ranking-metric-is-not-completion.md).
+**Rank on signal opens; the gate is still the total.** KiCad's `unconnected_items` mixes two
+quantities: opens between pads and tracks, which are deterministic for a given board, and same-net
+zone-island pairs, which depend on which refill produced the polygons — one board graded 26 islands
+under `kicad-cli --refill-zones` and 36 under `pcbnew.ZONE_FILLER` while its signal count stayed
+at 16 (§9 of the evidence file). Split the count, rank routing strategies on the signal component,
+and report both beside the total. The split changes the ranking, not the definition of done:
+islands are unfinished copper until stitched or removed by zone topology, and a criterion written
+as "zero unconnected items" is met only when the total is zero, unless its owner amends it in
+words. A session that reached zero signal opens and called the task complete "under the corrected
+metric" was wrong to; write "signal routing complete, board incomplete" and carry the original
+criterion into the final report as its own line
+([`reviews/2026-09-05-ranking-metric-is-not-completion.md`](reviews/2026-09-05-ranking-metric-is-not-completion.md)).
 
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —
@@ -499,7 +502,7 @@ of one recipe gave the identical unconnected count):
 | the 2 parts a sensitivity analysis named as gating | AFE row −6 → **+7 lanes** (16 → 29) | **63** |
 
 Both "improvements" made the board route worse, and the second was the *targeted* one — a
-per-part sensitivity analysis that named R40 (+9 lanes) and R17 (+4) out of 23 candidates, moved
+per-part sensitivity analysis that named two resistors (+9 and +4 lanes) out of 23 candidates, moved
 only those two, and doubled the row's lane count. Connectivity got worse anyway.
 
 So, on the evidence of these two interventions on this one board and backend: **a lane gain is
@@ -513,8 +516,9 @@ without routing the board.
 **A third intervention on the same board then improved both**, which is why the rule above is
 about the inference and not about capacity itself. Rotating 19 flat B.Cu passives 90 degrees in
 place — no part moved to a new location, mean displacement 0.68 mm — took B.Cu persistent lanes
-from 2 to 12 through y=70..76 and unconnected items from **39 to 25**, the only intervention here
-that ever improved connectivity, and repeatable to identical copper.
+from 2 to 12 through the tight band and unconnected items from **39 to 25** at the recipe's two-pass
+budget, the only intervention here that improved connectivity at that budget, and repeatable to
+identical copper. It has not been re-run to plateau (convergence rule above).
 
 The difference worth carrying is *what the intervention did to the pads*:
 
@@ -536,12 +540,12 @@ Rotation is not free, and two of its costs are invisible to a capacity metric:
 
 - **A pad that terminates authored copper cannot be rotated.** Turning the part moves the pad out
   from under the track endpoint. Nothing overlaps, so no clearance or courtyard check fires; the
-  net simply comes apart. Rotating all 24 candidates silently disconnected `/GUARD_REPLICA` — the
-  guard rails carrying the AFE's leakage budget — and only a diff of unconnected counts against
+  net simply comes apart. Rotating all 24 candidates silently disconnected the guard net carrying
+  the front end's leakage budget, and only a diff of unconnected counts against
   the unrotated seed caught it. Exclude any candidate whose pad contains a track endpoint.
 - **Courtyards are not a copper model.** They are not even self-consistent: two comparable 0603
   lands on this board declare 1.91 x 1.01 and 3.05 x 1.55. Rotating against courtyards alone put
-  four shorts on `/VA_MON`, `/GUARD_REPLICA`, `/CELL_WE` and `/RE_BUF`. Union the courtyard with
+  four shorts across four nets, two of them guard-critical. Union the courtyard with
   the pad copper plus clearance, and include existing tracks and vias as obstacles — with real
   segment geometry, since a 45-degree track's bounding box claims its whole diagonal envelope and
   will exclude parts that in fact have room.

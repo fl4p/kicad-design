@@ -384,18 +384,15 @@ electrical ratsnests or true copper DRC failures, continue by revising placement
 or report it blocked with exact evidence—never report it complete merely because a bounded run
 ended.
 
-Freeze the requested acceptance criteria separately from experiment-ranking metrics. Later evidence
-may correct a metric's meaning, split an aggregate into components, or show that one component is
-noisy; none of those changes waives or replaces a completion criterion unless the user explicitly
-amends that criterion. Keep the original criterion and every newly separated component visible in
-the final ledger. If any required item is false or unevaluable, the overall result is incomplete;
-name a finished sub-phase only as a sub-phase, never as task completion.
-
-When comparing iterative routing strategies, do not rank bounded early passes as though they were
-converged. Apply the same predeclared pass budget/stopping rule to every arm, record the full
-non-monotone sequence, retain the best valid artifact, and report no separation when the arms'
-best results sit inside the control's own trajectory range. Read [`ROUTING.md`](ROUTING.md) for the
-measurement contract.
+Freeze the requested acceptance criteria before comparing candidates, and keep them separate from
+the metrics used to rank candidates. Later evidence may split an aggregate, correct a metric's
+meaning or show that one component is noisy; that changes the ranking, never the criterion, unless
+the user amends the criterion in words. Report the original criterion and every separated component
+in the final result; any required item that is false or unevaluable makes the result incomplete,
+and a finished sub-phase is named as a sub-phase. When comparing iterative routing strategies, apply
+one predeclared pass budget and stopping rule to every arm, record the full sequence, keep the best
+valid artifact, and report no separation when an arm's best sits inside the control's own range
+([`ROUTING.md`](ROUTING.md)).
 
 Recompute important arithmetic independently, remeasure geometry from the emitted files, and
 separate confirmation of a defect from confirmation of the reported number.
