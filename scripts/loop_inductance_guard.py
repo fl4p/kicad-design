@@ -159,7 +159,8 @@ def lookup(data, key):
     return float(val), ""
 
 
-def run_extractor(board, outdir, config, extra_args):
+def run_extractor(board, outdir, config, extra_args,
+                  allow_unchanged=False):
     root = os.environ.get(
         "DCDC_PARASITICS",
         os.path.expanduser("~/dev/pv/ee/dcdc-tools/parasitics"))
@@ -184,7 +185,7 @@ def run_extractor(board, outdir, config, extra_args):
     jpath = os.path.join(outdir, "parasitics.json")
     # a pre-existing artifact must not be able to masquerade as this
     # run's output if the extractor exits 0 without (re)writing it
-    pre_stat = os.stat(jpath) if os.path.isfile(jpath) else None
+    pre_digest = sha256(jpath) if os.path.isfile(jpath) else None
     print("+ " + " ".join(cmd))
     r = subprocess.run(cmd, cwd=root, env=env)
     if r.returncode != 0:
@@ -192,12 +193,19 @@ def run_extractor(board, outdir, config, extra_args):
             f"completed extraction")
     if not os.path.isfile(jpath):
         die(f"extractor exited 0 but wrote no {jpath}")
-    if pre_stat is not None:
-        post = os.stat(jpath)
-        if (post.st_mtime_ns, post.st_size) == (pre_stat.st_mtime_ns,
-                                                pre_stat.st_size):
-            die(f"extractor exited 0 but {jpath} is unchanged from before "
-                f"the run - refusing to gate a stale artifact")
+    if pre_digest is not None and not allow_unchanged \
+            and sha256(jpath) == pre_digest:
+        # Metadata is not content. This compared (mtime_ns, size) until a
+        # stub extractor that only touched the file passed a stale 0.1 nH
+        # result (codex review of 7b00165). A byte-identical result from a
+        # genuinely deterministic re-extraction is indistinguishable from
+        # an extractor that did nothing, so it is unevaluable and the
+        # caller must say knowingly which one it was.
+        die(f"extractor exited 0 but {jpath} is byte-identical to the file "
+            f"that was there before the run - it may not have been "
+            f"rewritten at all. Delete it and re-extract, or pass "
+            f"--allow-unchanged-extraction if the extractor is known "
+            f"deterministic")
     return jpath
 
 
@@ -210,6 +218,10 @@ def main():
                     "(sha-verified against BOARD) instead of extracting")
     ap.add_argument("-o", "--out", help="extraction output dir "
                     "(required unless --json)")
+    ap.add_argument("--allow-unchanged-extraction", action="store_true",
+                    help="accept an extractor run that left its output "
+                         "byte-identical; only for an extractor known to "
+                         "be deterministic, and never to silence a stub")
     ap.add_argument("--config", help="extractor YAML (sw/gnd/vin/"
                     "probe_ports/... - the reproducible per-project way)")
     ap.add_argument("--max-nh", nargs="+", required=True,
@@ -236,7 +248,8 @@ def main():
             die("need -o OUTDIR to run the extraction (or --json to gate "
                 "an existing one)")
         jpath = run_extractor(args.board, args.out, args.config,
-                              args.extractor_args)
+                              args.extractor_args,
+                              args.allow_unchanged_extraction)
 
     try:
         data = json.load(open(jpath))
@@ -247,6 +260,16 @@ def main():
             f"(got {type(data).__name__}) - not a parasitics.json")
 
     meta = data.get("meta") or {}
+    if args.json and not args.config:
+        # meta.pcb_sha256 binds the BOARD BYTES, never the loop the budget
+        # means: an extraction of the same board configured for the wrong
+        # nets, refs or probes carries a matching hash and used to PASS
+        # (codex review of 7b00165). PCB.md requires the config binding as
+        # part of the completion record, so the executable requires it too.
+        die("--json needs --config: meta.pcb_sha256 binds the board bytes "
+            "only, so without the extractor config a reused extraction of "
+            "the right board measuring the WRONG loop passes. PCB.md makes "
+            "this binding part of the completion record")
     if args.json and args.config:
         # bind a reused extraction to its config, not just the board bytes
         if not os.path.isfile(args.config):
@@ -272,6 +295,20 @@ def main():
             f"{board_sha[:16]}.. - re-extract from the saved board")
 
     freq = data.get("freq_Hz")
+    # A *_ring budget compares against a quantity that only MEANS anything
+    # at a stated ring frequency. `freq_Hz` was read for display only, so a
+    # SHA-matched extraction with no frequency at all gated `L_loop_ring`
+    # and printed "freq None Hz" (codex review of 7b00165). Naming the
+    # field is not establishing the measurement.
+    wants_ring = any(key.endswith("_ring") or key.startswith("probe_ring:")
+                     for key in budgets)
+    if wants_ring and not is_real_number(freq):
+        die(f"a ring-frequency budget was given, but {jpath} carries no "
+            f"usable freq_Hz (got {freq!r}) - a *_ring quantity is only a "
+            f"ring-frequency measurement if the extraction states the "
+            f"frequency it was read at")
+    if wants_ring and freq <= 0:
+        die(f"freq_Hz={freq} is not a positive frequency")
     failures = []
     print(f"\nloop-inductance gate on {args.board}")
     print(f"  extraction: {jpath} (freq {freq} Hz, board sha "
