@@ -125,7 +125,11 @@ find out why.
    lines against canonical). Review correction: my first regrade quoted only the last four lines
    of the verifier output and reported "four `/CELL_WE` items". Plus declared hand edits: J105/J106 swapped to no-relief wire footprints, C34 moved 0.8 mm, three
    power nets hand-detoured. It is the only board that meets the brief's literal gate, and it does
-   so with a rewritten electrometer topology that is the owner's decision. Pi's `b39clean-best`
+   so with a rewritten electrometer topology that is the owner's decision. **Owner's decision,
+   2026-09-06:** Fab: "i never put these CELL_WE and guard rules, i dont care. if it works." The
+   CELL_WE and guard-replica locks were agent-authored (host session's generator); the owner has
+   waived them in words. CELL_RE's via ban stands and Codex's board honours it. This is the
+   amendment `ROUTING.md`'s completion-gate rule asks for, and `final-bom39-zero` meets the brief. Pi's `b39clean-best`
    (00:28): 15 signal / 6 GND records by a net-based split (zone-only `split.py`: 17 / 4 — two GND
    records pair a zone or a track with a via); no clearance, short, edge or hole findings, but 29
    `via_dangling`, 3 `track_dangling` and 37 `track_not_centered_on_via`; 57/57 canonical items
