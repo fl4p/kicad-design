@@ -85,6 +85,7 @@ def classify_record(
     pour_nets: Iterable[str],
     mixed_pour_nets: Iterable[str] = (),
     included_severities: Optional[Iterable[str]] = None,
+    strict_pour: bool = False,
 ) -> Dict[str, Any]:
     declared = frozenset(pour_nets)
     mixed = frozenset(mixed_pour_nets)
@@ -186,6 +187,21 @@ def classify_record(
         )
         return result
     if net in declared:
+        if strict_pour and "zone" not in kinds:
+            # A record with no zone item on a declared pure-pour net is not
+            # self-evidently refill topology: a pad-to-track open is
+            # authored routing, and the DRC text cannot tell them apart.
+            # Classifying it as pour turned a real signal open into a PASS
+            # purely because the caller labelled its net (codex review of
+            # 7b00165). Only the fabrication-closing gate is strict; the
+            # default classification keeps its recorded calibration.
+            result["reason"] = (
+                f"record on declared pour net {net!r} contains no zone item "
+                f"({', '.join(kinds) or 'no recognised items'}); under a "
+                "signal-open gate an authored-routing open cannot be "
+                "assumed to be refill topology"
+            )
+            return result
         result["bucket"] = "pour_topology"
         return result
     if "zone" in kinds:
@@ -203,6 +219,7 @@ def classify_report(
     source: str,
     pour_nets: Sequence[str],
     mixed_pour_nets: Sequence[str] = (),
+    strict_pour: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(report, dict):
         raise ConnectivityError("DRC report root is not an object")
@@ -287,7 +304,8 @@ def classify_report(
         )
 
     classified = [
-        classify_record(record, index, pour_nets, mixed_pour_nets, severities)
+        classify_record(record, index, pour_nets, mixed_pour_nets, severities,
+                        strict_pour)
         for index, record in enumerate(records)
     ]
     counts = collections.Counter(row["bucket"] for row in classified)
@@ -457,7 +475,12 @@ def build_parser() -> argparse.ArgumentParser:
             "gate the signal side of the split: fail if any record is a "
             "signal open, whatever the pour topology count. This is the gate "
             "a board with legitimate pour records can use; "
-            "--require-zero-total cannot pass on such a board"
+            "--require-zero-total cannot pass on such a board. It also "
+            "tightens classification: under this gate a record on a "
+            "declared pour net that contains no zone item stays ambiguous "
+            "(exit 3) instead of counting as pour topology, because a "
+            "pad-to-track open is authored routing and a declaration is "
+            "not evidence"
         ),
     )
     parser.add_argument(
@@ -597,8 +620,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         report, receipt = load_report(source)
         result = classify_report(
-            report, str(source), pour_nets, mixed_pour_nets
+            report, str(source), pour_nets, mixed_pour_nets,
+            strict_pour=args.require_zero_signal_opens,
         )
+        result["strict_pour"] = bool(args.require_zero_signal_opens)
         result.update(receipt)
         result["drc_metadata"] = {
             key: report.get(key)
