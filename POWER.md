@@ -334,6 +334,45 @@ the gate loop alongside the commutation loop rather than assuming it.
   commutation loop and must still be budgeted there. Budget CSI against the package, not the
   copper ([`LOOPS.md`](LOOPS.md)).
 
+## A tolerance does not cancel against itself unless it is the same part
+
+Every budget on this page is arithmetic over quantities that are intervals, not numbers: a
+capacitor's C over tolerance and bias, a device's `R_ds(on)` over temperature, a shunt's
+resistance over its ppm/K, a loop's extracted L over the extractor's own spread. Worst-case
+arithmetic over intervals has one trap, it is silent, and it produces a plausible margin rather
+than an error.
+
+**The rule.** A named quantity is correlated with itself; an interval *written twice* is not. So
+`X − X` is exactly `0` when both occurrences are the same physical thing, and `[−w, +w]` when they
+are two things that merely share a tolerance. Both readings are right for some circuits and the
+arithmetic cannot tell which one you meant — only the identity of the parts can. atopile's solver
+states the underlying set semantics correctly and is worth quoting because most tolerance
+calculators get it wrong in one direction or the other: *"Singleton sets are self-correlated / All
+other sets are uncorrelated with any other set (including themselves)"*
+(`src/faebryk/core/solver/README.md`, MIT, 0.15.8).
+
+**Where it bites on this page.** A divider or a current-sense ratio built from two parts of the
+same value and tolerance: model both with one symbol and the tolerances cancel, and the budget
+claims a spread the board does not have. A differential loop budget written as `L_hs − L_ls` when
+the two legs are separate copper: the same error. Conversely, a single shunt appearing on both
+sides of a burden-voltage inequality genuinely does cancel, and treating its two occurrences as
+independent inflates the budget until a legitimate part fails the gate.
+
+**What to do, in order.**
+
+1. **One variable per physical quantity.** Two resistors are two variables even when they are the
+   same MPN from the same reel. Sharing a symbol is an assertion that they are one object, and it
+   is the assertion, not the arithmetic, that is usually wrong.
+2. **Take the verdict from the uncorrelated bound.** It is always an outer bound, so it can be
+   pessimistic but never kind, and a guard is allowed to be too strict.
+3. **When the two readings disagree, say which is true in writing before adopting the tighter
+   one.** `scripts/design_ledger.py` computes both, prints the correlated value beside the verdict
+   whenever a variable appears more than once, and names the repeated variable. That divergence is
+   the finding — it is the one place the model can be interrogated about part identity — so do not
+   silence it by picking the number that passes.
+4. **A singleton is safe either way.** If a quantity is genuinely a single fixed value, write it as
+   a scalar; the two arithmetics then cannot disagree, and the ambiguity never arises.
+
 ## Stack-up, return path and the capacitors in the loop
 
 - **Set the layer-2 dielectric before routing anything.** Thinning it is a large, cheap lever —

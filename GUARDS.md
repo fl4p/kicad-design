@@ -343,6 +343,27 @@ resolve.
 - When a limit is derived from an allocation, compute it in code from the allocation and the
   measured inputs, and print the allocation, the derived limit, the observed value and the margin
   together, so a reader can audit the chain without opening the source.
+- **A constant is not verified until it has been re-checked against the part that ships.** A
+  `LEDGERS` pass establishes that the design arithmetic closed over the values the designer wrote
+  down. It says nothing about whether it still closes over the values the chosen MPNs deliver, and
+  those are two different questions with two different owners. Run the constraint set a second time
+  after the BOM is pinned, with the datasheet-pinned intervals of the exact parts, and gate the
+  release on that pass ([`RELEASE.md`](RELEASE.md), "Re-grade the design arithmetic against the
+  pinned parts"; `scripts/design_ledger.py`). The error must name the ORIGIN of both sides, not only
+  the inequality: an error that says "50.2 mV > 50 mV" sends the reader back to re-derive the whole
+  chain, while one that names the shunt's datasheet table and the ADC's input-range table identifies
+  which of the two assertions to change.
+- **Tag every load-bearing quantity with what kind of thing produced it** — `user | derived |
+  picked | datasheet` — and require a citation beside the tag. A tag alone cannot name a side of a
+  contradiction, and a value with no tag cannot be told apart from a guess. Emit the tags as data,
+  not only as prose, so a release review can be graded by a script rather than by reading.
+- **Worst-case arithmetic over intervals must state its correlation assumption.** `X - X` is `0` for
+  one physical quantity and `[-w, +w]` for two parts that share a tolerance, and the arithmetic
+  cannot tell which was meant. Take the verdict from the uncorrelated reading, which is always an
+  outer bound and so can only ever be too strict; report the correlated value beside it; and make a
+  disagreement between them a finding that has to be resolved in writing, never a number to pick
+  from. [`POWER.md`](POWER.md), "A tolerance does not cancel against itself unless it is the same
+  part".
 
 ## Reporting and review hygiene
 
@@ -381,6 +402,10 @@ resolve.
 - [ ] Matched copper uses independent artifact-shape and unmasked-quantity gates when required.
 - [ ] Reports use correct units and distinguish absolute, differential, semantic and byte evidence.
 - [ ] Every threshold names its provenance and sits above the generator's measured reproducibility.
+- [ ] Load-bearing constants were re-graded against the pinned MPNs, not only against design intent,
+      and each violation names the origin of both sides.
+- [ ] Interval arithmetic states whether repeated quantities are correlated, and the verdict comes
+      from the outer bound.
 - [ ] No constant gates two checks that make different physical claims.
 - [ ] Subject counts in report strings are derived, not literal.
 - [ ] Instability findings name the probe's steps and were A/B'd against a production-order probe.

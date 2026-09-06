@@ -192,6 +192,35 @@ resolves at a distributor and ships in the package the footprint draws, per the 
 [`SKILL.md`](SKILL.md); a check that only asks whether the MPN field is non-empty tests
 completeness and reads as correctness.
 
+### Re-grade the design arithmetic against the pinned parts
+
+Pinning the BOM is not the end of the sourcing step. Every load-bearing inequality in the design was
+closed against *design-intent* values — the interval the engineer wrote down when choosing what to
+look for. The parts that ended up on the BOM deliver their own intervals, and those are the ones
+that ship. Re-evaluate the inequalities a second time, with the datasheet-pinned values of the exact
+MPNs, and fail the release on any violated one. Nothing about this needs a solver: the derivations
+are explicit and the second pass is a discipline, not a technology.
+
+Run it as a gate, with [`scripts/design_ledger.py`](scripts/README.md), on a ledger the design owns:
+every load-bearing quantity tagged `user | derived | picked | datasheet`, each carrying a citation
+that names where the number came from, its intended interval, and the interval the chosen part
+actually delivers. Gate on the **as-built** tier and keep the **intent** tier in the report beside
+it. The two failing differently is the whole diagnostic value: intent FAIL is a design error;
+as-built FAIL under an intent PASS is a sourcing error; and a quantity with no as-built value at all
+is UNVERIFIED, which is neither, and is the state a release must not be allowed to skip past.
+
+Three rules make the difference between this and a spreadsheet:
+
+- **The tag is not the evidence.** `datasheet` without a document, page and table is a claim about
+  where a number *should* have come from. Require the citation, and print both sides' citations on
+  every violation — the point of a second pass is that the error message names the two assertions
+  that cannot both hold, so a reader can see which one to change without re-deriving anything.
+- **Absence is UNVERIFIED, never inheritance.** A part whose datasheet does not bound the quantity
+  over the design's temperature range does not silently keep the design-intent interval. Report the
+  coverage count beside the verdict so a ledger that lost half its rows cannot read as a clean pass.
+- **Correlation is declared, not inferred.** See [`POWER.md`](POWER.md), "A tolerance does not cancel
+  against itself unless it is the same part".
+
 Hold the class vocabulary in the gate, not in the file the gate reads. A gate that accepts whatever
 classes its input declares lets the next class name declare itself legitimate and walk past every
 rule written about the last one, so key each rule on what a class permits — buys to value, covers a
