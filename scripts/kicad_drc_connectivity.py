@@ -85,6 +85,7 @@ def classify_record(
     pour_nets: Iterable[str],
     mixed_pour_nets: Iterable[str] = (),
     included_severities: Optional[Iterable[str]] = None,
+    strict_pour: bool = False,
 ) -> Dict[str, Any]:
     declared = frozenset(pour_nets)
     mixed = frozenset(mixed_pour_nets)
@@ -186,6 +187,21 @@ def classify_record(
         )
         return result
     if net in declared:
+        if strict_pour and "zone" not in kinds:
+            # A record with no zone item on a declared pure-pour net is not
+            # self-evidently refill topology: a pad-to-track open is
+            # authored routing, and the DRC text cannot tell them apart.
+            # Classifying it as pour turned a real signal open into a PASS
+            # purely because the caller labelled its net (codex review of
+            # 7b00165). Only the fabrication-closing gate is strict; the
+            # default classification keeps its recorded calibration.
+            result["reason"] = (
+                f"record on declared pour net {net!r} contains no zone item "
+                f"({', '.join(kinds) or 'no recognised items'}); under a "
+                "signal-open gate an authored-routing open cannot be "
+                "assumed to be refill topology"
+            )
+            return result
         result["bucket"] = "pour_topology"
         return result
     if "zone" in kinds:
@@ -203,6 +219,7 @@ def classify_report(
     source: str,
     pour_nets: Sequence[str],
     mixed_pour_nets: Sequence[str] = (),
+    strict_pour: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(report, dict):
         raise ConnectivityError("DRC report root is not an object")
@@ -287,7 +304,8 @@ def classify_report(
         )
 
     classified = [
-        classify_record(record, index, pour_nets, mixed_pour_nets, severities)
+        classify_record(record, index, pour_nets, mixed_pour_nets, severities,
+                        strict_pour)
         for index, record in enumerate(records)
     ]
     counts = collections.Counter(row["bucket"] for row in classified)
@@ -457,7 +475,12 @@ def build_parser() -> argparse.ArgumentParser:
             "gate the signal side of the split: fail if any record is a "
             "signal open, whatever the pour topology count. This is the gate "
             "a board with legitimate pour records can use; "
-            "--require-zero-total cannot pass on such a board"
+            "--require-zero-total cannot pass on such a board. It also "
+            "tightens classification: under this gate a record on a "
+            "declared pour net that contains no zone item stays ambiguous "
+            "(exit 3) instead of counting as pour topology, because a "
+            "pad-to-track open is authored routing and a declaration is "
+            "not evidence"
         ),
     )
     parser.add_argument(
@@ -482,7 +505,11 @@ def _prescan_json_output(argv: Sequence[str]) -> Optional[pathlib.Path]:
     for index, token in enumerate(argv):
         if token == "--":
             break
-        if token == "--json":
+        # An abbreviation counts for INVALIDATION only: allow_abbrev is off
+        # so `--jso` is rejected as an argument, but the operator meant it as
+        # the report target and a stale prior report must not survive the
+        # failed run (codex review of 7b00165).
+        if _names_json(token):
             if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
                 json_out = pathlib.Path(argv[index + 1])
         if token.startswith("--json="):
@@ -490,6 +517,18 @@ def _prescan_json_output(argv: Sequence[str]) -> Optional[pathlib.Path]:
             if value:
                 json_out = pathlib.Path(value)
     return json_out
+
+
+def _names_json(token: str) -> bool:
+    """True for `--json` and for any prefix argparse would have abbreviated.
+
+    Used for invalidation and alias detection only. `allow_abbrev` is off, so
+    an abbreviation is still REJECTED as an argument -- but the operator
+    plainly meant it as the report target, and both the stale-report rule and
+    the alias guard have to see it that way (codex review of 7b00165).
+    """
+    return (token.startswith("--j") and len(token) >= 3
+            and "--json".startswith(token))
 
 
 def _preparse_target_may_be_input(
@@ -510,7 +549,7 @@ def _preparse_target_may_be_input(
         if not before_terminator:
             continue
         if (
-            token == "--json"
+            _names_json(token)
             and index + 1 < len(argv)
             and not argv[index + 1].startswith("-")
         ):
@@ -581,8 +620,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         report, receipt = load_report(source)
         result = classify_report(
-            report, str(source), pour_nets, mixed_pour_nets
+            report, str(source), pour_nets, mixed_pour_nets,
+            strict_pour=args.require_zero_signal_opens,
         )
+        result["strict_pour"] = bool(args.require_zero_signal_opens)
         result.update(receipt)
         result["drc_metadata"] = {
             key: report.get(key)
