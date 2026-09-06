@@ -82,7 +82,11 @@ Determine the authority before editing:
 - Treat an autorouted or otherwise transformed hand-maintained board as a derived candidate until
   the project explicitly promotes it.
 - Warn that GUI edits to generated artefacts will be overwritten, and check for a running KiCad GUI
-  holding a stale copy before regenerating.
+  holding a stale copy before regenerating. Run `scripts/kicad_open_probe.py <artefact>` rather than
+  asking; it reads KiCad's own `~<name>.lck` lock file and its IPC sockets. Neither signal can prove
+  a file is free — the lock carries no pid, so a crashed KiCad leaves one indistinguishable from a
+  live one, and the IPC server is off by default — so treat HELD (exit 1) and UNKNOWN (exit 2)
+  alike as "do not write", and never read an UNKNOWN as a pass.
 
 Keep generators surgical and reproducible:
 
