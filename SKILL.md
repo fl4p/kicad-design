@@ -391,8 +391,8 @@ the user amends the criterion in words. Report the original criterion and every 
 in the final result; any required item that is false or unevaluable makes the result incomplete,
 and a finished sub-phase is named as a sub-phase. When comparing iterative routing strategies, apply
 one predeclared pass budget and stopping rule to every arm, record the full sequence, keep the best
-valid artifact, and report no separation when an arm's best sits inside the control's own range
-([`ROUTING.md`](ROUTING.md)).
+valid artifact, and claim neither a winner nor a tie from single trajectories whose best values
+overlap — separation needs replication declared in advance ([`ROUTING.md`](ROUTING.md)).
 
 Recompute important arithmetic independently, remeasure geometry from the emitted files, and
 separate confirmation of a defect from confirmation of the reported number.

@@ -93,8 +93,16 @@ find out why.
    repeatedly on the same board (`iterate.sh`), signal opens per pass:
    `b39base` (untouched generator) 24 19 16 16 17 16 18 16 17 22 17 18 17; `b39c` (standing
    columns) 22 19 19 19 17 17 17 17 17 17; `b39no` (neck rewrite alone) 46 24 21 21 19 18 23 17;
-   `b39n1` (both) 42 17 17 20 17 23 22. At two passes the variants span 22–46; at plateau all four
-   sit at 16–17; the control's own band is 16–22. My regrade (ZONE_FILLER refill, canonical
+   `b39n1` (both) 42 17 17 20 17 23 22. The first number of each sequence is the two-stage
+   recipe's result; each following number is one further `--keep-input-copper` pass on the
+   previous output (`iterate.sh`, which passes `--keep-input-copper` only, not
+   `--no-stub-layer-swap`; the canonical verifier nevertheless found all 57 authored items present,
+   locked and on their layers on `b39base3` and `b39base4`). After the recipe the variants span
+   22–46; their best values over 7–13 further passes are 16, 17, 17, 17; the control's own range
+   is 16–22. These are best-of readings over a bounded number of passes — fable's own write-up
+   says "best-of over passes, not a run-to-plateau" — not a converged plateau. Review
+   correction: the first draft of `ROUTING.md` called 16 "a third pass" (it is the second further
+   pass, after 19) and called the best values a plateau. My regrade (ZONE_FILLER refill, canonical
    project, canonical verifier): fable `b39base1` 24 signal / 2 islands with the identical signal-net
    set to host's `rt-bom2` (same seed, same recipe, independent harness); `b39base3` and
    `b39base4` both 16 signal / 4 islands, copper clean apart from one `hole_clearance` inherited
@@ -107,14 +115,55 @@ find out why.
    `kicad-cli --refill-zones`; another 21 / 5 / 26 under both. Signal opens are refill-invariant,
    islands are not. Codex's `final-zero-signal` (113 footprints) then reached 0 signal opens with
    43 islands (my harness: 47) and reported the task complete; its later `final-bom39-zero`
-   (100 footprints, 2026-09-06 01:34) grades in my harness at **0 signal / 3 islands / no copper
-   violations** (0 / 0 / 0 under codex's `kicad-cli` refill), with the same four canonical
-   `/CELL_WE` items missing as before (generator byte-identical to `final-zero-signal`'s), plus
-   declared hand edits: J105/J106 swapped to no-relief wire footprints, C34 moved 0.8 mm, three
+   (100 footprints, 2026-09-06 01:34) grades in my harness at **0 signal / 3 GND records / no
+   copper violations** (0 / 0 / 0 under codex's `kicad-cli` refill). Of the three GND records two
+   are zone–zone and one is zone–track (a 0.14 mm GND track), so fable's zone-only `split.py`
+   scores it 1 / 2 and a net-based split 0 / 3. Canonical verifier (`verify_critical.py
+   --expect-locked` from the canonical working copy): **14 of 57 authored items missing** — nine
+   `/CELL_WE` tracks, two `/CELL_WE` vias, three `/GUARD_REPLICA` tracks — identically on
+   `final-zero-signal` and `final-bom39-zero` (generator byte-identical between them, 301 diff
+   lines against canonical). Review correction: my first regrade quoted only the last four lines
+   of the verifier output and reported "four `/CELL_WE` items". Plus declared hand edits: J105/J106 swapped to no-relief wire footprints, C34 moved 0.8 mm, three
    power nets hand-detoured. It is the only board that meets the brief's literal gate, and it does
    so with a rewritten electrometer topology that is the owner's decision. Pi's `b39clean-best`
-   (00:28): 15 signal / 6 islands, dangling only, 57/57 canonical items intact — its first board
-   to pass the canonical verifier. Host's `rt-bomrot2` (two passes, 19 rotated): 20 / 5, 57/57.
+   (00:28): 15 signal / 6 GND records by a net-based split (zone-only `split.py`: 17 / 4 — two GND
+   records pair a zone or a track with a via); no clearance, short, edge or hole findings, but 29
+   `via_dangling`, 3 `track_dangling` and 37 `track_not_centered_on_via`; 57/57 canonical items
+   present and locked — its first board to pass the canonical verifier. Review correction: the
+   first draft said "dangling only". Host's `rt-bomrot2` (two passes, 19 rotated): 20 / 5, 57/57.
+10. **The escape experiments (host session, 2026-09-05, old BOM, 113 footprints), copied from the
+    host workspace's `REROUTE-EXPERIMENTS.md` so the skill body's escape table has a record inside
+    this repository.** `author_escapes.py` authored radial pin escapes as locked F.Cu copper: 68
+    stubs on U8/U7/U6 (11/10/47), one length per package (1.24/1.09/1.53 mm), zero pads without a
+    legal escape, `kicad_copper_collisions.py` 0, DRC 0 clearance and 0 edge. Because
+    `--rip-existing-nets '*'` deletes locked geometry, the escape runs used `--keep-input-copper`
+    on both stages, and a control isolated that change. Identical two-stage recipe throughout,
+    graded as unconnected items (these runs predate the signal/island split):
+
+    | id | escapes | stage 1 | unconnected |
+    |---|---|---|---:|
+    | C | none | rips everything first | 30 (routed without the project; 39 with it) |
+    | G | none | `--keep-input-copper` | 31 |
+    | H | U7 + U8 only (0.5 mm-pitch pads and an exposed pad force radial) | 21 stubs | 33 |
+    | F | U7 + U8 + U6 (LQFP-48) | 68 stubs | 37 |
+
+    Two-pass readings, not re-run beyond that budget. Escapes were refuted the same way by three
+    other sessions on the same board (codex 30 → 31; fable 26 → 29 on a U7 south row; the pi
+    session's contrary 28 → 25 is in "Not promoted").
+11. **Rotation in place (host session Experiment I, 2026-09-05, old BOM).** `rotate_relax2.py`
+    rotates every flat two-terminal B.Cu passive in the band 90° and relaxes in both axes against
+    an obstacle model of courtyard ∪ pad copper + clearance plus existing tracks with real segment
+    geometry. 19 of 24 rotate legally: R40 anchors authored copper (rotating it disconnected
+    `/GUARD_REPLICA`, 173 → 174 unconnected on the *unrouted* seed, caught only by the diff); R24,
+    R25, R42, R43 have no legal position clear of the `/GUARD_REPLICA` rails; courtyards alone
+    (C16 declares 1.91 × 1.01 where C9 declares 3.05 × 1.55) produced four shorts on `/VA_MON`,
+    `/GUARD_REPLICA`, `/CELL_WE`, `/RE_BUF`. Mean displacement 0.68 mm. Seed checks: 173
+    unconnected, zero shorts, zero clearance, same 20 courtyard overlaps as baseline. Identical
+    two-stage recipe, project present both sides: baseline 39 / 39 (repeat), rotated **25 / 25**;
+    B.Cu persistent lanes through y = 70..76 went 2 → 12. Copper-geometry hashes identical across
+    repeats (3449 items `b0a2bdc60c31`; 3641 items `35c14f6bba88`). On the reduced BOM the same
+    lever measured 24 → 21 (two passes, host Experiment J), while fable's standing-column variant
+    was inseparable from the untouched seed under best-of iteration (§8). Two-pass readings.
 
 ## Not promoted
 

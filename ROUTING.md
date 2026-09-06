@@ -6,9 +6,11 @@ pipeline — scope, pinning, promotion, manifests. [`PCB.md`](PCB.md) governs th
 and the completion gates. This file sits between them: the method that makes the copper make
 sense, and the executable check that says whether it does.
 
-The evidence behind every numeric claim, with locators and an access log, is
-[`reviews/2026-09-05-routing-methodology-research.md`](reviews/2026-09-05-routing-methodology-research.md).
-Read it before changing a rule here.
+The evidence behind every numeric claim, with locators and an access log, is in two records:
+[`reviews/2026-09-05-routing-methodology-research.md`](reviews/2026-09-05-routing-methodology-research.md)
+for the literature and the first measurements, and
+[`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) for the escape, rotation, row-alignment, baseline and convergence experiments (§5, §8–§11).
+Read them before changing a rule here.
 
 ## Contents
 
@@ -146,7 +148,8 @@ Rules:
 This is the rule in this file with the strongest published backing and the worst measured result,
 so take the rule as being about **design**, not about copper you give an autorouter.
 
-Measured 2026-09-05 on the 20 × 107 mm 2-layer board this file was written against, escapes
+Measured on the long, narrow 2-layer board this file was written against (evidence record §10),
+escapes
 authored exactly as described above — uniform, radial, one length per package, every signal pad,
 zero pads without a legal escape, `kicad_copper_collisions.py` clean, DRC clean of clearance and
 edge findings — then locked and handed to the backend. Only the escapes differ between rows:
@@ -167,9 +170,9 @@ leave an 0.18 mm gap against the 0.48 mm a track needs, and the other's exposed 
 body.
 
 Every count in this table is a fixed two-pass reading. The convergence rule below was measured
-after it, on a board where a variant reading 46 at two passes reached 17 at plateau, so the table
-shows that escapes did not help *at that budget*; re-run both arms to plateau before citing it as
-more.
+after it, on a board where a variant reading 46 at two passes read 17 on its seventh further pass,
+so the table shows that escapes did not help *at that budget*; run both arms under a declared
+stopping rule before citing it as more.
 
 The proportionality is suggestive, not diagnostic. If the authored topology were merely *wrong*,
 you would expect the cost to concentrate on the pads that were sent the wrong way; instead the
@@ -419,34 +422,50 @@ search count — and when its SES was imported and the board refilled and graded
 read **42 unconnected pads**. Sixteen and forty-two are the same board. Quote the progress line
 as what it is, and never beside a KiCad-graded number in the same table.
 
-**A fixed pass budget is not convergence, and a two-pass A/B is a scout.** A router that accepts
-its previous copper as input (KRT's `--keep-input-copper`) defines a search that can simply be run
-again, and a recipe that stops after a fixed number of such passes reports wherever that budget
-happened to land. Measured on one board, one recipe, one seed: two passes read 24 unconnected and a
-third read 16; a variant that read 46 at two passes read 17 at eight; four variants spanning 22 to
-46 at two passes all sat at 16–17 at plateau; and the control's own trajectory over thirteen passes
-wandered 16 → 22 → 17, so the sequence is not monotone ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8). The two-pass
-readings ranked one variant as catastrophic and another as a small win; at plateau nothing
-separated any of them from the untouched seed. So:
+**A fixed pass budget is not convergence, and a two-pass A/B is a scout.** A router that can take
+its previous output as input defines a search that can simply be run again — KRT's
+`--keep-input-copper` re-routes the nets its *own* connectivity model still reports open and leaves
+the rest — and a recipe that stops after a fixed number of such passes reports wherever that budget
+happened to land. Measured on one board, one recipe, one seed ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8): the two-stage recipe
+read 24 unconnected and the next two further passes read 19 and 16; a variant that read 46 after
+the recipe read 17 on its seventh further pass; four variants spanning 22 to 46 after the recipe had
+best values of 16, 17, 17 and 17 over seven to thirteen further passes; and the control's own
+sequence wandered 16 → 22 → 17. So the sequence is not monotone, and these are best-of readings
+over a bounded number of passes, not a converged plateau. The fixed-budget readings ranked one
+variant as catastrophic and another as a small win; the best-of readings separated none of them
+from the untouched seed. So:
 
 1. Hold seed, tool versions, rules, refill path and per-pass command constant within every arm.
+   With KRT, pass `--keep-input-copper --no-stub-layer-swap` on every further pass — the flag
+   alone only protects the input copper from this run's cleanup prunes, and stub layer swapping
+   stays on by default (the locked-copper caveat above) — and verify the authored copper's
+   geometry *and layer* after each pass.
 2. Declare the pass budget and stopping rule before running the arms — a maximum, or N passes
    without a new best — and apply it to every arm, the control included.
 3. Record the whole sequence and keep the **best** valid board, not the last.
-4. If an arm's best lies inside the control's own band, report no separation.
+4. An arm whose best lies inside the control's own range has not shown separation, and one
+   trajectory per arm cannot show equivalence either. Claim a winner or a tie only from
+   replication declared in advance — more seeds, or repeated runs where the router is not
+   deterministic — never from the minimum and maximum of a single run.
 
 This downgrades every A/B in this file whose evidence is an unconnected count from a fixed one- or
 two-pass recipe — the escape table, the rotation-in-place result, the row-alignment result and the
-baseline deltas. Each was measured honestly and none has been re-run to plateau; read them as "did
+baseline deltas. Each was measured honestly and none has been re-run under a declared stopping
+rule; read them as "did
 not help at that budget" until someone does. Repeated *grading* of one saved board is a different
 question — that is deterministic (the geometry-hash paragraph above); the router's sequence is not.
 
-**Rank on signal opens; the gate is still the total.** KiCad's `unconnected_items` mixes two
-quantities: opens between pads and tracks, which are deterministic for a given board, and same-net
-zone-island pairs, which depend on which refill produced the polygons — one board graded 26 islands
-under `kicad-cli --refill-zones` and 36 under `pcbnew.ZONE_FILLER` while its signal count stayed
-at 16 (§9 of the evidence file). Split the count, rank routing strategies on the signal component,
-and report both beside the total. The split changes the ranking, not the definition of done:
+**Rank on signal opens; the gate is still the total.** KiCad's `unconnected_items` mixes records
+of different kinds. A record whose two items are both zones is a same-net pour island, and its
+count depends on which refill produced the polygons: on two candidates of one design, one board
+graded 16 non-zone opens with 36 island records under `pcbnew.ZONE_FILLER` and 16 with 26 under
+`kicad-cli --refill-zones`, the other 21 and 5 under both (§9 of the evidence file; two candidates
+of one design, so treat the invariance as measured there, not proven in general). Records between
+pads, tracks and vias are the routing result. Records on a plane net that pair a zone with a via
+or track, or a via with a track, can be either: keep them as a third bucket, list them, and say
+which classifier produced the split — a zone-only classifier and a net-based one disagreed by two
+items on the same board. Rank routing strategies on the signal component and report every bucket
+beside the total. The split changes the ranking, not the definition of done:
 islands are unfinished copper until stitched or removed by zone topology, and a criterion written
 as "zero unconnected items" is met only when the total is zero, unless its owner amends it in
 words. A session that reached zero signal opens and called the task complete "under the corrected
@@ -518,7 +537,8 @@ about the inference and not about capacity itself. Rotating 19 flat B.Cu passive
 place — no part moved to a new location, mean displacement 0.68 mm — took B.Cu persistent lanes
 from 2 to 12 through the tight band and unconnected items from **39 to 25** at the recipe's two-pass
 budget, the only intervention here that improved connectivity at that budget, and repeatable to
-identical copper. It has not been re-run to plateau (convergence rule above).
+identical copper. It has not been re-run beyond that budget (convergence rule above); the full
+record, with the excluded parts and the seed checks, is evidence record §11.
 
 The difference worth carrying is *what the intervention did to the pads*:
 

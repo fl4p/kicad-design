@@ -95,8 +95,8 @@ serialization, not capability.
 Measured on one 4-layer isolated board, whole-board scout: an external router returned **0 DRC
 violations and 0 unconnected**, routed every net including four gate escapes a second router could
 not complete — and the project audit refused it on its **first** check, with **35 items of copper
-inside the 4 mm galvanic isolation barrier**, host-side `+5VH` and isolated-side `GND_OUT` in the
-same gap. KiCad scored that board clean because nothing had asked it about the barrier (see
+inside the 4 mm galvanic isolation barrier**, a host-side supply rail and the isolated-side
+ground in the same gap. KiCad scored that board clean because nothing had asked it about the barrier (see
 *Isolated designs* in [`PCB.md`](PCB.md)).
 
 The converse also holds, so neither layer subsumes the other: on the same project a **dangling via
@@ -301,8 +301,8 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    on), not by any CLI flag; the early-exit paths that write a passthrough output (no valid nets,
    already connected) do not reach it. It announces itself with a summary line, `In-run DRC floors
    (#650): lowered N value(s) in <stem>.kicad_pro`, plus one line per changed value. Measured
-   2026-09-05 on a stage-1 log whose command line carried both `--fab-overrides
-   krt_fab_floor.txt` and `--no-fix-drc-settings`: `rules.min_hole_clearance: 0.2 -> 0.15 mm`; a
+   2026-09-05 on a stage-1 log whose command line carried both `--fab-overrides <floor file>`
+   and `--no-fix-drc-settings`: `rules.min_hole_clearance: 0.2 -> 0.15 mm`; a
    second session saw the same write. In a staged recipe every stage that routes something takes
    this path, so the project stage 2 routes against is already the one stage 1 lowered. The
    discipline that held: `shasum -a 256` the project and DRU before the first stage, copy the
@@ -312,12 +312,18 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    run was not.
    ([`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
    §1.)
-6. **`--keep-input-copper` is re-runnable, and a recipe that runs it a fixed number of times
-   stops wherever that budget lands.** Measured: a staged recipe's two passes read 24 unconnected,
-   one more pass read 16, and a variant reading 46 at two passes read 17 at eight. Iterate under a
-   stopping rule declared in advance, keep the best board rather than the last, and never A/B two
-   variants on their two-pass numbers — [`ROUTING.md`](ROUTING.md)'s convergence rule; the
-   sequences are in [`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8.
+6. **`--keep-input-copper` protects the input copper only from this run's cleanup passes, and a
+   recipe that runs a fixed number of passes stops wherever that budget lands.** The flag makes
+   the input copper read-only to the dead-end, orphan, redundancy and re-bend prunes (its help
+   text says exactly that); it does not disable stub layer swapping, which is on by default, and
+   "already routed" is KRT's own connectivity model, not KiCad's DRC. A pass re-run on its own
+   output with `--keep-input-copper --no-stub-layer-swap` re-attacks what that model still
+   reports open: measured on one board, the two-stage recipe read 24 unconnected, the next two
+   passes 19 and 16, and a variant reading 46 read 17 on its seventh further pass. Iterate under a
+   stopping rule declared in advance, keep the best board rather than the last, and treat a fixed
+   small budget as a scout unless that budget was shown to stabilise the metric on the board in
+   hand — [`ROUTING.md`](ROUTING.md)'s convergence rule; the sequences are in
+   [`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8.
 
 ## Inputs required for a promotable run
 
