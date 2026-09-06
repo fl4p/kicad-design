@@ -424,7 +424,11 @@ class ConnectivitySplitTests(unittest.TestCase):
                 split.main(
                     [str(drc), "--no-pour-nets", "--j", str(out), "--bad-option"]
                 )
-            self.assertEqual(out.read_text(encoding="utf-8"), original)
+            # Rejected as an argument (allow_abbrev is off) AND invalidated
+            # as a report: the operator plainly meant `--j` as the target, so
+            # a prior clean result must not survive the failed run.
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertFalse(written["classification_evaluable"])
 
     def test_argparse_failure_invalidates_last_duplicate_json_target(self):
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -536,6 +540,46 @@ class ConnectivitySplitTests(unittest.TestCase):
                     split.main(["--no-pour-nets", str(drc), "--report-only"]),
                     0,
                 )
+
+    def test_declaring_a_net_pour_cannot_launder_a_real_signal_open(self):
+        """A pad-to-track open is authored routing. Classifying every record
+        on a declared net as pour topology let the caller turn a real open
+        into a fabrication-closing PASS by labelling its net (codex review
+        of 7b00165): --no-pour-nets exited 4, --pour-net /SIG exited 0."""
+        opening = record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
+        with tempfile.TemporaryDirectory() as raw_dir:
+            drc = pathlib.Path(raw_dir) / "drc.json"
+            drc.write_text(json.dumps(drc_report([opening])), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(
+                    split.main([str(drc), "--no-pour-nets",
+                                "--require-zero-signal-opens"]), 4)
+                # The same record, relabelled: unevaluable, never a pass.
+                self.assertEqual(
+                    split.main([str(drc), "--pour-net", "/SIG",
+                                "--require-zero-signal-opens"]), 3)
+                # The aggregate gate keeps its recorded behaviour.
+                self.assertEqual(
+                    split.main([str(drc), "--pour-net", "/SIG",
+                                "--require-zero-total"]), 4)
+
+    def test_a_genuine_pour_record_still_passes_the_signal_gate(self):
+        """The tightening must not manufacture false failures: a zone/track
+        record on a declared pour net is what the split exists to excuse."""
+        with tempfile.TemporaryDirectory() as raw_dir:
+            drc = pathlib.Path(raw_dir) / "drc.json"
+            drc.write_text(
+                json.dumps(drc_report([
+                    record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")])),
+                encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(
+                    split.main([str(drc), "--pour-net", "/GND",
+                                "--require-zero-signal-opens"]), 0)
 
     def test_cli_refuses_an_ungraded_gating_run(self):
         """No gate and no --report-only must not read as a pass."""
