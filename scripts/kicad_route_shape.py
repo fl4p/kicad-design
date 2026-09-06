@@ -52,11 +52,20 @@ Gating contract (fail closed):
   corpus; inventing one here would be exactly the fake-threshold failure
   `../GUARDS.md` forbids.
 
+Backend: the metrics come from a named board-access backend, and every verdict
+line and JSON report says which one and how it was chosen (`--backend`,
+`$KICAD_BACKEND`, or the default). Only `swig` can serve this audit today: the
+IPC API cannot open a saved board without a running KiCad. A requested backend
+that is unavailable, or that lacks a capability this audit needs, is
+UNEVALUABLE with a stable failure ID; it never falls back to the other backend.
+See `kicad_backend.py` and `../plans/SWIG-to-IPC-inventory.md`.
+
 Exit codes:
   0  audited (graded and passing) — only with the explicit OK verdict line —
      or `--report-only`, with the NOT-GRADED verdict line
   1  unevaluable — board missing/unloadable, no track copper, no usable pcbnew
-     interpreter, no threshold and no --report-only, bad CLI value, worker
+     interpreter, the requested backend unavailable or lacking a required
+     capability, no threshold and no --report-only, bad CLI value, worker
      timeout, or an exception
   2  a graded metric failed its threshold, or a threshold named a metric that
      could not be evaluated
@@ -81,6 +90,8 @@ import os
 import subprocess
 import sys
 
+import kicad_backend
+
 # `--short-segment-mm` defines a metric rather than grading one, so it needs
 # its own domain: the floor is below any manufacturable segment KiCad's own
 # minimum track width admits, the ceiling above any length a "short" segment
@@ -102,6 +113,49 @@ _WORKER_ENV = "KICAD_ROUTE_SHAPE_WORKER"
 _AXIS_TOLERANCE_DEG = 5.0
 
 
+# Provenance of the backend that produced this run's numbers. None until the
+# backend is resolved, and reported as null rather than omitted.
+_BACKEND = None
+
+
+def _backend_suffix():
+    return "" if _BACKEND is None else " [%s]" % _BACKEND["provenance"]
+
+
+def _swig_selection(environ=None):
+    """SWIG probe for `kicad_backend.select`, reusing THIS module's discovery."""
+    del environ
+    # In-process availability is decided by the IMPORT, exactly as it was
+    # before the backend layer existed. A pcbnew that imports but cannot report
+    # its version is still the pcbnew this process will use; downgrading it to
+    # "no backend" here would re-execute a worker that is already home.
+    try:
+        import pcbnew
+    except Exception:
+        pcbnew = None
+    if pcbnew is not None:
+        try:
+            version = str(pcbnew.GetBuildVersion())
+        except Exception:
+            version = "version-unreported"
+        return kicad_backend.Selection(
+            kicad_backend.SWIG, None,
+            "pcbnew %s in-process under %s" % (version, sys.executable),
+            kicad_backend.SWIG_CAPABILITIES)
+    interpreter, error = _find_kicad_python()
+    if not interpreter:
+        # A configured interpreter that fails its probe is a DIFFERENT fault
+        # from finding none at all, and the two want different fixes.
+        failure = ("swig-configured-interpreter-bad"
+                   if os.environ.get(kicad_backend.INTERPRETER_ENV_VAR)
+                   else "swig-no-interpreter")
+        raise kicad_backend.BackendUnavailable(
+            kicad_backend.SWIG, failure, error)
+    return kicad_backend.Selection(
+        kicad_backend.SWIG, None, "pcbnew via %s" % interpreter,
+        kicad_backend.SWIG_CAPABILITIES, interpreter=interpreter)
+
+
 class Unevaluable(Exception):
     """Raised for every input the audit cannot grade. Never caught into OK."""
 
@@ -112,7 +166,7 @@ def _fail_unevaluable(message, json_out=None, board=None):
             _write_json(json_out, board, "unevaluable", {"error": message})
         except (Unevaluable, OSError) as error:
             print(f"{_UNEVALUABLE_LINE}: {error}", file=sys.stderr)
-    print(f"{_UNEVALUABLE_LINE}: {message}", file=sys.stderr)
+    print(f"{_UNEVALUABLE_LINE}: {message}{_backend_suffix()}", file=sys.stderr)
     return 1
 
 
@@ -151,6 +205,9 @@ def _write_json(path, board, verdict, payload):
         "verdict": verdict,
         "board": os.path.abspath(board) if board else None,
         "pid": os.getpid(),
+        # null until the backend is resolved; a report that cannot name the
+        # backend behind its numbers must say so, not omit the field.
+        "backend": _BACKEND,
         "metrics": payload,
     }
     directory = os.path.dirname(os.path.abspath(path)) or "."
@@ -610,6 +667,7 @@ def main(argv=None):
         except (Unevaluable, OSError):
             pass
     parser = build_parser()
+    kicad_backend.add_backend_argument(parser)
     args = parser.parse_args(argv)
 
     thresholds = [
@@ -692,15 +750,34 @@ def main(argv=None):
 
     try:
         import pcbnew  # noqa: F401
+        in_process = True
     except ImportError:
-        if os.environ.get(_WORKER_ENV):
-            return _fail_unevaluable(
-                "re-executed interpreter still cannot import pcbnew",
-                args.json_out, args.board)
-        interpreter, error = _find_kicad_python()
-        if not interpreter:
-            return _fail_unevaluable(error, args.json_out, args.board)
-        return _run_worker(interpreter, argv, args.timeout)
+        in_process = False
+    if not in_process and os.environ.get(_WORKER_ENV):
+        return _fail_unevaluable(
+            "re-executed interpreter still cannot import pcbnew",
+            args.json_out, args.board)
+
+    # Resolve the backend explicitly and record it. An unavailable backend is
+    # UNEVALUABLE; it never falls back to the other one.
+    global _BACKEND
+    try:
+        selection = kicad_backend.select(
+            args.backend, probes={kicad_backend.SWIG: _swig_selection,
+                                  kicad_backend.IPC: kicad_backend.probe_ipc})
+        kicad_backend.require_capabilities(
+            selection, kicad_backend.CAP_OPEN_BOARD_FROM_PATH)
+    except kicad_backend.BackendUnavailable as error:
+        return _fail_unevaluable(str(error), args.json_out, args.board)
+    _BACKEND = dict(selection.as_dict(), provenance=selection.provenance())
+
+    if selection.interpreter is not None:
+        worker_argv = list(argv)
+        # Name the backend explicitly in the child: a worker that re-resolved
+        # it from its own defaults could grade with another backend.
+        if args.backend and "--backend" not in worker_argv:
+            worker_argv += ["--backend", args.backend]
+        return _run_worker(selection.interpreter, worker_argv, args.timeout)
 
     try:
         metrics = measure(args.board, args.short_segment_mm, layer_directions)
@@ -715,7 +792,8 @@ def main(argv=None):
     if args.report_only:
         if args.json_out:
             _write_json(args.json_out, args.board, "reported", metrics)
-        print(f"{_NOT_GRADED_LINE}: metrics only, no threshold applied")
+        print(f"{_NOT_GRADED_LINE}: metrics only, no threshold applied"
+              f"{_backend_suffix()}")
         return 0
 
     findings, graded = grade(metrics, args)
@@ -730,11 +808,12 @@ def main(argv=None):
     for finding in findings:
         print(f"ROUTE-SHAPE: {finding}")
     if findings:
-        print(f"{_FAIL_LINE}: {len(findings)} of {graded} graded metrics failed")
+        print(f"{_FAIL_LINE}: {len(findings)} of {graded} graded metrics failed"
+              f"{_backend_suffix()}")
         return 2
     print(f"{_OK_LINE}: {graded} graded metrics within their thresholds "
           f"(short-segment metric defined at "
-          f"{args.short_segment_mm} mm)")
+          f"{args.short_segment_mm} mm){_backend_suffix()}")
     return 0
 
 

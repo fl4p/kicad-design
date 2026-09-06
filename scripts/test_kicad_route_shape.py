@@ -524,5 +524,105 @@ class CliContract(unittest.TestCase):
             _os.unlink(path)
 
 
+class BackendSelection(unittest.TestCase):
+    """The audit must name the backend behind its numbers, and refuse a backend
+    it cannot use rather than quietly using the other one."""
+
+    def setUp(self):
+        self._saved = audit._BACKEND
+        audit._BACKEND = None
+
+    def tearDown(self):
+        audit._BACKEND = self._saved
+
+    def _run(self, argv, **patches):
+        board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
+        with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                mock.patch.object(audit.os.path, "isfile", return_value=True), \
+                contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            code = audit.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_requested_backend_that_is_unavailable_is_unevaluable(self):
+        def refuse(environ=None, **kwargs):
+            raise audit.kicad_backend.BackendUnavailable(
+                "ipc", "ipc-test-refusal", "not here")
+
+        with mock.patch.object(audit.kicad_backend, "probe_ipc", refuse):
+            code, _, err = self._run(["b.kicad_pcb", "--report-only",
+                                      "--backend", "ipc"])
+        self.assertEqual(code, 1)
+        self.assertIn("ipc-test-refusal", err)
+
+    def test_an_unavailable_backend_never_falls_back_to_the_other_one(self):
+        def refuse(environ=None, **kwargs):
+            raise audit.kicad_backend.BackendUnavailable(
+                "ipc", "ipc-test-refusal", "not here")
+
+        def swig(environ=None):  # pragma: no cover - must not run
+            raise AssertionError("fell back to swig")
+
+        with mock.patch.object(audit.kicad_backend, "probe_ipc", refuse), \
+                mock.patch.object(audit, "_swig_selection", swig):
+            code, _, _ = self._run(["b.kicad_pcb", "--report-only",
+                                    "--backend", "ipc"])
+        self.assertEqual(code, 1)
+
+    def test_an_unknown_backend_in_the_environment_is_unevaluable(self):
+        with mock.patch.dict(audit.os.environ,
+                             {audit.kicad_backend.ENV_VAR: "swog"}):
+            code, _, err = self._run(["b.kicad_pcb", "--report-only"])
+        self.assertEqual(code, 1)
+        self.assertIn("backend-unknown", err)
+
+    def test_a_backend_that_cannot_open_a_board_is_refused(self):
+        def crippled(environ=None):
+            return audit.kicad_backend.Selection(
+                "swig", None, "cannot open a file", frozenset())
+
+        with mock.patch.object(audit, "_swig_selection", crippled):
+            code, _, err = self._run(["b.kicad_pcb", "--report-only"])
+        self.assertEqual(code, 1)
+        self.assertIn("backend-missing-capability", err)
+        self.assertIn(audit.kicad_backend.CAP_OPEN_BOARD_FROM_PATH, err)
+
+    def test_the_resolved_backend_reaches_the_verdict_line(self):
+        code, out, _ = self._run(["b.kicad_pcb", "--report-only"])
+        self.assertEqual(code, 0)
+        self.assertIn(audit._NOT_GRADED_LINE, out)
+        self.assertIn("backend=swig", out)
+        self.assertIn("source=default", out)
+
+    def test_the_report_carries_the_backend_and_null_before_it_is_resolved(self):
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+        handle, path = _tempfile.mkstemp(suffix=".json")
+        _os.close(handle)
+        _os.unlink(path)
+        try:
+            code, _, _ = self._run(["b.kicad_pcb", "--report-only",
+                                    "--json", path])
+            self.assertEqual(code, 0)
+            with open(path) as stream:
+                document = _json.load(stream)
+            self.assertEqual(document["backend"]["name"], "swig")
+            self.assertIn("provenance", document["backend"])
+        finally:
+            _os.unlink(path)
+        # And before resolution the field is present and null, never absent.
+        audit._BACKEND = None
+        handle, path = _tempfile.mkstemp(suffix=".json")
+        _os.close(handle)
+        _os.unlink(path)
+        try:
+            audit._write_json(path, "b.kicad_pcb", "unevaluable", {})
+            with open(path) as stream:
+                self.assertIsNone(_json.load(stream)["backend"])
+        finally:
+            _os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

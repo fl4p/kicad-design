@@ -849,3 +849,132 @@ class Round5Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackendSelectionTests(unittest.TestCase):
+    """The audit must name the backend behind its numbers, and must refuse a
+    backend it cannot use rather than quietly using the other one."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.json_path = os.path.join(self._tmp.name, "audit.json")
+        self.board = os.path.join(self._tmp.name, "b.kicad_pcb")
+        Path(self.board).write_text("(kicad_pcb)\n", encoding="utf-8")
+        self._saved_backend = guard._BACKEND
+        guard._BACKEND = None
+
+    def tearDown(self):
+        guard._BACKEND = self._saved_backend
+        self._tmp.cleanup()
+
+    def _report(self):
+        with open(self.json_path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_a_requested_backend_that_is_unavailable_is_unevaluable(self):
+        def refuse(environ=None):
+            raise guard.kicad_backend.BackendUnavailable(
+                "ipc", "ipc-test-refusal", "not here")
+
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": None}),
+            mock.patch.object(guard.kicad_backend, "probe_ipc", refuse),
+        ):
+            code = guard.main([self.board, "--backend", "ipc",
+                               "--json", self.json_path])
+        self.assertEqual(code, 1)
+        report = self._report()
+        self.assertEqual(report["verdict"], "unevaluable")
+        self.assertIn("ipc-test-refusal", report["reason"])
+
+    def test_an_unavailable_backend_never_falls_back_to_the_other_one(self):
+        ran = []
+
+        def refuse(environ=None):
+            raise guard.kicad_backend.BackendUnavailable(
+                "ipc", "ipc-test-refusal", "not here")
+
+        def swig(environ=None):  # pragma: no cover - must not run
+            ran.append(True)
+            raise AssertionError("fell back to swig")
+
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": None}),
+            mock.patch.object(guard.kicad_backend, "probe_ipc", refuse),
+            mock.patch.object(guard, "_swig_selection", swig),
+            mock.patch.object(guard, "_run_worker") as worker,
+        ):
+            code = guard.main([self.board, "--backend", "ipc"])
+        self.assertEqual(code, 1)
+        self.assertEqual(ran, [])
+        worker.assert_not_called()
+
+    def test_an_unknown_backend_in_the_environment_is_unevaluable(self):
+        with mock.patch.dict(guard.os.environ,
+                             {guard.kicad_backend.ENV_VAR: "swog"}):
+            code = guard.main([self.board, "--json", self.json_path])
+        self.assertEqual(code, 1)
+        self.assertIn("backend-unknown", self._report()["reason"])
+
+    def test_a_backend_without_the_needed_capability_is_refused(self):
+        def crippled(environ=None):
+            return guard.kicad_backend.Selection(
+                "swig", None, "a backend that cannot collide", frozenset())
+
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": None}),
+            mock.patch.object(guard, "_swig_selection", crippled),
+        ):
+            code = guard.main([self.board, "--backend", "swig",
+                               "--json", self.json_path])
+        self.assertEqual(code, 1)
+        report = self._report()
+        self.assertEqual(report["verdict"], "unevaluable")
+        self.assertIn("backend-missing-capability", report["reason"])
+        self.assertIn(guard.kicad_backend.CAP_EFFECTIVE_SHAPE_COLLIDE,
+                      report["reason"])
+
+    def test_an_unresolved_backend_is_reported_as_null_not_omitted(self):
+        guard._write_json(self.json_path, self.board, "unevaluable", [], {},
+                          "did not get that far")
+        self.assertIn("backend", self._report())
+        self.assertIsNone(self._report()["backend"])
+
+    def test_the_resolved_backend_reaches_the_verdict_line_and_the_report(self):
+        selection = guard.kicad_backend.Selection(
+            "swig", None, "pcbnew 0.0.0-test in-process",
+            guard.kicad_backend.SWIG_CAPABILITIES)
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": None}),
+            mock.patch.object(guard, "_swig_selection",
+                              lambda environ=None: selection),
+            mock.patch.object(guard, "run_audit", return_value=0) as audit,
+        ):
+            code = guard.main([self.board, "--json", self.json_path])
+        self.assertEqual(code, 0)
+        audit.assert_called_once()
+        self.assertEqual(guard._BACKEND["name"], "swig")
+        self.assertEqual(guard._BACKEND["source"], "default")
+        self.assertIn("pcbnew 0.0.0-test", guard._backend_suffix())
+
+    def test_the_worker_is_told_which_backend_the_parent_chose(self):
+        selection = guard.kicad_backend.Selection(
+            "swig", None, "detail", guard.kicad_backend.SWIG_CAPABILITIES,
+            interpreter="/x/python3")
+        with (
+            mock.patch.dict(sys.modules, {"pcbnew": None}),
+            mock.patch.object(guard, "_swig_selection",
+                              lambda environ=None: selection),
+            mock.patch.object(guard, "_run_worker", return_value=0) as worker,
+        ):
+            guard.main([self.board, "--backend", "swig"])
+        self.assertEqual(worker.call_args[0][0], "/x/python3")
+        proc = mock.Mock(returncode=0, stdout=f"{guard._OK_LINE}: ok\n",
+                         stderr="")
+        with mock.patch.object(guard.subprocess, "run",
+                               return_value=proc) as run:
+            guard._run_worker("/x/python3", mock.Mock(
+                board=self.board, max_report=1, json_out=None,
+                timeout=10, backend="swig"))
+        self.assertIn("--backend", run.call_args[0][0])
+        self.assertIn("swig", run.call_args[0][0])
