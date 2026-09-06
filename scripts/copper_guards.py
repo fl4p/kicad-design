@@ -43,6 +43,15 @@ Calibration record:
   - vias: kimi3-r2 GND_BR pour-stitch sliver vias (half inside a pad's
     fill carve) FAIL at contact fractions 0.02/0.07 vs the 0.6 default
     threshold; qwen3p8max 66-via known-good board grades clean (2026-09).
+    The spoke criterion measures a strip that crosses the WHOLE annulus,
+    checked at five radii from the drill edge to the pad edge. Constructed
+    calibration in test_copper_guards_geometry.py: a 0.010 mm radially thin
+    sector covering 0.5% of the ring reads 0.0 mm (it read 0.35 mm and
+    PASSed under the earlier single-circle measurement, codex review of
+    7b00165); two disjoint slivers at different radii read 0.0 mm; a real
+    0.5 mm zone thermal spoke reads 0.44 mm and still passes the 0.3 mm
+    default. The 0.44-vs-0.50 gap is the angular footprint of a straight
+    strip narrowing with radius; conservative, in the safe direction.
 Dependencies: the MEASUREMENT paths need numpy and shapely, and
 `resistance` additionally needs scipy; the CLI boundary does not. An absent
 measurement stack exits 1 FAIL-CLOSED at the point of use, never a pass and
@@ -405,6 +414,57 @@ def parse_board(path):
 
 # ------------------------------------------------------------ check: vias
 
+_BRIDGE_ANGLES = 720          # 0.5 deg; 0.003 mm of arc at r = 0.35 mm
+_BRIDGE_RADII = 5             # inner edge, outer edge and three between
+
+
+def annulus_bridge_mm(cover_u, cx, cy, r_drill, r_pad):
+    """Width of the widest copper strip that crosses the WHOLE annulus.
+
+    Measured as an angular interval that is covered at every sampled radius
+    from the drill edge to the pad edge, converted to arc length at the mid
+    radius.
+
+    The previous implementation intersected copper with a single
+    mid-annulus circle and took the resulting arc length. That is not a
+    strip width: a radially thin sliver hugging the mid radius produces a
+    long arc while bridging nothing. Measured 2026-09-07 (codex review of
+    7b00165): a 0.010 mm-wide annular sector covering 0.5 % of the ring
+    passed as `spoke 0.35mm`, which is precisely the sliver this check
+    exists to catch. Requiring the same angular interval at every radius
+    fails that sector at the drill and pad edges while still passing a real
+    thermal-relief spoke, which is the representation-independence the
+    criterion was introduced for.
+    """
+    if cover_u is None or r_pad <= r_drill:
+        return 0.0
+    angles = np.linspace(0.0, 2.0 * math.pi, _BRIDGE_ANGLES, endpoint=False)
+    cos_a, sin_a = np.cos(angles), np.sin(angles)
+    covered = np.ones(_BRIDGE_ANGLES, dtype=bool)
+    for radius in np.linspace(r_drill, r_pad, _BRIDGE_RADII):
+        xs, ys = cx + radius * cos_a, cy + radius * sin_a
+        try:
+            here = shapely.intersects_xy(cover_u, xs, ys)
+        except AttributeError:          # pragma: no cover - shapely < 2.0
+            here = np.array([cover_u.intersects(Point(x, y))
+                             for x, y in zip(xs, ys)])
+        covered &= here
+        if not covered.any():
+            return 0.0
+    if covered.all():
+        run = _BRIDGE_ANGLES
+    else:
+        # longest contiguous run, wrapping around 0 rad
+        doubled = np.concatenate([covered, covered])
+        run = best = 0
+        for flag in doubled:
+            run = run + 1 if flag else 0
+            best = max(best, run)
+        run = min(best, _BRIDGE_ANGLES)
+    r_mid = (r_drill + r_pad) / 2.0
+    return run / _BRIDGE_ANGLES * 2.0 * math.pi * r_mid
+
+
 def check_vias(board, nets=None, min_zone_frac=0.6, min_contact_mm=0.3,
                verbose=False):
     if board["zones_declared"] and not board["any_fill"]:
@@ -432,8 +492,6 @@ def check_vias(board, nets=None, min_zone_frac=0.6, min_contact_mm=0.3,
         r_pad, r_drill = v["size"] / 2, v["drill"] / 2
         ring = center.buffer(r_pad, quad_segs=32).difference(
             center.buffer(r_drill, quad_segs=32))
-        mid_circle = center.buffer((r_pad + r_drill) / 2,
-                                   quad_segs=64).exterior
         for layer in CU_LAYERS:
             zone_polys = board["zone_fills"].get((v["net"], layer), [])
             # pads count via their real annular-ring coverage, never by
@@ -445,16 +503,14 @@ def check_vias(board, nets=None, min_zone_frac=0.6, min_contact_mm=0.3,
                 if (zone_polys or pad_polys) else None
             cover_frac = (ring.intersection(cover_u).area / ring.area
                           if cover_u is not None else 0.0)
-            # widest contiguous copper strip crossing the mid-annulus:
+            # widest contiguous copper strip crossing the WHOLE annulus:
             # a zone thermal-relief spoke is electrically a track and must
             # not fail for being encoded as fill (representation
-            # independence) - grade its width like a track's
-            contact_w = 0.0
-            if cover_u is not None:
-                inter = mid_circle.intersection(cover_u)
-                parts = getattr(inter, "geoms", [inter])
-                contact_w = max((g.length for g in parts
-                                 if hasattr(g, "length")), default=0.0)
+            # independence) - grade its width like a track's. A strip that
+            # does not reach both the drill edge and the pad edge is a
+            # sliver, not a spoke.
+            contact_w = annulus_bridge_mm(cover_u, v["x"], v["y"],
+                                          r_drill, r_pad)
             track_conn = any(
                 s["net"] == v["net"] and s["layer"] == layer
                 and s["geom"].distance(center) <= s["width"] / 2 + 1e-6
