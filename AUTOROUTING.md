@@ -25,6 +25,7 @@ promoted, manifest-bound routes.
 - [Diff the project file after any external router runs](#diff-the-project-file-after-any-external-router-runs)
 - [Choose the backend from behaviour](#choose-the-backend-from-behaviour)
 - [KiCadRoutingTools (KRT): a native-format backend, measured](#kicadroutingtools-krt-a-native-format-backend-measured)
+- [Record iterative KRT experiments as one ledger](#record-iterative-krt-experiments-as-one-ledger)
 - [Inputs required for a promotable run](#inputs-required-for-a-promotable-run)
 - [Onboard with the v2 scaffold](#onboard-with-the-v2-scaffold)
 - [Run the candidate-and-promotion pipeline](#run-the-candidate-and-promotion-pipeline)
@@ -327,6 +328,27 @@ Measured caveats — the first three bit during the scout, the fourth on a later
    small budget as a scout unless that budget was shown to stabilise the metric on the board in
    hand — [`ROUTING.md`](ROUTING.md)'s convergence rule; the sequences are in
    [`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md) §8.
+
+## Record iterative KRT experiments as one ledger
+
+A measured KRT residue sequence was non-monotone, so do not assume monotonicity: run the control
+and every treatment through one project-owned driver with the same declared comparator, pass limit
+and stopping rule. Three invariants make the result reviewable:
+
+1. Restore and hash-check the same-stem project and DRU before KRT and after every KRT or `pcbnew`
+   save. Pin the complete argv; residue passes include `--keep-input-copper
+   --no-stub-layer-swap` unless the experiment explicitly studies one of those settings.
+2. Grade every pass through the same pinned refill, full-severity KiCad JSON DRC, connectivity
+   classifier, protected-geometry check and independent collision audit. An ambiguous or failed
+   verdict cannot feed the next pass or become the retained best.
+3. Keep one machine-readable record for every attempted pass, including failures: input/output
+   board digests, tool/helper identities, command status, separated connectivity counts and audit
+   verdicts. Record the stopping reason and retain the best pass, not merely the last.
+
+For an A/B, bind every arm to one canonical base seed and prove with a declared semantic diff that
+its pre-route input differs only by the named treatment. Preserve the full pass sequence. Without
+those invariants, a count list describes observed files but does not establish a controlled layout
+comparison.
 
 ## Inputs required for a promotable run
 

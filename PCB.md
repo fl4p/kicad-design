@@ -16,7 +16,7 @@ pays only for what it needs:
 |---|---|
 | [`SETUP.md`](SETUP.md) | the task designs or reviews circuitry, placement, or layout around a component that meets `SKILL.md`'s device-evidence criticality test |
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing board audits, geometry checks or calibration harnesses |
-| [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing a footprint, choosing a land pattern, changing a package |
+| [`FOOTPRINTS.md`](FOOTPRINTS.md) | editing/choosing a footprint or package; **before any placement, routing, or existing-board release review**, read its inventory rule and account for all transformed pads and holes, including remote anonymous NPTH/mechanical geometry |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, chasing a wobbling md5, or a slow generator |
 | [`RELEASE.md`](RELEASE.md) | verifying a board, or answering "is this ready to fab?" |
 | [`THERMALS.md`](THERMALS.md) | dissipation, heat paths, thermal pads/vias, gradients, or temperature validation |

@@ -44,7 +44,7 @@ Read only the companions required by the task:
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or routing ownership and completion |
 | [`ROUTING.md`](ROUTING.md) | any routing pass is planned, by hand or by machine — layer plan, escape stage, net priority, router cost weights, and the routing-shape audit; read it before [`AUTOROUTING.md`](AUTOROUTING.md), and whenever a routed board is reviewed or a route looks arbitrary |
 | [`AUTOROUTING.md`](AUTOROUTING.md) | any routing pass is planned — the default pre-pass scout lives here (with [`PCB.md`](PCB.md)); promotion of external geometry (Freerouting/KRT candidates, route manifests) additionally needs the project opt-in |
-| [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern |
+| [`FOOTPRINTS.md`](FOOTPRINTS.md) | selecting, creating, or modifying a footprint or land pattern; **before any placement, routing, or existing-board release review**, read its inventory rule and account for every transformed pad and hole, including remote anonymous NPTH/mechanical geometry |
 | [`PCBNEW.md`](PCBNEW.md) | scripting `pcbnew`, preserving reproducibility, or improving generator performance |
 | [`RELEASE.md`](RELEASE.md) | running board verification, inspecting severity maps, exporting fabrication data, or deciding release readiness |
 | [`GUARDS.md`](GUARDS.md) | writing or reviewing generators, validators, audits, or calibration harnesses |

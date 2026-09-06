@@ -178,6 +178,30 @@ find out why.
     lever measured 24 → 21 (two passes, host Experiment J), while fable's standing-column variant
     was inseparable from the untouched seed under best-of iteration (§8). Two-pass readings.
 
+12. **Endpoint-led closure and remote mechanical pads (Codex session, 2026-09-06).** The archived
+    deliverable and reports are under
+    `~/dev/ee/hw/o2-probe-2layer-archive/codex-final-bom39-zero/`; the narrative is
+    `~/dev/ee/hw/o2-probe-2layer-archive/writeups/codex-PCB-LAYOUT-RETROSPECTIVE.md`. The branch
+    selected for closure was not chosen by
+    the lowest aggregate total or by continuing the 16-signal KRT measurement branch. After repair
+    of two wire footprints it had two signal opens,
+    35 GND records and one local short, but the two signal endpoints had bounded local escapes and
+    the GND burden had filled-polygon stitch sites. The closure pass moved the one local blocker,
+    connected both signals, restored the displaced connection, stitched only legal overlapping
+    fill components, added short pad escapes, moved one passive 0.8 mm so its GND pad landed in the
+    connected plane, and removed dangling, duplicate and too-close-via residue. Its pinned
+    `kicad-cli --refill-zones` report then read 0 aggregate unconnected and no copper-rule findings;
+    an alternate refill later exposed three GND topology records, which is why refill provenance
+    and separated counts remain required. This is one completion instance, not evidence that local
+    closure always beats another global pass.
+
+    The same session traced a placement-origin defect to two stock wire footprints: each carried
+    an empty-number 2.2 mm NPTH 10.2 mm from its origin, outside the electrical-pad cluster and the
+    placement model used by the routing experiment; one transformed hole sat 0.1853 mm from a pad
+    against a 0.200 mm rule. The generic lesson is to inventory every transformed pad and hole,
+    including anonymous mechanical pads, and either reserve its complete envelope or replace it
+    under footprint authority. The specific offset is not a universal rejection threshold.
+
 ## Not promoted
 
 - Pi's placement ideas (U8 rotated 270° to face U7; WE_BUF filter R37/C30 moved under U8 pin 5

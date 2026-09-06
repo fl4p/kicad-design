@@ -9,6 +9,7 @@ in [`PCB.md`](PCB.md); `pcbnew` scripting in [`PCBNEW.md`](PCBNEW.md). Read
 
 - [Verify pin identity, not only the land pattern](#verify-pin-identity-not-only-the-land-pattern)
 - [Verify the land pattern, not the name](#verify-the-land-pattern-not-the-name)
+- [Inventory remote mechanical geometry before placement](#inventory-remote-mechanical-geometry-before-placement)
 - [Qualify external spacing and lead fit](#qualify-external-spacing-and-lead-fit)
 - [Classify via-in-pad by process](#classify-via-in-pad-by-process)
 - [Treat copper, mask, and paste independently](#treat-copper-mask-and-paste-independently)
@@ -91,6 +92,24 @@ instead of accepting a plausible library name.
 When creating a custom footprint, calibrate the generator against a known land pattern before
 using it for the new one. Require the emitted pad inventory and unioned geometry to match the
 datasheet, including repeated pad numbers and notched or merged same-net lands.
+
+### Inventory remote mechanical geometry before placement
+
+The footprint origin and the electrical pad cluster do not bound the footprint. Before placement,
+routing, or an existing-board release review, inventory **every emitted pad and hole**, including
+empty-number mechanical pads, NPTHs, slots and repeated pad numbers. Record each one's attribute,
+drill/slot dimensions, local offset from the footprint origin and transformed position on the
+board. Compare that inventory with the vendor drawing and with the placement envelope the floorplan
+actually reserved. Produce the inventory with a project generator assertion or a board parser; a
+visual glance at the electrical pad cluster is not inventory evidence.
+
+Flag any unexplained pad or hole outside the expected body, courtyard or declared cable/fixture
+envelope for review; there is no universal maximum offset because a legitimate mounting or strain-
+relief feature may be remote. The project must either include the feature's full transformed
+geometry in placement and routing obstacles or remove/replace it from the authoritative footprint.
+Do not let an unnumbered pad disappear merely because a BOM, netlist or electrical-pad loop ignores
+it. Calibrate the inventory check with a scratch footprint carrying an anonymous off-origin NPTH
+and require the report to identify that pad and its transformed location.
 
 ## Qualify external spacing and lead fit
 

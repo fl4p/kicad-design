@@ -21,6 +21,7 @@ Read them before changing a rule here.
 - [Author the skeleton by hand, in priority order](#author-the-skeleton-by-hand-in-priority-order)
 - [A router's defaults are tuned for completion, not for legibility](#a-routers-defaults-are-tuned-for-completion-not-for-legibility)
 - [A sequence of per-net passes is not a routing pass](#a-sequence-of-per-net-passes-is-not-a-routing-pass)
+- [Finish with endpoint-led local closure](#finish-with-endpoint-led-local-closure)
 - [Grade the shape of the route, not only its DRC](#grade-the-shape-of-the-route-not-only-its-drc)
 - [Lane capacity is not routability — measured three times, and the third one agreed](#lane-capacity-is-not-routability--measured-three-times-and-the-third-one-agreed)
 - [Do not generalise the anti-autorouter folklore](#do-not-generalise-the-anti-autorouter-folklore)
@@ -339,6 +340,29 @@ If a board's routing provenance reads as a list of per-net or per-cluster passes
 that is not an implementation detail to record — it is the finding. Re-run the whole scope in one
 pass with the rip-up loop enabled, or route it by hand; do not accumulate.
 
+## Finish with endpoint-led local closure
+
+A global router reaching its declared stopping rule does not imply that its lowest-count candidate
+is the easiest one to finish. This is a late-stage repair over a preserved global-route checkpoint,
+not a substitute for global rip-up and reroute:
+
+1. Choose the branch from exact open endpoint identities and local escape/stitch evidence, not the
+   aggregate alone; keep the declared ranking comparator visible.
+2. Close one signal at a time. A scripted path must collide effective copper against pads, tracks,
+   arcs, vias, holes, **filled polygons**, edges and rule areas. Disconnected same-net copper is a
+   target or obstacle until the proposed path actually joins it.
+3. Withdraw only a named local blocker when needed. After each closure, refill and compare gained
+   and lost endpoints, then rerun DRC, the independent collision audit and protected-geometry check.
+4. Only after signal opens are zero, stitch pour components at legal overlapping fill. Verify the
+   intended component merge after refill and require a calibrated minimum annular contact; KiCad
+   can accept a DRC-clean sliver. Remove dangling/duplicate residue and rerun the complete board
+   gate before promotion.
+
+The successful measured instance and its limits are recorded in
+[`reviews/2026-09-05-cross-session-routing-evidence.md`](reviews/2026-09-05-cross-session-routing-evidence.md)
+§12. It supports this closure workflow; it does not establish that one placement, router or path
+planner is generally superior.
+
 ## Grade the shape of the route, not only its DRC
 
 DRC and [`scripts/kicad_copper_collisions.py`](scripts/README.md) answer "is this legal" and "is
@@ -460,16 +484,36 @@ not help at that budget" until someone does. Repeated *grading* of one saved boa
 question — that is deterministic (the geometry-hash paragraph above); the router's sequence is not.
 
 **Rank on signal opens; the gate is still the total.** KiCad's `unconnected_items` mixes records
-of different kinds. A record whose two items are both zones is a same-net pour island, and its
-count depends on which refill produced the polygons: on two candidates of one design, one board
-graded 16 non-zone opens with 36 island records under `pcbnew.ZONE_FILLER` and 16 with 26 under
-`kicad-cli --refill-zones`, the other 21 and 5 under both (§9 of the evidence file; two candidates
-of one design, so treat the invariance as measured there, not proven in general). Records between
-pads, tracks and vias are the routing result. Records on a plane net that pair a zone with a via
-or track, or a via with a track, can be either: keep them as a third bucket, list them, and say
-which classifier produced the split — a zone-only classifier and a net-based one disagreed by two
-items on the same board. Rank routing strategies on the signal component and report every bucket
-beside the total. The split changes the ranking, not the definition of done:
+of different kinds, but its JSON contains the net only inside each item's human-readable
+description. A zone-only classifier is wrong: measured reports also contain zone-track, zone-via
+and track-via records on a pour-managed net. Conversely, not every net with a familiar power name
+is necessarily pour-managed. Make the project declare the exact pure-pour nets and classify every
+record on those nets as pour topology; leave a zone on an undeclared net, a missing net, or
+mismatched item nets ambiguous. If one net mixes routed-return obligations with refill-owned plane
+work, declare it with `--mixed-pour-net`; every record on it remains ambiguous because DRC text
+alone cannot assign the obligation safely.
+
+Use the shipped parser on a fresh JSON DRC report:
+
+```sh
+python3 scripts/kicad_drc_connectivity.py drc.json \
+    --pour-net /GND --json connectivity.json
+```
+
+The report must come from a full-severity run whose authoritative configuration does not ignore
+`unconnected_items`. The command requires `--pour-net`, `--mixed-pour-net`, or the explicit
+`--no-pour-nets` declaration when the board truly has none. It handles KiCad's `mm`, `in` and `mils`
+JSON reports and pad, qualified PTH/SMD/NPTH pad, track, via and zone descriptions; any ambiguity
+exits nonzero. `--require-zero-total` gates the original aggregate criterion. KiCad 10.0.5 was
+measured to cap a violation type at exactly 199 records. The parser conservatively refuses that
+exact count on every version, which can reject a legitimate 199; qualify the installed release's
+cap behaviour before changing that refusal or ranking the value. Do not isolate connectivity by
+deleting foreign nets, because doing so can change zone fill and topology.
+On two candidates of one measured design, signal counts stayed fixed under two refill paths while
+the pour-topology count moved by ten on one candidate (§9 of the evidence file); that observation
+is not a proof of refill invariance on arbitrary designs. Rank routing strategies on the evaluable
+signal component and report signal, pour, ambiguous and total beside each other. The split changes
+the ranking, not the definition of done:
 islands are unfinished copper until stitched or removed by zone topology, and a criterion written
 as "zero unconnected items" is met only when the total is zero, unless its owner amends it in
 words. A session that reached zero signal opens and called the task complete "under the corrected
