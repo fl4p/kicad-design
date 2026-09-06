@@ -316,17 +316,25 @@ do not renumber until the independent sources agree.
 **A prose sentence naming signals is not a pinout, and text extraction is not a pinout source.**
 `pdftotext` output orders words, not pins, so a sentence like "a 3-pin configuration (Counter,
 Reference and Working electrodes)" is the first plausible-looking pin order a text-first search
-finds and the easiest to promote silently. Take pin identity only from a pin drawing or a numbered
-pin-function table; see `FOOTPRINTS.md`, "Verify pin identity, not only the land pattern", for the
-tracing, view, and provenance rules.
+finds and the easiest to promote silently. Take pin identity from an explicit terminal relation — a numbered
+pin-function table, a labelled drawing, a polarity or marking statement tied to a drawn feature, a
+package standard, or a validated measurement — and record which one you used. `FOOTPRINTS.md`,
+"Verify pin identity, not only the land pattern", is canonical for the tracing, view, and
+provenance rules; this paragraph only says why the prose sentence is the trap.
 
-**Where a part has no pin-function table, the drawing is the sole authority — do not fall through
-to hardware.** A one- or two-page datasheet often carries pin identity only as labels on the
+**Where a part has no pin-function table, the drawing must be inspected — do not fall through to
+hardware.** A one- or two-page datasheet often carries pin identity only as labels on the
 mechanical drawing. A workflow built around locating the pin table will silently produce no result
 for such a part. That absence is a documentary gap to escalate, never a reason to reclassify pin
 identity as a mechanical property needing a physical sample: a fact printed in a figure is not
 made unknowable by not having opened the figure. Extract it from the drawing, and treat a genuinely
 unobtainable pin map as a blocked read under `Fail closed`.
+
+The drawing being unskippable is not the same as the drawing being sufficient: a single source
+still leaves the map uncorroborated, and some parts need an explicit marking statement before the
+drawing can be read at all. `FOOTPRINTS.md` holds the normative rule; this one says only that a
+claim that hardware is necessary cannot replace opening the figure. (Earlier wording — "the drawing
+is the sole authority" — contradicted that file's own corroboration requirement; [`reviews/2026-09-01-codex-pin-identity-rules.md`](reviews/2026-09-01-codex-pin-identity-rules.md) F5.)
 
 An absence claim needs evidence. Cite the pages and vocabulary checked, or say “not found in this
 search; full-sheet absence not established.”
@@ -336,27 +344,49 @@ search; full-sheet absence not established.”
 A reviewer without the primary sources is not a reviewer. Before dispatching any independent design
 review — subagent, Codex, or a fresh session — establish and record two preconditions:
 
-1. **A working browser surface**, per the `online-research` browser gate. A review that cannot fetch
-   cannot verify, and a fetch failure inside a review becomes a claim rather than a blocker.
-   Attach the browser explicitly; never assume the reviewer can obtain one.
-2. **Every datasheet for every component in scope**, resolved to local files before the review
-   starts, listed by MPN with document revision and hash. Do not leave working copies in a
-   temporary directory: archive them, because the review's conclusions are only as durable as the
-   documents that ground them.
+1. **A working browser surface, wherever the review needs external retrieval**, per the
+   `online-research` browser gate — matching `SKILL.md`, which requires the gate only when external
+   search or fetching is required. A fetch failure inside a review becomes a claim rather than a
+   blocker, so attach the browser explicitly and never assume the reviewer can obtain one. A review
+   grounded entirely in local primaries — PDFs on disk, the schematic, ERC/DRC, netlists, renders —
+   verifies perfectly well without a fetch; what it needs is *validated local access*, established
+   and recorded the same way. ("A review that cannot fetch cannot verify" was false as a general
+   rule; [`reviews/2026-09-01-codex-pin-identity-rules.md`](reviews/2026-09-01-codex-pin-identity-rules.md) F6.)
+2. **A claim-scoped evidence manifest**, resolved to local files before the review starts: each
+   primary work the review's claims will rest on, by MPN, with its kind, document revision and
+   hash. The controlling primary is not always a datasheet — it may be a customer drawing, a
+   package standard, an erratum, a CAD model, or a measured identification. Archive under the
+   project's authorized retention policy; where a document cannot be durably archived, retain a
+   stable pointer plus its hash and provenance record. The review's conclusions are only as
+   durable as the documents that ground them. (Earlier wording required "every datasheet" and
+   unconditional archival, which is not an executable contract; [`reviews/2026-09-01-codex-pin-identity-rules.md`](reviews/2026-09-01-codex-pin-identity-rules.md) F7.)
 
 **Enumerate the components in scope and diff that list against the sources held.** Any component
-without a primary source is stated up front as out of scope, not discovered later in a footnote.
-This is the check that matters: reviews cover the parts they have documents for, and a defect
-migrates to the part nobody could check.
+without a primary source is stated up front, not discovered later in a footnote. This is the check
+that matters: reviews cover the parts they have documents for, and a defect migrates to the part
+nobody could check.
 
-### Discard a source-less review
+**A missing source does not remove a component from scope.** `IN_SCOPE + SOURCE_MISSING =>
+UNVERIFIED/BLOCKED`, never `OUT_OF_SCOPE` — otherwise a reviewer closes `Fail closed` by
+redefinition, and the blocking requirement below is silently weakened. Only the task specification
+or explicit user authorization may narrow scope ([`reviews/2026-09-01-codex-pin-identity-rules.md`](reviews/2026-09-01-codex-pin-identity-rules.md) F8.)
 
-If a completed review turns out to have had no primary source for a component, its findings on that
-component are **void — discard them**. Do not downgrade them to low confidence, do not annotate
-them as provisional, and do not let a "verified" or "no findings" line stand with a caveat. A
-review of a component against the project's own artefacts is the design agreeing with itself, and
-it carries no evidence in either direction. Mark the review discarded for that component at the top
-of the document, restate what is now unverified, and re-review with the source in hand.
+### Void the source-dependent findings of a source-less review
+
+If a completed review turns out to have had no primary source for a component, **classify its
+findings by evidence dependency** and void the source-dependent ones. Any conclusion that needed
+the datasheet — a pin map, a rating, an absolute-maximum margin, a "verified" or "no findings" line
+covering that component — is void. Do not downgrade those to low confidence, do not annotate them
+as provisional, and do not let the blanket clearance stand with a caveat: a review of a component
+against the project's own artefacts is the design agreeing with itself, and carries no evidence in
+either direction.
+
+Artefact-only findings survive with their narrower scope stated. A DRC clearance violation at U1, a
+short across its pads, a missing bypass capacitor — these are facts about the board and need no
+datasheet. Voiding them too destroys valid findings and leaves no usable boundary for mixed claims
+like "U1 lacks required decoupling", which crosses component, net and requirement lines ([`reviews/2026-09-01-codex-pin-identity-rules.md`](reviews/2026-09-01-codex-pin-identity-rules.md) F9).
+Mark at the top of the document which findings are voided and why, restate what is now unverified,
+and re-review the source-dependent part with the source in hand.
 
 Watch for the specific way this hides: a missing source is rarely written as "not available". It is
 written as an engineering judgement — "requires a physical sample", "deferred to first article",

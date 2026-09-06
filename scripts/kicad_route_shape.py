@@ -81,6 +81,14 @@ import os
 import subprocess
 import sys
 
+# `--short-segment-mm` defines a metric rather than grading one, so it needs
+# its own domain: the floor is below any manufacturable segment KiCad's own
+# minimum track width admits, the ceiling above any length a "short" segment
+# could plausibly mean. Neither bound is corpus-calibrated -- they exist to
+# reject a vacuous metric, not to express a routing opinion.
+_MIN_SHORT_SEGMENT_MM = 0.05
+_MAX_SHORT_SEGMENT_MM = 10.0
+
 _OK_LINE = "ROUTE-SHAPE-OK"
 _NOT_GRADED_LINE = "ROUTE-SHAPE-REPORTED-NOT-GRADED"
 _FAIL_LINE = "ROUTE-SHAPE-FAIL"
@@ -520,6 +528,12 @@ def _run_worker(interpreter, argv, timeout):
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Routing-shape audit for a saved .kicad_pcb",
+        # The pre-parse invalidator in main() matches the literal `--json`
+        # only. With abbreviation on, `--jso stale.json --bogus` was accepted
+        # by argparse, missed by the scan, and left a prior "pass" report
+        # standing -- the exact failure the scan exists to prevent (codex
+        # review of 7a99de9, reproduced 2026-09-07).
+        allow_abbrev=False,
     )
     parser.add_argument("board", help="path to the saved .kicad_pcb")
     parser.add_argument(
@@ -529,8 +543,10 @@ def build_parser():
              "have no declared direction and their conformance is unevaluable",
     )
     parser.add_argument("--short-segment-mm", type=float, default=0.2,
-                        help="segments shorter than this count as short "
-                             "(default 0.2)")
+                        help=f"segments shorter than this count as short "
+                             f"(default 0.2, allowed range "
+                             f"[{_MIN_SHORT_SEGMENT_MM}, "
+                             f"{_MAX_SHORT_SEGMENT_MM}] mm)")
     parser.add_argument("--max-vias-on-any-net", type=float,
                         help="fail if any single net carries more vias than "
                              "this; the per-net maximum is used because the "
@@ -600,6 +616,24 @@ def main(argv=None):
         return _fail_unevaluable(
             f"--short-segment-mm must be finite and positive, got "
             f"{args.short_segment_mm}", args.json_out, args.board)
+    # This parameter DEFINES the short-segment metric, so it dilutes both
+    # short-segment gates without touching the board: `--short-segment-mm
+    # 1e-9` turned a measured `short_segment_fraction 1.000 vs limit 0.15`
+    # FAIL into ROUTE-SHAPE-OK (codex review of 7a99de9). The threshold
+    # range check below rejects a gate that can never fire; a metric
+    # definition that can never fire is the same configuration error one
+    # level up. Below the floor no manufacturable segment is short; above
+    # the ceiling essentially all copper is, and neither is a gate.
+    if not (_MIN_SHORT_SEGMENT_MM <= args.short_segment_mm
+            <= _MAX_SHORT_SEGMENT_MM):
+        return _fail_unevaluable(
+            f"--short-segment-mm={args.short_segment_mm} is outside "
+            f"[{_MIN_SHORT_SEGMENT_MM}, {_MAX_SHORT_SEGMENT_MM}] mm; it "
+            "defines the short-segment metric, so a value no real segment "
+            "can fall below (or one nearly all copper falls below) makes "
+            "both short-segment gates vacuous -- a configuration error, not "
+            "a verdict about the board",
+            args.json_out, args.board)
     for name, value, lo, hi, integral in (
         ("--max-vias-on-any-net", args.max_vias_on_any_net, 0.0, None, True),
         ("--max-full-stack-via-fraction", args.max_full_stack_via_fraction, 0.0, 1.0, False),
@@ -684,7 +718,9 @@ def main(argv=None):
     if findings:
         print(f"{_FAIL_LINE}: {len(findings)} of {graded} graded metrics failed")
         return 2
-    print(f"{_OK_LINE}: {graded} graded metrics within their thresholds")
+    print(f"{_OK_LINE}: {graded} graded metrics within their thresholds "
+          f"(short-segment metric defined at "
+          f"{args.short_segment_mm} mm)")
     return 0
 
 

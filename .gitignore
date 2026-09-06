@@ -1,1 +1,6 @@
 .pi-subagents/
+
+# Agent scratch: .claude/worktrees/ holds live git worktrees inside the
+# repo, so an unguarded `git add -A` would commit them.
+.claude/
+.playwright-mcp/

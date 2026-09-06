@@ -251,7 +251,16 @@ class ConnectivitySplitTests(unittest.TestCase):
                 io.StringIO()
             ):
                 self.assertEqual(
-                    split.main([str(drc), "--pour-net", "/GND", "--json", str(out)]),
+                    split.main(
+                        [
+                            str(drc),
+                            "--pour-net",
+                            "/GND",
+                            "--report-only",
+                            "--json",
+                            str(out),
+                        ]
+                    ),
                     0,
                 )
                 self.assertEqual(
@@ -523,7 +532,104 @@ class ConnectivitySplitTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
             ):
-                self.assertEqual(split.main(["--no-pour-nets", str(drc)]), 0)
+                self.assertEqual(
+                    split.main(["--no-pour-nets", str(drc), "--report-only"]),
+                    0,
+                )
+
+    def test_cli_refuses_an_ungraded_gating_run(self):
+        """No gate and no --report-only must not read as a pass."""
+        with tempfile.TemporaryDirectory() as raw_dir:
+            drc = pathlib.Path(raw_dir) / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                stderr
+            ):
+                self.assertEqual(split.main(["--no-pour-nets", str(drc)]), 2)
+            self.assertIn("ungraded gating run", stderr.getvalue())
+
+    def test_cli_rejects_report_only_with_a_gate(self):
+        with tempfile.TemporaryDirectory() as raw_dir:
+            drc = pathlib.Path(raw_dir) / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(
+                    split.main(
+                        [
+                            "--no-pour-nets",
+                            str(drc),
+                            "--report-only",
+                            "--require-zero-total",
+                        ]
+                    ),
+                    2,
+                )
+
+    def test_signal_open_gate_fails_while_aggregate_gate_would_not_be_usable(self):
+        """The gate the split exists for: pour records present, signal open."""
+        report = drc_report(
+            [
+                record("Pad 1 [/SENSE] of R1 on F.Cu", "Track [/SENSE] on F.Cu"),
+                record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu"),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as raw_dir:
+            directory = pathlib.Path(raw_dir)
+            drc = directory / "drc.json"
+            out = directory / "split.json"
+            drc.write_text(json.dumps(report), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(
+                    split.main(
+                        [
+                            str(drc),
+                            "--pour-net",
+                            "/GND",
+                            "--require-zero-signal-opens",
+                            "--json",
+                            str(out),
+                        ]
+                    ),
+                    4,
+                )
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(written["signal_open_gate"], "fail")
+            self.assertEqual(written["aggregate_gate"], "not_requested")
+            self.assertEqual(written["counts"]["signal_open_records"], 1)
+            self.assertEqual(written["counts"]["pour_topology_records"], 1)
+
+    def test_signal_open_gate_passes_with_pour_records_present(self):
+        report = drc_report(
+            [record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")]
+        )
+        with tempfile.TemporaryDirectory() as raw_dir:
+            directory = pathlib.Path(raw_dir)
+            drc = directory / "drc.json"
+            out = directory / "split.json"
+            drc.write_text(json.dumps(report), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(
+                    split.main(
+                        [
+                            str(drc),
+                            "--pour-net",
+                            "/GND",
+                            "--require-zero-signal-opens",
+                            "--json",
+                            str(out),
+                        ]
+                    ),
+                    0,
+                )
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(written["signal_open_gate"], "pass")
 
 
 if __name__ == "__main__":

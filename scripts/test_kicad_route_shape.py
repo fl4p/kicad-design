@@ -393,6 +393,51 @@ class CliContract(unittest.TestCase):
             self.run_cli(["b.kicad_pcb", "--short-segment-mm", "0",
                           "--max-vias-on-any-net", "2"]), 1)
 
+    def test_vacuous_short_segment_definition_is_unevaluable(self):
+        """`--short-segment-mm` defines the metric, so it dilutes both
+        short-segment gates without touching the board: 1e-9 turned a
+        measured 1.000-vs-0.15 FAIL into ROUTE-SHAPE-OK (codex review of
+        7a99de9). A ceiling is the same error in the other direction."""
+        for value in ("1e-9", "0.0001", "1000"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.run_cli(["b.kicad_pcb", "--short-segment-mm", value,
+                                  "--max-short-segment-fraction", "0.15"]), 1)
+        # The default and the bounds themselves stay usable.
+        for value in ("0.05", "0.2", "10"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.run_cli(["b.kicad_pcb", "--short-segment-mm", value,
+                                  "--report-only"]), 0)
+
+    def test_abbreviated_json_flag_is_refused_not_silently_accepted(self):
+        """The pre-parse invalidator matches the literal `--json` only. With
+        argparse abbreviation on, `--jso stale.json --bogus` was ACCEPTED as
+        --json, missed by the scan, and left a prior "pass" report standing
+        (codex review of 7a99de9, reproduced 2026-09-07). `allow_abbrev=False`
+        makes the abbreviation an unrecognised argument instead, so the run
+        fails loudly and the named file is not this run's report target --
+        the same contract `kicad_drc_connectivity.py` already holds. The
+        literal flag still invalidates."""
+        import tempfile, json as _json, os as _os
+        stale = _json.dumps({"tool": "kicad_route_shape", "verdict": "pass"})
+        with tempfile.TemporaryDirectory() as directory:
+            report = _os.path.join(directory, "report.json")
+            with open(report, "w", encoding="utf-8") as handle:
+                handle.write(stale)
+            with contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                self.run_cli(["b.kicad_pcb", "--jso", report, "--bogus-flag"])
+            with open(report, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), stale)
+            # Control: spelled in full, the same malformed command line does
+            # invalidate the report it targets.
+            with contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                self.run_cli(["b.kicad_pcb", "--json", report, "--bogus-flag"])
+            with open(report, encoding="utf-8") as handle:
+                self.assertEqual(_json.load(handle)["verdict"], "unevaluable")
+
     def test_vacuous_out_of_domain_thresholds_are_unevaluable(self):
         """A fraction outside [0,1] can never fail, so it is a configuration
         error, not a pass."""

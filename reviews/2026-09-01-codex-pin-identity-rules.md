@@ -9,6 +9,17 @@ DS30086 Rev 31-2 (39c16a68); KiCad 10.0.5 local manual (a87371d8).
 NOTE: the Playwright/CDP browser did NOT attach ('browser runtime exposed no
 binding'); it worked from local primaries only and no finding depends on a fetch.
 
+STATUS (added 2026-09-07): when this file was committed in `d0e3f8f` none of its
+eleven findings had been applied to the documents, and the only record of that was
+the commit message — the shipped rules still carried text this review had disproved
+against a primary source. Applied since: **F1, F2, F3, F5, F6, F7, F8, F9 and F10**
+are now fixed in `FOOTPRINTS.md` and `SETUP.md`, each at the passage named below.
+**F4** (the `pinmap:`/`view:`/`leaders:` token check is self-certifying) and **F11**
+(pin-map status propagation is cosmetic) are NOT fixed: both need a machine-readable
+schema and a calibrated checker that do not exist yet. Both passages now carry a
+"Review correction" note saying so in the document itself, so no reader takes the
+fields for a check that passed.
+
 FINDINGS:
 
 1. **(c) [FOOTPRINTS.md:24](/Users/fab/dev/ee/kicad-design/FOOTPRINTS.md:24), [SETUP.md:316](/Users/fab/dev/ee/kicad-design/SETUP.md:316) — “Never from prose” is over-broad.** Diodes Incorporated’s common 1N4148W SOD123 datasheet, DS30086 Rev. 31-2, page 1, has no numbered terminal-function table; it establishes physical identity through the prose “Polarity: Cathode Band” plus the marking drawing. The literal rule makes that pin map impossible to establish. **Fix:** prohibit deriving order from an *unordered enumeration of signal names*. Permit any explicit terminal relation—numbered table, labelled drawing, polarity/marking statement tied to a drawn feature, package standard, or validated measurement—and record the relation used.

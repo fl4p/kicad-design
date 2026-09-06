@@ -13,11 +13,20 @@ splits records into:
   assign mixed-net records to authored routing versus refill-owned topology.
 
 The declaration is intentionally project-owned.  The script does not assume
-that a net named GND is a plane, or that every plane net is named GND.  Exit 0
-means the split was evaluable, not that the board is connected.  Exit 2 is an
-input/configuration error, exit 3 means the classification is unevaluable
-(ambiguous or possibly capped), and exit 4 means --require-zero-total was
-requested and the exact total was nonzero.
+that a net named GND is a plane, or that every plane net is named GND.
+
+A gating run needs a gate.  The whole product of this tool is the
+signal/pour split, so `--require-zero-total` -- which ignores that split --
+is not the only gate on offer: `--require-zero-signal-opens` grades the
+signal side alone, which is the gate a board with legitimate pour records can
+actually use.  A run with neither gate and no explicit `--report-only` is a
+configuration error, not a pass: exit 0 with no gate used to mean "the split
+was evaluable" while reading exactly like "the board is connected".
+
+Exit 2 is an input/configuration error, exit 3 means the classification is
+unevaluable (ambiguous or possibly capped), and exit 4 means a requested gate
+failed.  Exit 0 means a requested gate passed, or -- under `--report-only` --
+that the split was evaluable and nothing was graded.
 """
 
 from __future__ import annotations
@@ -404,6 +413,7 @@ def prepare_json(path: pathlib.Path, source: Optional[pathlib.Path]) -> None:
             "source": str(source) if source is not None else None,
             "classification_evaluable": False,
             "aggregate_gate": "unevaluable",
+            "signal_open_gate": "unevaluable",
             "error": "classification did not complete",
         },
     )
@@ -439,6 +449,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-zero-total",
         action="store_true",
         help="gate the aggregate completion criterion after classification",
+    )
+    parser.add_argument(
+        "--require-zero-signal-opens",
+        action="store_true",
+        help=(
+            "gate the signal side of the split: fail if any record is a "
+            "signal open, whatever the pour topology count. This is the gate "
+            "a board with legitimate pour records can use; "
+            "--require-zero-total cannot pass on such a board"
+        ),
+    )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help=(
+            "classify and report without grading. Exit 0 means the split was "
+            "evaluable, never that the board is connected; not valid as a gate"
+        ),
     )
     return parser
 
@@ -538,6 +566,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "declare --pour-net/--mixed-pour-net, or explicitly pass "
                 "--no-pour-nets"
             )
+        gates = (args.require_zero_total, args.require_zero_signal_opens)
+        if args.report_only and any(gates):
+            raise ConnectivityError(
+                "--report-only cannot be combined with a gate: a run is "
+                "either graded or not"
+            )
+        if not args.report_only and not any(gates):
+            raise ConnectivityError(
+                "no gate given and --report-only not set: an ungraded gating "
+                "run is unevaluable, not a pass. Pass "
+                "--require-zero-signal-opens (the signal side alone), "
+                "--require-zero-total (the aggregate), or --report-only"
+            )
         report, receipt = load_report(source)
         result = classify_report(
             report, str(source), pour_nets, mixed_pour_nets
@@ -550,14 +591,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         }
         if not result["classification_evaluable"]:
             result["aggregate_gate"] = "unevaluable"
-        elif args.require_zero_total:
-            result["aggregate_gate"] = (
-                "pass"
-                if result["counts"]["total_unconnected_records"] == 0
-                else "fail"
-            )
+            result["signal_open_gate"] = "unevaluable"
         else:
-            result["aggregate_gate"] = "not_requested"
+            if args.require_zero_total:
+                result["aggregate_gate"] = (
+                    "pass"
+                    if result["counts"]["total_unconnected_records"] == 0
+                    else "fail"
+                )
+            else:
+                result["aggregate_gate"] = "not_requested"
+            if args.require_zero_signal_opens:
+                result["signal_open_gate"] = (
+                    "pass"
+                    if result["counts"]["signal_open_records"] == 0
+                    else "fail"
+                )
+            else:
+                result["signal_open_gate"] = "not_requested"
         if args.json:
             write_json(args.json, result)
     except ConnectivityError as exc:
@@ -576,9 +627,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if result["report_censored"]:
         print(f"UNEVALUABLE: {result['censor_reason']}", file=sys.stderr)
         return 3
+    if args.require_zero_signal_opens and counts["signal_open_records"]:
+        print(
+            "FAIL: {signal_open_records} signal open record(s)".format(**counts),
+            file=sys.stderr,
+        )
+        return 4
     if args.require_zero_total and counts["total_unconnected_records"]:
         print("FAIL: aggregate unconnected total is nonzero", file=sys.stderr)
         return 4
+    if args.report_only:
+        print(
+            "CONNECTIVITY-REPORTED-NOT-GRADED: the split was evaluable; "
+            "nothing was graded"
+        )
     return 0
 
 
