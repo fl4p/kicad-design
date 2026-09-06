@@ -309,6 +309,40 @@ unconnected count (30, 30, 30) but clearance-violation counts of 4, 18 and 4. Co
 deterministic; the violation tally was not. Comparing two routing strategies on a noisy metric
 invents differences that are not there.
 
+**Equal pass count is not equal convergence.** A router that accepts its previous copper as input
+defines an iterative search trajectory, and its objective can improve, regress, then recover. Treat
+one- or two-pass readings as scouts, not A/B verdicts. Before claiming that a placement, authored
+copper topology, or cost setting wins:
+
+1. Hold seed, router/tool versions, rules, refill path, and per-pass command constant within every
+   arm.
+2. Choose the same pass budget and stopping rule before running the arms (for example, stop after a
+   fixed maximum or after a stated number of passes without a new best).
+3. Record the complete objective sequence and retain the best valid artifact, not merely the last.
+4. If the arms' best results overlap the control's own within-trajectory range, report no measured
+   separation. Do not turn a transient early reversal into a layout conclusion.
+
+This is separate from repeated grading of one saved board: its connectivity may be deterministic
+while the router's evolving sequence is non-monotone. A comparison is not mature merely because
+both arms ran the same small number of passes.
+
+**Keep comparison metrics and the completion gate separate.** A DRC aggregate may itself combine
+different mechanisms. When evidence splits it, retain and report both the component counts and the
+original total. Use only the stable, routing-owned component to compare routing strategies, but do
+not substitute that comparison score for [`PCB.md`](PCB.md)'s Completed-PCB predicate. In
+particular, refill-dependent unconnected records between same-net zone components are not signal
+routing results, yet they remain unfinished electrical CAD until stitched, eliminated by valid zone
+topology, or explicitly removed from the project acceptance criteria by its owner. A statement that
+changes how results are ranked is not such a waiver.
+
+Before declaring completion, copy the task's original definition of done into a fail-closed ledger
+and evaluate every clause from the final artifacts. Later metric-semantic findings go in a separate
+amendment/history section. Any false or unevaluable clause makes the task-level verdict
+`INCOMPLETE`, even when a named routing sub-phase is complete. This prevents a technically correct
+reclassification from silently weakening the requested outcome; the measured failure and required
+report shape are recorded in
+[`reviews/2026-09-05-ranking-metric-is-not-completion.md`](reviews/2026-09-05-ranking-metric-is-not-completion.md).
+
 It reports, per board and per net: vias per routed net, the via layer-span histogram, the segment
 length distribution, per-layer copper length, and — only when `--layer-direction` is supplied —
 the fraction of copper length running along each layer's declared preferred direction. Every
