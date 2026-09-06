@@ -482,7 +482,11 @@ def _prescan_json_output(argv: Sequence[str]) -> Optional[pathlib.Path]:
     for index, token in enumerate(argv):
         if token == "--":
             break
-        if token == "--json":
+        # An abbreviation counts for INVALIDATION only: allow_abbrev is off
+        # so `--jso` is rejected as an argument, but the operator meant it as
+        # the report target and a stale prior report must not survive the
+        # failed run (codex review of 7b00165).
+        if _names_json(token):
             if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
                 json_out = pathlib.Path(argv[index + 1])
         if token.startswith("--json="):
@@ -490,6 +494,18 @@ def _prescan_json_output(argv: Sequence[str]) -> Optional[pathlib.Path]:
             if value:
                 json_out = pathlib.Path(value)
     return json_out
+
+
+def _names_json(token: str) -> bool:
+    """True for `--json` and for any prefix argparse would have abbreviated.
+
+    Used for invalidation and alias detection only. `allow_abbrev` is off, so
+    an abbreviation is still REJECTED as an argument -- but the operator
+    plainly meant it as the report target, and both the stale-report rule and
+    the alias guard have to see it that way (codex review of 7b00165).
+    """
+    return (token.startswith("--j") and len(token) >= 3
+            and "--json".startswith(token))
 
 
 def _preparse_target_may_be_input(
@@ -510,7 +526,7 @@ def _preparse_target_may_be_input(
         if not before_terminator:
             continue
         if (
-            token == "--json"
+            _names_json(token)
             and index + 1 < len(argv)
             and not argv[index + 1].startswith("-")
         ):

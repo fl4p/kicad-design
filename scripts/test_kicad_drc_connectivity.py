@@ -424,7 +424,11 @@ class ConnectivitySplitTests(unittest.TestCase):
                 split.main(
                     [str(drc), "--no-pour-nets", "--j", str(out), "--bad-option"]
                 )
-            self.assertEqual(out.read_text(encoding="utf-8"), original)
+            # Rejected as an argument (allow_abbrev is off) AND invalidated
+            # as a report: the operator plainly meant `--j` as the target, so
+            # a prior clean result must not survive the failed run.
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertFalse(written["classification_evaluable"])
 
     def test_argparse_failure_invalidates_last_duplicate_json_target(self):
         with tempfile.TemporaryDirectory() as raw_dir:

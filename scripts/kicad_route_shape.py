@@ -129,6 +129,13 @@ def _is_own_report(path):
     return isinstance(document, dict) and document.get("tool") == _REPORT_MARKER
 
 
+def _names_json(token):
+    """True for `--json` and for any prefix of it argparse would have taken
+    as an abbreviation (`--j`, `--js`, `--jso`)."""
+    return (token.startswith("--j") and len(token) >= 3
+            and "--json".startswith(token))
+
+
 def _write_json(path, board, verdict, payload):
     """Atomically replace `path`. A crash leaves the pre-written placeholder,
     never a stale clean report. Refuses a target this tool does not own."""
@@ -588,9 +595,17 @@ def main(argv=None):
         # argparse keeps the LAST occurrence, so invalidate that one; stopping
         # at the first left the effective report standing (codex review of
         # 0aefe5b).
-        if token == "--json" and index + 1 < len(argv):
+        # Match an ABBREVIATION too, for invalidation only. `allow_abbrev`
+        # is off, so `--jso` is rejected as an argument -- but the operator
+        # plainly meant it as the report target, and leaving a prior "pass"
+        # standing after a failed run is the stale-clean-report failure
+        # `GUARDS.md` forbids (codex review of 7b00165). Rejecting the
+        # invocation and invalidating the report it names are both required;
+        # invalidating is always the safe direction, so an ambiguous prefix
+        # is treated as a match rather than skipped.
+        if _names_json(token) and index + 1 < len(argv):
             target = argv[index + 1]
-        elif token.startswith("--json="):
+        elif "=" in token and _names_json(token.split("=", 1)[0]):
             target = token.split("=", 1)[1]
     if target:
         if not _is_own_report(target):
