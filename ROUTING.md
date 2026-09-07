@@ -19,6 +19,7 @@ Read them before changing a rule here.
 - [Commit a layer plan before the first track](#commit-a-layer-plan-before-the-first-track)
 - [Escape is a stage, and it is where vias are decided](#escape-is-a-stage-and-it-is-where-vias-are-decided)
 - [Author the skeleton by hand, in priority order](#author-the-skeleton-by-hand-in-priority-order)
+- [On a repeated board, check what KiCad already carries before hand-rolling reuse](#on-a-repeated-board-check-what-kicad-already-carries-before-hand-rolling-reuse)
 - [A router's defaults are tuned for completion, not for legibility](#a-routers-defaults-are-tuned-for-completion-not-for-legibility)
 - [A sequence of per-net passes is not a routing pass](#a-sequence-of-per-net-passes-is-not-a-routing-pass)
 - [Finish with endpoint-led local closure](#finish-with-endpoint-led-local-closure)
@@ -266,6 +267,63 @@ things follow, both measured on one board in one day
   record that path in the result. This is [`GUARDS.md`](GUARDS.md)'s source-of-truth rule: the
   expectation must come from the authority, not from the artefact's neighbourhood. Check the layer
   as well as the coordinates — see the layer-swap caveat above.
+
+## On a repeated board, check what KiCad already carries before hand-rolling reuse
+
+Everything above is about authoring *one* good channel. If the board has several equivalent ones,
+do not also write the copier: KiCad 10 ships two reuse mechanisms, and the evidence behind this
+section — what was verified by running it, what was only read — is in
+[`plans/kicad10-layout-reuse.md`](plans/kicad10-layout-reuse.md).
+
+- **Multichannel Repeat Layout** (Tools → Multi-Channel) copies placement, tracks, vias, zones
+  and graphics from one placement rule area to the other rule areas **of the same board**, reassigning
+  each copied track's net through a component match. Present since KiCad 9.
+- **Board-layout design blocks** save a schematic fragment, a layout fragment, or both, into a
+  `*.kicad_blocks` library, and carry them **between boards and projects**. New in KiCad 10; the
+  KiCad 9 PCB Editor manual has no design-block chapter.
+
+Two things follow for a generator-based workflow.
+
+**A design block library is script-authorable, and that is the part worth using.** The library is a
+directory, `<lib>.kicad_blocks/<block>.kicad_block/`, holding an ordinary `<block>.kicad_pcb`, an
+optional `<block>.kicad_sch`, and a `<block>.json` of description/keywords/fields — no special
+format, written by the same s-expression board writer as any board. Verified once, KiCad 10.0.5 on
+macOS, 2026-09-07, not replicated: a library generated entirely from the bundled `pcbnew` Python
+module, with no GUI involved in authoring it, was enumerated by the Design Blocks panel and placed
+into a board that had never held its items, carrying its routed segment, its net and its `locked`
+flag, and creating a `(group … (lib_id "reuse:rc_snubber"))` link on the target board. Note the
+table filename: **`design-block-lib-table`, with hyphens** — a project file named
+`design_block_lib_table` was ignored in silence, no error and an empty panel.
+
+**Every consumer of it is GUI-only, so it does not close the loop by itself.** Verified by
+enumeration on 10.0.5: `kicad-cli` has no design-block or multichannel subcommand; the IPC API at
+tag `10.0.5` defines no message for either; the SWIG `pcbnew` module exposes only `EDA_GROUP`'s
+design-block *link* accessors. The tool actions exist and the API's `RunAction` can name them, but
+that proto's own comment is *"the TOOL_ACTIONs are specifically **not** an API … provided for
+low-level prototyping purposes only"*, and `repeatLayout` opens a modal dialog. So a generator can
+emit the reuse unit; applying it must currently go through an interactive GUI path. That is a
+statement about the interface, not about the operator — GUI automation is possible, and nothing
+here establishes that a person has to be the one clicking.
+
+Neither mechanism relaxes anything else in this file, and two rules above apply to their output
+with more force than usual:
+
+- **A replicated channel is a skeleton edit, so the skeleton rules apply to it.** Before copying,
+  Repeat Layout removes *eligible* existing routing in the target area — inside the rule area, on
+  layers enabled in that rule area, narrowed further by *Restrict to routing connected within the
+  area*, and skipping locked target items unless *Include locked items* is set, which then updates
+  them too. Read that as "routing can survive a purported clean copy" in both directions: some
+  target copper is deleted, and some is not. A block placed from a library is a copy of geometry
+  with no link back to the authority that justified it — the same hazard as verifying a board
+  against the generator sitting beside it.
+- **Do not read a completion message as verification.** Documented-not-verified, from the 10.0.5
+  manual and source: a target whose topology does not match is skipped silently and the only
+  completion signal is an info bar reading `Copied to N Rule Areas.`; routing that leaves the
+  reference area, or sits on a layer not enabled in *both* rule areas, is *"silently omitted"*; and
+  when the connectivity isomorphism fails, the tool falls back to matching by schematic-symbol
+  instance UUID — which checks footprint identity and pad count but **no connectivity** — and
+  still reports the target as "OK". Verify each replicated channel's authored copper by geometry *and*
+  layer, as after any router pass.
 
 ## A router's defaults are tuned for completion, not for legibility
 
