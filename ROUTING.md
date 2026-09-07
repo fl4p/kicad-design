@@ -654,7 +654,7 @@ The difference worth carrying is *what the intervention did to the pads*:
 | move the 2 parts a sensitivity analysis named | parts, to new locations | up | 39 → 63 |
 | rotate 19 passives in place | footprint aspect; pads stay put | up | **39 → 25** |
 
-A flat 0603 land is 3.05 x 1.55; rotated it is 1.55 x 3.05. On a long narrow board whose useful
+The flat 0603 land used here is 3.05 x 1.55; rotated it is 1.55 x 3.05. It is one library's land, not *the* 0603 land -- the bullet below records two comparable 0603 lands on this same board declaring 1.91 x 1.01 and 3.05 x 1.55. On a long narrow board whose useful
 lanes run lengthwise, that hands back 1.5 mm of the scarce axis per part without relocating
 anything. That is a placement change that does not disturb escape geometry, and it is a different
 lever from moving a part. **The hypothesis this supports — that the two failures cost more in

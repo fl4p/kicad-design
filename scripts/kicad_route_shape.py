@@ -52,6 +52,13 @@ Gating contract (fail closed):
   corpus; inventing one here would be exactly the fake-threshold failure
   `../GUARDS.md` forbids.
 
+Report binding: the `--json` report records the board's SHA-256, size and
+mtime under `source`, digested before the measurement and re-digested after
+it. A board rewritten mid-run is UNEVALUABLE -- its metrics describe no single
+revision. Without this a `"pass"` written for one revision of a board still
+reads as a verdict about whatever now sits at that path, which is the stale
+clean-report failure `../GUARDS.md` exists to prevent.
+
 Backend: the metrics come from a named board-access backend, and every verdict
 line and JSON report says which one and how it was chosen (`--backend`,
 `$KICAD_BACKEND`, or the default). Only `swig` can serve this audit today: the
@@ -63,10 +70,10 @@ See `kicad_backend.py` and `../plans/SWIG-to-IPC-inventory.md`.
 Exit codes:
   0  audited (graded and passing) — only with the explicit OK verdict line —
      or `--report-only`, with the NOT-GRADED verdict line
-  1  unevaluable — board missing/unloadable, no track copper, no usable pcbnew
-     interpreter, the requested backend unavailable or lacking a required
-     capability, no threshold and no --report-only, bad CLI value, worker
-     timeout, or an exception
+  1  unevaluable — board missing/unloadable/undigestable, no track copper, no
+     usable pcbnew interpreter, the requested backend unavailable or lacking a
+     required capability, no threshold and no --report-only, bad CLI value, the
+     board changing while it is measured, worker timeout, or an exception
   2  a graded metric failed its threshold, or a threshold named a metric that
      could not be evaluated
 
@@ -84,6 +91,7 @@ Usage:
 
 import argparse
 import glob
+import hashlib
 import json
 import math
 import os
@@ -108,6 +116,7 @@ _AXIS_TOLERANCE_DEG = 5.0
 # Provenance of the backend that produced this run's numbers. None until the
 # backend is resolved, and reported as null rather than omitted.
 _BACKEND = None
+_BOARD_IDENTITY = None
 
 
 def _backend_suffix():
@@ -190,6 +199,35 @@ def _names_json(token):
             and "--json".startswith(token))
 
 
+def _board_identity(path):
+    """Digest the board bytes, re-stat'ing to catch a write mid-read.
+
+    A report that names only a PATH is not bound to the copper it graded: the
+    board can be edited after the run and the stale `"pass"` still reads as a
+    verdict about the file now on disk. GUARDS.md requires the report to bind
+    the artefact digest, and the sibling `kicad_drc_connectivity.py` already
+    does (`source_sha256`/`source_size`). Raises rather than returning a
+    partial identity -- a board this tool cannot digest is UNEVALUABLE, never
+    a graded board with the provenance quietly omitted."""
+    try:
+        with open(path, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            payload = stream.read()
+            after = os.fstat(stream.fileno())
+        current = os.stat(path)
+    except OSError as error:
+        raise Unevaluable(f"cannot read {path} to digest it: {error}")
+    identity = lambda stat: (stat.st_dev, stat.st_ino,
+                             stat.st_size, stat.st_mtime_ns)
+    if identity(before) != identity(after) or identity(after) != identity(current):
+        raise Unevaluable(f"{path} changed while it was being digested")
+    return {
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size": len(payload),
+        "mtime_ns": after.st_mtime_ns,
+    }
+
+
 def _write_json(path, board, verdict, payload):
     """Atomically replace `path`. A crash leaves the pre-written placeholder,
     never a stale clean report. Refuses a target this tool does not own."""
@@ -203,6 +241,10 @@ def _write_json(path, board, verdict, payload):
         "tool": _REPORT_MARKER,
         "verdict": verdict,
         "board": os.path.abspath(board) if board else None,
+        # null until the board is digested; a graded report always carries it
+        # (the grading paths digest before they measure), so a null `source`
+        # beside a "pass" is itself the signal that something is wrong.
+        "source": _BOARD_IDENTITY,
         "pid": os.getpid(),
         # null until the backend is resolved; a report that cannot name the
         # backend behind its numbers must say so, not omit the field.
@@ -647,7 +689,7 @@ def main(argv=None):
     # run's backend, breaking the "null before resolution" contract the
     # reports promise (codex review of 95d1e48; the tests had been masking it
     # by resetting the global in setUp).
-    global _BACKEND
+    global _BACKEND, _BOARD_IDENTITY
     _BACKEND = None
     argv = list(sys.argv[1:] if argv is None else argv)
     # Invalidate any pre-existing report BEFORE argparse can exit: a bad
@@ -788,6 +830,14 @@ def main(argv=None):
             worker_argv += ["--backend", args.backend]
         return _run_worker(selection.interpreter, worker_argv, args.timeout)
 
+    # Bind the verdict to the BYTES, not the path. Digest before measuring
+    # and again after: a board rewritten mid-run would otherwise be graded as
+    # a mixture of two boards and reported under one digest.
+    try:
+        _BOARD_IDENTITY = _board_identity(args.board)
+    except Unevaluable as error:
+        return _fail_unevaluable(str(error), args.json_out, args.board)
+
     try:
         metrics = measure(args.board, args.short_segment_mm, layer_directions)
     except Unevaluable as error:
@@ -795,6 +845,17 @@ def main(argv=None):
     except Exception as error:  # never let an exception read as clean
         return _fail_unevaluable(
             f"{type(error).__name__}: {error}", args.json_out, args.board)
+
+    try:
+        after = _board_identity(args.board)
+    except Unevaluable as error:
+        return _fail_unevaluable(str(error), args.json_out, args.board)
+    if after["sha256"] != _BOARD_IDENTITY["sha256"]:
+        return _fail_unevaluable(
+            f"{args.board} changed while it was being measured "
+            f"({_BOARD_IDENTITY['sha256'][:12]} -> {after['sha256'][:12]}); "
+            "these metrics describe no single board",
+            args.json_out, args.board)
 
     _report(metrics)
 

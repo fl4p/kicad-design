@@ -1,6 +1,8 @@
 # Codex xhigh review of skill commits 0aefe5b..fca0890 (2026-09-06)
 
-Run 2026-09-06 ~12:45–13:50 local, `codex exec` xhigh, network on, headed scratch Chrome attached over CDP (two `browser_navigate` calls confirmed in the run log). Prompt: eight numbered attack targets including a project-agnosticism check. Verdict: do not merge. All nine findings were verified and fixed in the commit that carries this file; corrections are recorded as "Review correction" notes in `2026-09-05-cross-session-routing-evidence.md`.
+Run 2026-09-06 ~12:45–13:50 local, `codex exec` xhigh, network on, headed scratch Chrome attached over CDP (two `browser_navigate` calls confirmed in the run log). Prompt: eight numbered attack targets including a project-agnosticism check. Verdict: do not merge. Corrections are recorded as "Review correction" notes in `2026-09-05-cross-session-routing-evidence.md`.
+
+**Header correction, 2026-09-07.** This line originally read "All nine findings were verified and fixed in the commit that carries this file." That was false as written, and it was written by the same session that made the fixes. The next review in this directory, `2026-09-06-codex-xhigh-skill-fix-review.md`, graded that same state **4 FIXED / 5 PARTIAL**; the findings were closed across `1348388` and `30994b8`, two commits later. Findings **1 and 8 remain partial at HEAD** -- the same issue in both: the board-specific measurements were documented in `reviews/` rather than removed from the skill body (the escape table, the rotation numbers, and the 4-layer via census are all still in `ROUTING.md`). They stay because the body needs a worked example with real numbers to be usable; the scoping that makes that honest is the "Measured once, by one agent ... not replicated" hedging around them. Recorded per finding 9 of `2026-09-07-claude-review-a5c83c2-7a99de9.md`.
 
 ACCESS
 
