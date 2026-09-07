@@ -219,6 +219,50 @@ class ConnectivitySplitTests(unittest.TestCase):
         with self.assertRaisesRegex(split.ConnectivityError, "ignores unconnected_items"):
             split.classify_report(fixture, "fixture.json", [])
 
+    def test_a_count_above_the_cap_stays_unevaluable(self):
+        """MONOTONICITY. `== cap` let a strictly worse report recover.
+
+        Measured 2026-09-07 before the fix: 198 records exited 0, 199 exited 3,
+        and 200 exited 0 again -- so 200 duplicated pour records passed the
+        signal gate that 199 could not. A count above a cap this tool cannot
+        qualify is not better evidence than a count at it; it means the report
+        came from a release whose cap behaviour is unknown here.
+        """
+        for total in (split.KICAD_10_REPORT_CAP,
+                      split.KICAD_10_REPORT_CAP + 1,
+                      split.KICAD_10_REPORT_CAP * 3):
+            with self.subTest(total=total):
+                rows = [record("Pad 1 [/SIG] of R1 on F.Cu",
+                               "Track [/SIG] on F.Cu")
+                        for _ in range(total)]
+                result = self.classify(rows)
+                self.assertTrue(result["report_censored"])
+                self.assertFalse(result["classification_evaluable"])
+
+    def test_below_the_cap_is_still_evaluable(self):
+        rows = [record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP - 1)]
+        result = self.classify(rows)
+        self.assertFalse(result["report_censored"])
+
+    def test_the_cap_can_be_qualified_but_never_silently_disabled(self):
+        """`none` is the documented escape once the release has been probed."""
+        rows = [record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP + 1)]
+        result = split.classify_report(
+            drc_report(rows), "fixture.json", [], [], cap=None)
+        self.assertFalse(result["report_censored"])
+        self.assertIsNone(result["report_cap"])
+
+    def test_a_malformed_report_cap_is_a_config_error_not_a_mute(self):
+        for bad in ("banana", "0", "-1", "", None, "1.5"):
+            with self.subTest(value=bad):
+                with self.assertRaises(split.ConnectivityError):
+                    split._parse_report_cap(bad)
+        self.assertIsNone(split._parse_report_cap("none"))
+        self.assertIsNone(split._parse_report_cap("NONE"))
+        self.assertEqual(split._parse_report_cap("42"), 42)
+
     def test_exact_199_records_is_marked_possibly_censored(self):
         rows = [
             record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")

@@ -749,6 +749,39 @@ class ReportBindsTheBoardBytes(unittest.TestCase):
             document = _json.loads(report.read_text())
             self.assertEqual(document["verdict"], "unevaluable")
 
+    def test_the_digest_does_not_leak_into_the_next_run(self):
+        """Module state must not publish run N's digest in run N+1's report.
+
+        Measured 2026-09-07 (codex review of 9732ec7): `main()` reset
+        `_BACKEND` but not `_BOARD_IDENTITY`, so a second board that failed
+        BEFORE it was ever hashed published the FIRST board's sha256 as its
+        own `source`. The tests' own setUp reset was what hid it.
+        """
+        import hashlib as _hashlib
+        import json as _json
+        board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "A.kicad_pcb"
+            second = Path(directory) / "B.kicad_pcb"
+            first.write_bytes(b"BOARD-A\n")
+            second.write_bytes(b"BOARD-B-is-a-different-board\n")
+            report = Path(directory) / "r.json"
+            with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                audit.main([str(first), "--max-vias-on-any-net", "2",
+                            "--json", str(report)])
+                # No gate and no --report-only: run 2 fails before hashing.
+                audit.main([str(second), "--json", str(report)])
+            document = _json.loads(report.read_text())
+            self.assertEqual(document["verdict"], "unevaluable")
+            self.assertIsNone(
+                document["source"],
+                "run 2 published a digest for a board it never hashed")
+            self.assertNotEqual(
+                (document["source"] or {}).get("sha256"),
+                _hashlib.sha256(b"BOARD-A\n").hexdigest())
+
     def test_a_board_that_cannot_be_digested_is_unevaluable(self):
         """A failed observation is not a clean observation."""
         board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
@@ -790,6 +823,61 @@ class ShortSegmentGateIsCalibrated(unittest.TestCase):
         code, _, _ = self._run(
             ["b.kicad_pcb", "--max-short-segment-fraction", "0.15"],
             self._short_board())
+        self.assertEqual(code, 2)
+
+    def _tuned_board(self):
+        """One 0.10 mm segment and nine 0.19 mm ones.
+
+        At the 0.20 mm definition every segment is short (10/10). At 0.15 only
+        one is (1/10) -- and 0.15 clears the vacuity check, because it is above
+        the 0.10 mm shortest segment. Identical copper, opposite verdicts.
+        """
+        tracks = [FakeTrack("/N0", F_CU, 0.0, 0.0, 0.10, 0.0)]
+        tracks += [FakeTrack("/N%d" % index, F_CU,
+                             index * 2.0, 1.0, index * 2.0 + 0.19, 1.0)
+                   for index in range(1, 10)]
+        return tracks
+
+    def test_a_pass_that_exists_only_at_the_chosen_definition_is_refused(self):
+        """KNOWN-BAD CALIBRATION for the mute button that vacuity does NOT catch.
+
+        Measured 2026-09-07 (codex review of 9732ec7): this exact board went
+        from ROUTE-SHAPE-FAIL to ROUTE-SHAPE-OK by moving --short-segment-mm
+        from 0.20 to 0.15, with no copper changed. Refusing only the fully
+        vacuous definition was never enough.
+        """
+        board = self._tuned_board()
+        code, _, _ = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15",
+             "--short-segment-mm", "0.20"], board)
+        self.assertEqual(code, 2, "the board fails at the honest definition")
+
+        code, out, err = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15",
+             "--short-segment-mm", "0.15"], board)
+        self.assertEqual(code, 1, "the tuned definition must not buy a pass")
+        self.assertNotIn(audit._OK_LINE, out)
+        self.assertIn("property of the definition, not of the board", err)
+
+    def test_a_verdict_stable_across_the_band_still_passes(self):
+        """The guard must not turn every real pass into noise."""
+        tracks = [FakeTrack("/S", F_CU, 0.0, 0.0, 0.10, 0.0)]
+        tracks += [FakeTrack("/L%d" % index, F_CU,
+                             0.0, index + 1.0, 1.0, index + 1.0)
+                   for index in range(99)]
+        code, out, _ = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15",
+             "--short-segment-mm", "0.20"], tracks)
+        self.assertEqual(code, 0)
+        self.assertIn(audit._OK_LINE, out)
+
+    def test_a_genuinely_bad_board_still_fails_rather_than_going_unevaluable(self):
+        tracks = [FakeTrack("/B%d" % index, F_CU,
+                            index * 2.0, 0.0, index * 2.0 + 0.05, 0.0)
+                  for index in range(10)]
+        code, _, _ = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15",
+             "--short-segment-mm", "0.20"], tracks)
         self.assertEqual(code, 2)
 
     def test_shrinking_the_definition_cannot_mute_that_failure(self):

@@ -325,3 +325,39 @@ review-and-fix chain that verifies end to end; but it ships one skill rule its o
 disproved against a primary source, with no caveat in the document (finding 1), and a guard whose
 stale-clean-report protection is bypassable by a one-character CLI abbreviation (finding 2,
 reproduced).
+
+
+---
+
+## Disposition, 2026-09-07 (added after an independent review of the fixes)
+
+Findings 1-6, 11, 12, 13 and 14: **closed.**
+
+**Finding 7 (report not bound to its artefact): PARTIAL, not closed.** The
+report now carries the board's digest, taken either side of the measurement.
+But `pcbnew.LoadBoard` is handed the pathname and opens the file a second
+time, so the digest bounds the run without sealing it: a board swapped to B
+and restored to A around the load is graded as B and reported under A's
+digest. Demonstrated with a path-faithful LoadBoard double. Sealing it needs a
+loader that reads from an open descriptor or from bytes, which the SWIG API
+does not offer. The docstring and `scripts/README.md` now state the limit
+instead of claiming the stronger property.
+
+**Finding 8 (model-tier suites): PARTIAL, not closed.** The commit that
+claimed to close it added no real `.kicad_pcb` and no real DRC-export fixture.
+`FakePcbnew.LoadBoard` ignores the bytes it is given and returns a
+preconstructed board, so `test_the_report_records_the_digest_of_the_bytes_it
+_graded` verifies the file's digest while grading an unrelated fake. The new
+tests are worth having and the four fake-path CLI tests are genuinely better,
+but the finding asked for a reparsed artefact and that has not been done.
+
+**Finding 15: still open.** Now partly addressed: `7a99de9` did get its review
+(2026-09-07), which found the cap-monotonicity defect fixed in `a2624a4`, plus
+four findings that remain open against `kicad_drc_connectivity.py` -- the
+report binds the DRC JSON rather than the board, a declared pour net can still
+launder a zone-bearing signal open, no test exercises a real KiCad export, and
+the footprint inventory rule accepts model-tier evidence for an emitted-artefact
+claim.
+
+Recorded because a fix that closes six findings and quietly narrows two is the
+same self-certification failure this file's findings 9 and 10 are about.

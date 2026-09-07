@@ -52,12 +52,24 @@ Gating contract (fail closed):
   corpus; inventing one here would be exactly the fake-threshold failure
   `../GUARDS.md` forbids.
 
-Report binding: the `--json` report records the board's SHA-256, size and
-mtime under `source`, digested before the measurement and re-digested after
-it. A board rewritten mid-run is UNEVALUABLE -- its metrics describe no single
-revision. Without this a `"pass"` written for one revision of a board still
-reads as a verdict about whatever now sits at that path, which is the stale
-clean-report failure `../GUARDS.md` exists to prevent.
+Report binding, and its LIMIT: the `--json` report records the board's SHA-256,
+size and mtime under `source`, digested before the measurement and re-digested
+after it. A board whose CONTENT differs between those two reads is UNEVALUABLE.
+Without this a `"pass"` written for one revision of a board still reads as a
+verdict about whatever now sits at that path, which is the stale clean-report
+failure `../GUARDS.md` exists to prevent.
+
+What this does NOT prove is that `pcbnew.LoadBoard` parsed the bytes that were
+hashed. The digest opens the file itself; `LoadBoard` is given the PATHNAME and
+opens it again. Equal hashes either side bound the run, they do not seal it: a
+board swapped to B and restored to A around the load is graded as B and
+reported under A's digest (demonstrated 2026-09-07, codex review of 9732ec7,
+with a path-faithful LoadBoard double). Closing that needs a loader that reads
+from an open descriptor or from bytes, which the SWIG API does not offer. Until
+then this is a same-run consistency check on an uncontended file, NOT a defence
+against an adversary editing the board during the audit. The sibling
+`kicad_drc_connectivity.py` IS sealed, because it hashes and parses one
+in-memory payload.
 
 Backend: the metrics come from a named board-access backend, and every verdict
 line and JSON report says which one and how it was chosen (`--backend`,
@@ -111,6 +123,11 @@ _WORKER_ENV = "KICAD_ROUTE_SHAPE_WORKER"
 # further off (45-degree diagonals, arcs' chords) count towards neither axis
 # and appear in the off-axis remainder.
 _AXIS_TOLERANCE_DEG = 5.0
+
+# The band over which a short-segment PASS must hold. A verdict that
+# survives only inside a narrow window around the caller's chosen
+# definition is a property of the definition, not of the copper.
+_SENSITIVITY_FACTORS = (0.5, 2.0)
 
 
 # Provenance of the backend that produced this run's numbers. None until the
@@ -345,6 +362,15 @@ def measure(board_path, short_segment_mm, layer_directions):
 
     lengths = sorted(length for length, _, _ in segments)
     short = sum(1 for length in lengths if length < short_segment_mm)
+    # `--short-segment-mm` DEFINES the metric rather than grading it, so a
+    # caller who dislikes a failure can move the definition instead of the
+    # copper. Measure the same board at half and double the chosen definition
+    # so the gate's sensitivity to that choice is visible, and gradeable.
+    sensitivity = {
+        str(factor): sum(1 for length in lengths
+                         if length < short_segment_mm * factor)
+        for factor in _SENSITIVITY_FACTORS
+    }
     routed_nets = len(net_has_copper)
 
     copper_layers = [
@@ -397,6 +423,11 @@ def measure(board_path, short_segment_mm, layer_directions):
         "short_segment_threshold_mm": short_segment_mm,
         "short_segments": short,
         "short_segment_fraction": short / len(lengths),
+        "short_segment_sensitivity": {
+            factor: {"short_segments": count,
+                     "short_segment_fraction": count / len(lengths)}
+            for factor, count in sensitivity.items()
+        },
         "per_layer": {
             layer: {
                 "segments": bucket["segments"],
@@ -599,7 +630,15 @@ def _find_kicad_python():
     return None, "no interpreter with pcbnew found; set KICAD_PYTHON"
 
 
-def _run_worker(interpreter, argv, timeout):
+def _run_worker(interpreter, argv, timeout, json_out=None, board=None):
+    """Run the audit under `interpreter` and OWN the verdict it publishes.
+
+    The child writes the final report itself, and it does so BEFORE it prints
+    its verdict line and returns. A child killed or hung in that window leaves
+    a finalized `"pass"` on disk while this parent reports a timeout or a
+    signal -- a failed probe caching "verified clean", which `../GUARDS.md`
+    forbids. So every termination this parent cannot positively confirm as a
+    completed audit invalidates the report before returning."""
     cmd = [interpreter, "-u", os.path.abspath(__file__)] + list(argv)
     env = dict(os.environ, **{_WORKER_ENV: "1"})
     try:
@@ -608,7 +647,10 @@ def _run_worker(interpreter, argv, timeout):
             errors="replace", timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return _fail_unevaluable(f"worker exceeded --timeout {timeout}s")
+        return _fail_unevaluable(
+            f"worker exceeded --timeout {timeout}s; any report it had already "
+            "written is not a completed audit",
+            json_out, board)
     if proc.stdout:
         sys.stdout.write(proc.stdout)
     if proc.stderr:
@@ -619,8 +661,16 @@ def _run_worker(interpreter, argv, timeout):
         or _NOT_GRADED_LINE in (proc.stdout or "")
     ):
         return _fail_unevaluable(
-            "worker exited 0 without a verdict line (treated as unevaluable)"
+            "worker exited 0 without a verdict line (treated as unevaluable)",
+            json_out, board
         )
+    if proc.returncode < 0:
+        # Killed by a signal. It may have published a verdict first.
+        return _fail_unevaluable(
+            f"worker was killed by signal {-proc.returncode} before it could "
+            "report; any report it had already written is not a completed "
+            "audit",
+            json_out, board)
     return proc.returncode
 
 
@@ -691,6 +741,12 @@ def main(argv=None):
     # by resetting the global in setUp).
     global _BACKEND, _BOARD_IDENTITY
     _BACKEND = None
+    # Reset with _BACKEND. Left standing, run N's digest was published
+    # in run N+1's early-failure report: measured 2026-09-07, a board
+    # that failed before it was ever hashed carried the PREVIOUS
+    # board's sha256. The tests reset it in setUp, which is exactly
+    # what hid the missing production reset.
+    _BOARD_IDENTITY = None
     argv = list(sys.argv[1:] if argv is None else argv)
     # Invalidate any pre-existing report BEFORE argparse can exit: a bad
     # argument used to leave a previous "pass" artefact standing (measured
@@ -828,7 +884,8 @@ def main(argv=None):
         # it from its own defaults could grade with another backend.
         if args.backend and "--backend" not in worker_argv:
             worker_argv += ["--backend", args.backend]
-        return _run_worker(selection.interpreter, worker_argv, args.timeout)
+        return _run_worker(selection.interpreter, worker_argv, args.timeout,
+                           args.json_out, args.board)
 
     # Bind the verdict to the BYTES, not the path. Digest before measuring
     # and again after: a board rewritten mid-run would otherwise be graded as
@@ -891,6 +948,40 @@ def main(argv=None):
         return _fail_unevaluable(
             "no metric was graded despite a threshold being supplied",
             args.json_out, args.board)
+
+    # Vacuity is only the degenerate END of the mute button, and refusing it
+    # is not enough. Measured 2026-09-07 (codex review of 9732ec7): ten
+    # unchanged segments -- one 0.10 mm and nine 0.19 mm -- FAIL a 0.15
+    # fraction gate at the 0.20 mm definition (10/10) and PASS it at 0.15
+    # (1/10), while 0.15 clears the vacuity check because it is above the
+    # 0.10 mm shortest segment. Not one micron of copper moved.
+    #
+    # So a short-segment PASS must also survive the definition being wrong by
+    # a factor of two. The test is ASYMMETRIC on purpose: a FAIL is already
+    # fail-closed and is left alone, and only a pass that exists solely at the
+    # caller's chosen definition is refused. That refusal is UNEVALUABLE, not
+    # FAIL -- the copper has not been shown to be bad, the verdict has been
+    # shown not to be about the copper.
+    if not findings and grades_short:
+        sensitivity = metrics.get("short_segment_sensitivity") or {}
+        for factor, at in sorted(sensitivity.items(), key=lambda kv: float(kv[0])):
+            if float(factor) == 1.0:
+                continue
+            probe = argparse.Namespace(**vars(args))
+            flipped, _ = grade(dict(metrics, **at), probe)
+            if flipped:
+                return _fail_unevaluable(
+                    f"the short-segment gate passes at "
+                    f"--short-segment-mm={args.short_segment_mm} but fails at "
+                    f"{float(factor)}x that definition "
+                    f"({args.short_segment_mm * float(factor)} mm: "
+                    f"{at['short_segments']} of {metrics['segments']} "
+                    f"segments), on identical copper -- this verdict is a "
+                    f"property of the definition, not of the board. Set the "
+                    f"definition from the project's standard and re-run, or "
+                    f"use --report-only",
+                    args.json_out, args.board)
+
     if args.json_out:
         _write_json(args.json_out, args.board,
                     "fail" if findings else "pass",

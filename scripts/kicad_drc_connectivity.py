@@ -52,6 +52,13 @@ PAD_QUALIFIERS = frozenset(("pth", "smd", "npth"))
 REQUIRED_SEVERITIES = frozenset(("error", "warning", "exclusion"))
 SUPPORTED_COORDINATE_UNITS = frozenset(("mm", "in", "mils"))
 KICAD_10_REPORT_CAP = 199
+# The 199 figure is measured, but it is measured for `silk_overlap` and
+# `silk_over_copper` on KiCad 10.0.5 -- NOT for `unconnected_items`, and not on
+# any other release. See ~/dev/kb/tooling/kicad-drc-caps-reports-at-199-per-type.md,
+# which ends "re-probe other releases rather than assuming the cap's value or
+# its existence". So this is an unqualified boundary for the count this tool
+# actually ranks, and every total AT OR ABOVE it is unqualified with it.
+CAP_UNQUALIFIED = "unqualified"
 
 
 class ConnectivityError(ValueError):
@@ -214,12 +221,34 @@ def classify_record(
     return result
 
 
+def _parse_report_cap(value: Any) -> Optional[int]:
+    """`none` disables the cap check; anything else must be a positive int.
+
+    A malformed value is a configuration error, never a silently disabled
+    check -- muting the cap is exactly the mute-button failure `../GUARDS.md`
+    forbids, so it has to be spelled out."""
+    if isinstance(value, str) and value.strip().lower() == "none":
+        return None
+    try:
+        cap = int(value)
+    except (TypeError, ValueError):
+        raise ConnectivityError(
+            "--report-cap must be a positive integer or 'none', not %r" % (value,)
+        )
+    if cap <= 0:
+        raise ConnectivityError(
+            "--report-cap must be positive or 'none', not %d" % cap
+        )
+    return cap
+
+
 def classify_report(
     report: Any,
     source: str,
     pour_nets: Sequence[str],
     mixed_pour_nets: Sequence[str] = (),
     strict_pour: bool = False,
+    cap: Optional[int] = KICAD_10_REPORT_CAP,
 ) -> Dict[str, Any]:
     if not isinstance(report, dict):
         raise ConnectivityError("DRC report root is not an object")
@@ -326,13 +355,21 @@ def classify_report(
     # KiCad 10.0.5 is measured to cap each violation type at exactly 199 in
     # both text and JSON reports. Treat that exact boundary as suspicious on
     # every version until the installed release is explicitly re-probed.
-    report_censored = total == KICAD_10_REPORT_CAP
+    # `== cap` broke monotonicity: 198 evaluable, 199 unevaluable, 200
+    # evaluable again, so a strictly WORSE report recovered from UNEVALUABLE to
+    # PASS at the far tail (measured 2026-09-07, codex review of 7a99de9: 200
+    # duplicated pour records passed the signal gate). A count above a cap this
+    # tool cannot qualify is not better evidence than a count at it -- it means
+    # the report came from a release whose cap behaviour is unknown here.
+    report_censored = cap is not None and total >= cap
     censor_reason = None
     if report_censored:
         censor_reason = (
-            "unconnected_items contains exactly 199 records, the measured "
-            "KiCad 10.0.5 per-type report cap; qualify the installed KiCad "
-            "version's cap behaviour before ranking this value"
+            "unconnected_items contains %d records, at or above the "
+            "unqualified per-type report cap %d (measured on KiCad 10.0.5 for "
+            "silk_overlap/silk_over_copper, never for unconnected_items); "
+            "qualify the installed KiCad version's cap behaviour with "
+            "--report-cap before ranking this value" % (total, cap)
         )
     return {
         "schema": SCHEMA,
@@ -350,6 +387,7 @@ def classify_report(
             for bucket, counter in by_net.items()
         },
         "records": classified,
+        "report_cap": cap,
         "report_censored": report_censored,
         "censor_reason": censor_reason,
         "classification_evaluable": ambiguous == 0 and not report_censored,
@@ -444,6 +482,19 @@ def write_json(path: pathlib.Path, result: Dict[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("drc_json", type=pathlib.Path)
+    parser.add_argument(
+        "--report-cap",
+        default=str(KICAD_10_REPORT_CAP),
+        help=(
+            "the installed KiCad's measured per-type report cap for "
+            "unconnected_items. A total AT OR ABOVE it is unevaluable, because "
+            "a capped count is not a measurement. Default %d, which is measured "
+            "for silk_overlap/silk_over_copper on KiCad 10.0.5 and NOT for "
+            "unconnected_items -- pass 'none' only once you have probed the "
+            "installed release and shown it does not cap this type"
+            % KICAD_10_REPORT_CAP
+        ),
+    )
     parser.add_argument(
         "--pour-net",
         action="append",
@@ -618,10 +669,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "--require-zero-signal-opens (the signal side alone), "
                 "--require-zero-total (the aggregate), or --report-only"
             )
+        cap = _parse_report_cap(args.report_cap)
         report, receipt = load_report(source)
         result = classify_report(
             report, str(source), pour_nets, mixed_pour_nets,
             strict_pour=args.require_zero_signal_opens,
+            cap=cap,
         )
         result["strict_pour"] = bool(args.require_zero_signal_opens)
         result.update(receipt)
