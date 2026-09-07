@@ -24,7 +24,11 @@ I = L.Interval
 
 
 def var(source="datasheet", origin="datasheet p.1", spec=None, actual=None,
-        unit=None):
+        unit="V"):
+    """`unit` defaults to a real one: it became mandatory when a ledger
+    comparing volts with amperes graded PASS (codex review of 0f709ed).
+    Tests that care about units pass their own; tests that do not still get a
+    consistent one so their comparisons stay commensurable."""
     d = {"source": source, "origin": origin}
     if spec is not None:
         d["spec"] = spec
@@ -256,13 +260,13 @@ class TestBaselineAndKnownBad(_Tmp):
     def base(self):
         return ledger(
             {"I_max": var("user", "spec sheet: 20 A continuous",
-                          spec=20, actual=20),
+                          spec=20, actual=20, unit="A"),
              "R_sense": var("picked",
                             "BOM R12 WSLP2726L1000FEA, datasheet p.2",
                             spec=[0.00095, 0.00105],
-                            actual=[0.00099, 0.00101]),
+                            actual=[0.00099, 0.00101], unit="V/A"),
              "V_burden_max": var("datasheet", "ADS1262 SBAS661C table 7.5",
-                                 spec=0.05, actual=0.05)},
+                                 spec=0.05, actual=0.05, unit="V")},
             [con("SENSE-BURDEN", "I_max * R_sense <= V_burden_max")])
 
     def test_the_baseline_passes(self):

@@ -80,7 +80,7 @@ class TestFrozenKnownBad(_Tmp):
         with self.assertRaises(R.FrozenError):
             R.check_frozen(self.stable_gen("(kicad_pcb B)\n"), [self.out],
                            **FAST)
-        regen = self.d / "board.kicad_pcb.regenerated"
+        regen = self.d / R._keep_name(self.out, "regenerated")
         self.assertTrue(regen.exists())
         self.assertEqual(regen.read_text(), "(kicad_pcb B)\n")
 
@@ -89,8 +89,8 @@ class TestFrozenKnownBad(_Tmp):
             R.check_frozen(self.stable_gen("(kicad_pcb B)\n"), [self.out],
                            **FAST)
         m = str(cm.exception)
-        self.assertIn("board.kicad_pcb.tracked", m)
-        self.assertIn("board.kicad_pcb.regenerated", m)
+        self.assertIn(R._keep_name(self.out, "tracked"), m)
+        self.assertIn(R._keep_name(self.out, "regenerated"), m)
         self.assertIn("first difference at byte 11", m)   # the A/B position
         self.assertIn("line 1", m)
 
@@ -105,7 +105,7 @@ class TestFrozenKnownBad(_Tmp):
         with self.assertRaises(R.FrozenError):
             R.check_frozen(self.stable_gen("(kicad_pcb B)\n"), [self.out],
                            **FAST)
-        (self.d / "board.kicad_pcb.regenerated").unlink()
+        (self.d / R._keep_name(self.out, "regenerated")).unlink()
         R.check_frozen(self.stable_gen(), [self.out], **FAST)
 
 
@@ -121,16 +121,41 @@ class TestFrozenNeverPassesOnAGeneratorThatDidNotRun(_Tmp):
         self.assertEqual(self.out.read_text(), "(kicad_pcb A)\n")
 
     def test_a_generator_that_silently_does_nothing_is_a_refusal(self):
-        # Exits 0, output untouched, digest unchanged. Without the mtime
-        # gate this is the confident false PASS.
+        # Exits 0, writes nothing. Under the default recreate witness the
+        # output is gone, so there is nothing to mistake for a pass.
         cmd = self.gen("pass\n")
         with self.assertRaises(R.ReproError) as cm:
             R.check_frozen(cmd, [self.out], **FAST)
         self.assertNotIsInstance(cm.exception, R.FrozenError)
+        self.assertIn("is gone", str(cm.exception))
+        self.assertEqual(self.out.read_text(), "(kicad_pcb A)\n")
+
+    def test_a_generator_that_only_touches_the_output_is_a_refusal(self):
+        """mtime movement is not proof of generation: `os.utime` alone exited
+        0 and PASSED under the old witness (codex review of 0f709ed), which
+        contradicts SKILL.md's own rule against mtime-only proof."""
+        cmd = self.gen("import os\ntry:\n os.utime(%r, None)\nexcept OSError:\n"
+                       " pass\n" % str(self.out))
+        with self.assertRaises(R.ReproError) as cm:
+            R.check_frozen(cmd, [self.out], **FAST)
+        self.assertNotIsInstance(cm.exception, R.FrozenError)
+        self.assertEqual(self.out.read_text(), "(kicad_pcb A)\n")
+
+    def test_the_mtime_witness_remains_available_and_says_what_it_is(self):
+        """The documented escape for an in-place generator. It only requires
+        the mtime to move, so it does NOT witness generation."""
+        cmd = self.gen("pass\n")
+        with self.assertRaises(R.ReproError) as cm:
+            R.check_frozen(cmd, [self.out], witness="mtime", **FAST)
         self.assertIn("mtime did not move", str(cm.exception))
+        with self.assertRaises(R.ReproError):
+            R.check_frozen(cmd, [self.out], witness="nonsense", **FAST)
 
     def test_a_generator_that_deletes_the_output_is_a_refusal(self):
-        cmd = self.gen("import os\nos.remove(%r)\n" % str(self.out))
+        # Tolerant of the recreate witness having already removed it: the
+        # case under test is "the generator left no output", either way.
+        cmd = self.gen("import os\ntry:\n os.remove(%r)\nexcept OSError:\n"
+                       " pass\n" % str(self.out))
         with self.assertRaises(R.ReproError) as cm:
             R.check_frozen(cmd, [self.out], **FAST)
         self.assertIn("is gone", str(cm.exception))
@@ -226,7 +251,8 @@ class TestFrozenKeepDir(_Tmp):
         with self.assertRaises(R.FrozenError):
             R.check_frozen(self.stable_gen("(kicad_pcb B)\n"), [self.out],
                            keep_dir=scratch, **FAST)
-        self.assertTrue((scratch / "board.kicad_pcb.regenerated").exists())
+        self.assertTrue(
+            (scratch / R._keep_name(self.out, "regenerated")).exists())
         self.assertEqual(sorted(p.name for p in self.d.iterdir()),
                          ["board.kicad_pcb", "gen.py", "scratch"])
 

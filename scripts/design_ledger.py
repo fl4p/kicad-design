@@ -140,6 +140,7 @@ import ast
 import itertools
 import json
 import math
+import os
 import re
 import sys
 
@@ -173,6 +174,19 @@ class Interval:
                               % (lo, hi))
         if isinstance(lo, bool) or isinstance(hi, bool):
             raise LedgerError("booleans are not interval bounds")
+        # An integer that binary64 cannot hold EXACTLY silently moves the
+        # bound, and it moves it inward as readily as outward: the pair
+        # [9007199254740992, 9007199254740993] collapsed to a singleton, so
+        # `X - X <= 0` passed where the uncorrelated interval [-1, 1] must
+        # fail (codex review of 0f709ed). That falsifies the outer-bound
+        # guarantee this whole module rests on, so it is unevaluable.
+        for raw in (lo, hi):
+            if isinstance(raw, int) and int(float(raw)) != raw:
+                raise LedgerError(
+                    "interval bound %d cannot be represented exactly in "
+                    "binary64 (nearest double is %d) -- an inexact bound is "
+                    "not an outer bound; give it as a rounded-outward pair"
+                    % (raw, int(float(raw))))
         lo, hi = float(lo), float(hi)
         if not (math.isfinite(lo) and math.isfinite(hi)):
             raise LedgerError(
@@ -367,6 +381,92 @@ def eval_corners(node, env):
     return Interval(lo, hi)
 
 
+DIMENSIONLESS = "dimensionless"
+
+
+def _parse_unit(text):
+    """A unit token to an exponent map: 'V/A' -> {'V': 1, 'A': -1}.
+
+    Atoms are compared as written -- this does not know that mV and V share a
+    dimension, and does not pretend to. It exists to catch the failure that
+    was actually reproduced (volts compared with amperes) and to let a product
+    cancel, so that A * (V/A) is V rather than an uncomparable string.
+    """
+    if text is None:
+        return {}
+    flat = text.strip()
+    if not flat or flat.lower() == DIMENSIONLESS:
+        return {}
+    exps = {}
+    sign = 1
+    token = ""
+    for ch in flat + "*":
+        if ch in "*/":
+            atom = token.strip()
+            if atom and atom.lower() != DIMENSIONLESS:
+                exps[atom] = exps.get(atom, 0) + sign
+            token = ""
+            sign = -1 if ch == "/" else 1
+        else:
+            token += ch
+    return {k: v for k, v in exps.items() if v}
+
+
+def _unit_str(exps):
+    if not exps:
+        return DIMENSIONLESS
+    num = [k if v == 1 else "%s^%d" % (k, v)
+           for k, v in sorted(exps.items()) if v > 0]
+    den = [k if v == -1 else "%s^%d" % (k, -v)
+           for k, v in sorted(exps.items()) if v < 0]
+    return ("*".join(num) or "1") + ("/" + "*".join(den) if den else "")
+
+
+def _mul(a, b, scale=1):
+    out = dict(a)
+    for k, v in b.items():
+        out[k] = out.get(k, 0) + scale * v
+    return {k: v for k, v in out.items() if v}
+
+
+def unit_of(node, units, path="<ledger>", cid="<constraint>"):
+    """The unit of an expression, as an exponent map.
+
+    `+` and `-` require their operands to agree; `*` and `/` compose and
+    cancel; a literal is dimensionless and therefore comparable with anything,
+    so `X - X <= 0` still works.
+    """
+    if isinstance(node, ast.Constant):
+        return {}
+    if isinstance(node, ast.Name):
+        return _parse_unit(units.get(node.id))
+    if isinstance(node, ast.UnaryOp):
+        return unit_of(node.operand, units, path, cid)
+    if isinstance(node, ast.BinOp):
+        left = unit_of(node.left, units, path, cid)
+        right = unit_of(node.right, units, path, cid)
+        if isinstance(node.op, (ast.Add, ast.Sub)):
+            if left != right and left and right:
+                raise LedgerError(
+                    "%s: constraint %s adds or subtracts %s and %s -- that is "
+                    "not a quantity"
+                    % (path, cid, _unit_str(left), _unit_str(right)))
+            return left or right
+        if isinstance(node.op, ast.Mult):
+            return _mul(left, right)
+        if isinstance(node.op, ast.Div):
+            return _mul(left, right, -1)
+        if isinstance(node.op, ast.Pow):
+            if isinstance(node.right, ast.Constant) and left:
+                try:
+                    n = int(node.right.value)
+                except (TypeError, ValueError):
+                    return left
+                return {k: v * n for k, v in left.items()}
+            return left
+    return {}
+
+
 def satisfied(lhs, op, rhs):
     """Worst-case satisfaction of `lhs OP rhs` over the two intervals.
 
@@ -387,6 +487,43 @@ def margin(lhs, op, rhs):
     if op in ("<=", "<"):
         return rhs.lo - lhs.hi
     return lhs.lo - rhs.hi
+
+
+# An origin that points back at the document being graded is the ledger
+# agreeing with itself: every origin equal to "this ledger" passed validation
+# and contributed to an exit-0 run (codex review of 0f709ed). This cannot
+# police a citation's truth, only its self-reference, which is the failure
+# actually observed.
+_SELF_CITATIONS = frozenset((
+    "this ledger", "the ledger", "ledger", "this document", "this file",
+    "self", "itself", "as above", "see above", "n/a", "na", "none",
+    "tbd", "todo", "unknown", "-", "?",
+))
+
+
+def _reject_self_citation(path, what, origin, design):
+    flat = " ".join(origin.split()).strip().strip(".").lower()
+    if flat in _SELF_CITATIONS or (design and flat == str(design).lower()) \
+            or flat == os.path.basename(str(path)).lower():
+        raise LedgerError(
+            "%s: %s cites %r as its origin, which names this ledger rather "
+            "than anything outside it. An origin has to be somewhere a "
+            "reviewer can go and disagree with -- a document and page, a "
+            "measurement, a computation naming its inputs."
+            % (path, what, origin))
+
+
+_REPORT_MARKER = "design_ledger"
+
+
+def _is_own_report(path):
+    """True only when `path` is a JSON document this tool wrote."""
+    try:
+        with open(path, encoding="utf-8") as stream:
+            doc = json.load(stream)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(doc, dict) and doc.get("tool") == _REPORT_MARKER
 
 
 # ------------------------------------------------------------------ ledger ---
@@ -439,10 +576,20 @@ def load_ledger(path):
                 "%s: variable %s has no 'origin'. A provenance TAG without a "
                 "citation cannot name either side of a contradiction, which "
                 "is the entire point of tagging it." % (path, name))
+        _reject_self_citation(path, "variable %s" % name, origin,
+                              doc.get("design"))
+        unit = v.get("unit")
+        if not isinstance(unit, str) or not unit.strip():
+            raise LedgerError(
+                "%s: variable %s has no 'unit'. It was optional and never "
+                "interpreted, so a ledger comparing volts with amperes graded "
+                "PASS (codex review of 0f709ed). Give the unit as a plain "
+                "token ('V', 'A', 'mohm'); use 'dimensionless' for a ratio."
+                % (path, name))
         out_vars[name] = {
             "source": src,
             "origin": origin,
-            "unit": v.get("unit"),
+            "unit": unit.strip(),
             "spec": as_interval(v.get("spec"), "%s.spec" % name),
             "actual": as_interval(v.get("actual"), "%s.actual" % name),
         }
@@ -473,7 +620,24 @@ def load_ledger(path):
                 "provenance is unrecorded cannot be audited or re-derived "
                 "(GUARDS, 'Establish a threshold's provenance and floor')"
                 % (path, cid))
+        _reject_self_citation(path, "constraint %s" % cid, origin,
+                              doc.get("design"))
         lhs, op, rhs, names = parse_constraint(expr)
+        # An undefined name is NOT refused here: evaluation already reports it
+        # per-constraint as UNVERIFIED, which names the row instead of killing
+        # the whole ledger. It contributes no unit, which is the conservative
+        # reading.
+        # `.get` because an undefined name reaches evaluation as UNVERIFIED
+        # rather than being refused here; it contributes no unit.
+        units = {n: out_vars[n]["unit"] for n in names if n in out_vars}
+        lu, ru = unit_of(lhs, units, path, cid), unit_of(rhs, units, path, cid)
+        if lu != ru and lu and ru:
+            raise LedgerError(
+                "%s: constraint %s compares %s with %s. A comparison across "
+                "units is not a weak result, it is a meaningless one: this "
+                "ledger graded volts against amperes as PASS before units "
+                "were interpreted (codex review of 0f709ed)."
+                % (path, cid, _unit_str(lu), _unit_str(ru)))
         out_cons.append({
             "id": cid, "expr": expr, "lhs": lhs, "op": op, "rhs": rhs,
             "names": names, "origin": origin,
@@ -529,16 +693,24 @@ def evaluate(ledger, tier):
         repeated = sorted(n for n, k in _repeats(c).items() if k > 1)
         row["repeated_variables"] = repeated
         if repeated:
+            # Correlate across the WHOLE comparison. Evaluating each side's
+            # corners and then comparing the two intervals re-decorrelates
+            # them: `X <= X` with X=[1,2] reported a correlated FAIL, because
+            # lhs.hi=2 was compared against rhs.lo=1 (codex review of
+            # 0f709ed). The relation has to be sampled at one consistent
+            # assignment per variable, so the difference is what gets
+            # cornered.
             try:
-                cl = eval_corners(c["lhs"], env)
-                cr = eval_corners(c["rhs"], env)
+                diff = eval_corners(
+                    ast.BinOp(left=c["lhs"], op=ast.Sub(), right=c["rhs"]),
+                    env)
             except LedgerError:
-                cl = cr = None
-            if cl is not None and cr is not None:
-                row["correlated_lhs"] = repr(cl)
-                row["correlated_rhs"] = repr(cr)
-                row["correlated_margin"] = margin(cl, c["op"], cr)
-                row["correlated_meets"] = satisfied(cl, c["op"], cr)
+                diff = None
+            if diff is not None:
+                zero = Interval(0.0, 0.0)
+                row["correlated_difference"] = repr(diff)
+                row["correlated_margin"] = margin(diff, c["op"], zero)
+                row["correlated_meets"] = satisfied(diff, c["op"], zero)
                 if row["correlated_meets"] != ok:
                     row["detail"] += (
                         ". CORRELATION MATTERS HERE: %s appear(s) more than "
@@ -631,6 +803,14 @@ def run(argv):
                     default="as-built",
                     help="which tier the EXIT CODE is taken from; both tiers "
                          "are always printed (default: as-built)")
+    ap.add_argument("--expect-variables", default=None, metavar="A,B,C",
+                    help="the variable names the AUTHORITY says this ledger "
+                         "must define. Without it, coverage is counted from "
+                         "the ledger being graded, so deleting a variable and "
+                         "its constraint together still passes")
+    ap.add_argument("--expect-constraints", default=None, metavar="c1,c2",
+                    help="the constraint ids the authority says must be "
+                         "graded; same reason")
     ap.add_argument("--min-constraints", type=int, default=1,
                     help="refuse if the ledger has fewer (default 1); a "
                          "ledger that lost its constraints must not pass")
@@ -653,6 +833,34 @@ def run(argv):
                           "unevaluable, not a pass"
                        % (args.ledger, n, args.min_constraints), "E-EMPTY")
 
+    # Take the expectation from the AUTHORITY, not from the artefact's own
+    # neighbourhood (GUARDS.md). Counting variables and constraints out of the
+    # ledger being graded means a deleted variable AND its constraint leave a
+    # smaller, still-passing ledger -- and a constant-only tautology counts as
+    # a graded constraint (codex review of 0f709ed).
+    for flag, label, present in (
+        (args.expect_variables, "variable", set(ledger["variables"])),
+        (args.expect_constraints, "constraint",
+         {c["id"] for c in ledger["constraints"]}),
+    ):
+        if flag is None:
+            continue
+        expected = {s.strip() for s in flag.split(",") if s.strip()}
+        if not expected:
+            return verdict(2, "--expect-%ss was given but names nothing; an "
+                              "empty inventory is not an expectation"
+                              % label, "E-LEDGER")
+        missing = sorted(expected - present)
+        extra = sorted(present - expected)
+        if missing or extra:
+            return verdict(
+                2, "%s inventory does not match the authority: %s%s%s"
+                % (label,
+                   "missing " + ", ".join(missing) if missing else "",
+                   "; " if missing and extra else "",
+                   "unexpected " + ", ".join(extra) if extra else ""),
+                "E-INVENTORY")
+
     tiers = {t: evaluate(ledger, t) for t in ("intent", "as-built")}
     gated = ("intent", "as-built") if args.tier == "both" else (args.tier,)
 
@@ -660,9 +868,27 @@ def run(argv):
         _print_tier(t, tiers[t], t in gated)
 
     if args.json_out:
+        # The ledger is the AUTHORITY. `--json=ledger.json ledger.json`
+        # returned PASS and replaced it with a report that has no schema
+        # (codex review of 0f709ed) -- the guard destroying the thing it
+        # grades, the same defect copper_guards had.
+        try:
+            same = (os.path.exists(args.json_out)
+                    and os.path.samefile(args.json_out, args.ledger))
+        except OSError:
+            same = os.path.abspath(args.json_out) == os.path.abspath(args.ledger)
+        if same:
+            return verdict(2, "--json %s is the ledger being graded; refusing "
+                              "to overwrite the authority with a report"
+                              % args.json_out, "E-LEDGER")
+        if os.path.exists(args.json_out) and not _is_own_report(args.json_out):
+            return verdict(2, "--json %s exists and is not a design_ledger "
+                              "report; refusing to overwrite a file this "
+                              "guard does not own" % args.json_out, "E-LEDGER")
         try:
             with open(args.json_out, "w", encoding="utf-8") as f:
-                json.dump({"design": ledger["design"],
+                json.dump({"tool": _REPORT_MARKER,
+                           "design": ledger["design"],
                            "gated_tiers": list(gated),
                            "tiers": {t: tiers[t] for t in tiers}},
                           f, indent=2, default=str)

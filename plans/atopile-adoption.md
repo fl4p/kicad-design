@@ -289,12 +289,12 @@ subjects (`GUARDS.md`), a tri-state verdict where atopile has two, and a per-gua
 contract atopile has nowhere. Adopting the shape would be a downgrade.
 
 **`Units.py`'s dimensional analysis.** Correct and impressive — angle and solid angle are in the
-basis, so torque and energy are not commensurable (`Units.py:31-35`) — but everything after line 210
+basis, so torque and energy are not commensurable (`Units.py:31-35`) — but the first `fabll.Node`-derived class starts at line 221, not immediately after 210, and everything from there
 derives from `fabll.Node` and is welded to the type graph. Not liftable, and not needed.
 
 **Layout reuse (`layout_sync.py`).** The idea of a proven sub-block as a reusable addressable unit
 with routing attached is sound and this repo has no equivalent. The implementation is not the thing
-to copy: rotation is unhandled (`:387`, `# TODO rotation?`), the anchor is chosen by pad count
+to copy: rotation is unhandled (`:390`, `# TODO rotation?`; an earlier draft cited `:387`), the anchor is chosen by pad count
 (`:365-369`) so adding a bigger part silently re-anchors the group, a missing net map returns net `0`
 (`:487-491`) putting copper on the no-net net, and the "most frequent mapping" vote at `:218-229` is
 `x > max(... including x ...)`, which is always false, so the first observation wins and is never
@@ -322,7 +322,7 @@ than a thing to use. It lives inside `design_ledger.py` where it is exercised on
 | `SKILL.md` | the running-KiCad check now names an executable probe and its tri-state contract |
 | `scripts/README.md` | three helper-table rows and three usage sections |
 
-Suite: 273 tests at the base commit, **376** after, all passing
+Suite: 273 tests at the base commit, **386** after, all passing under both `/opt/homebrew/bin/python3` and `/usr/bin/python3` (6 skipped on the latter, where numpy/shapely are absent)
 (`cd scripts && python3 -m unittest discover -p 'test_*.py'`). No third-party dependency was added;
 every new script is stdlib-only.
 

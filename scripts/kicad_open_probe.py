@@ -28,8 +28,12 @@ Two independent signals exist, and NEITHER can prove a file is free:
 Consequently the verdict is deliberately asymmetric and monotone: evidence of
 danger can only ever move the answer toward HELD, never toward NOT-HELD.
 
-    HELD       a lock file exists for this exact path.
-    UNKNOWN    the lock file exists but is unreadable or malformed; or the
+    HELD       a lock file exists for this exact path -- including when its
+               CONTENT is malformed. A lock whose body cannot be parsed is
+               still a lock; treating unreadable content as UNKNOWN would let
+               a corrupt lock read as less dangerous than a valid one, and
+               this scale is deliberately asymmetric the other way.
+    UNKNOWN    the lock file exists but cannot be READ at all; or the
                containing directory cannot be listed; or no lock exists but a
                KiCad IPC socket does, so a KiCad is running and this probe
                cannot ask it what it has open.
@@ -197,17 +201,33 @@ def kicad_holding(path):
     parent = lock.parent
     try:
         exists = lock.exists()
-        parent_ok = parent.is_dir() and os.access(parent, os.R_OK)
     except OSError as e:
-        return UNKNOWN, ("cannot stat %s (%s); a read that failed is not an observation" % (lock, e))
+        return UNKNOWN, ("cannot stat %s (%s); a read that failed is not an "
+                         "observation" % (lock, e))
+    # LIST the directory rather than asking access(2) whether we could. A
+    # negative `exists()` plus `R_OK` is a prediction about a read, not a read
+    # (codex review of 0f709ed found NOT-HELD returned with no listdir on the
+    # board's own directory). os.access can also disagree with the kernel
+    # under ACLs, and Path.glob on an unreadable directory yields nothing and
+    # raises nothing -- the same silent-empty trap this module's own IPC probe
+    # already had.
+    try:
+        listing = os.listdir(parent)
+        parent_ok = True
+    except OSError as e:
+        listing, parent_ok = None, False
+        parent_error = e
 
     if exists:
         return _read_lock(lock)
 
     if not parent_ok:
         return UNKNOWN, (
-            "%s does not exist or is not a readable directory, so the absence "
-            "of %s is not an observation" % (parent, lock.name))
+            "%s could not be listed (%s), so the absence of %s is not an "
+            "observation" % (parent, parent_error, lock.name))
+    if lock.name in listing:
+        # The listing is the observation; `exists()` raced or lied.
+        return _read_lock(lock)
 
     socks, sock_ok = ipc_sockets()
     if not sock_ok:
