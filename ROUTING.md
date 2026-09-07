@@ -548,8 +548,8 @@ contain zone-track, zone-via and track-via records on a pour-managed net. Conver
 with a familiar power name is necessarily pour-managed. Make the project declare the exact pure-pour
 nets; leave a zone on an undeclared net, a missing net, or mismatched item nets ambiguous.
 
-**But a net declaration is not evidence about a particular record, and the gate that closes
-fabrication treats it that way (amended 2026-09-07).** Classifying *every* record on a declared net
+**But a net declaration is not evidence about a particular record, and the signal-open gate
+treated it that way (amended 2026-09-07).** Classifying *every* record on a declared net
 as topology is what let a real `Zone [/SIG] <-> Track [/SIG]` open exit 0 merely because the caller
 had labelled `/SIG` as pour. Under `--require-zero-signal-opens` only an all-zone record — a zone
 island, which is what a refill produces — counts as topology on its own. The zone-track, zone-via
