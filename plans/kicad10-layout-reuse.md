@@ -35,12 +35,17 @@ Three source tiers, in the order this record trusts them.
 | local manual | the bundled PCB Editor manual, §13 Multichannel layout and §14 Design blocks | `/Applications/KiCad/KiCad.app/Contents/SharedSupport/help/en/pcbnew.html` |
 | source | the KiCad tree at git tag `10.0.5` | `gitlab.com/kicad/code/kicad` — note the tag is `10.0.5`, not `v10.0.5`, which 404s |
 
-The source tag is tied to the installed build rather than assumed to match it: the strings
-`Target Rule Area shares components with the reference area` and
-`Rule Area topologies do not match: %s`, both introduced in the 10.0.5 `multichannel_tool.cpp`,
-are present in the shipped `/Applications/KiCad/KiCad.app/Contents/PlugIns/_pcbnew.kiface`.
+The source tag is tied to the installed build directly:
+`kicad-cli version --format commit` returns `18fb9289ff0efdca53c0352ed81a0973f0a6b58c`, which is
+the commit on the official `10.0.5` tag. An earlier draft argued this from two strings said to be
+new in 10.0.5; that was wrong — `Rule Area topologies do not match: %s` is already present at tag
+`10.0.4` — and string presence cannot identify a whole tree anyway. The commit hash can.
 
-The local manual and the source did not disagree anywhere in this investigation. The local manual
+The local manual and the source disagree in exactly one place, and it is the important one: the
+manual says Status shows "OK" when the topology matches (pcbnew.html §13.4.2), while the source
+can set `m_isOk` and report "OK" *after* `FindIsomorphism` fails, via a UUID/FPID/pad-count
+fallback that checks no connectivity at all (`multichannel_tool.cpp:2165`, and see "the refusal is
+fail-closed as an edit, open as a report" below). Nowhere else did they disagree. The local manual
 and the **web** manual do disagree by version, usefully: `docs.kicad.org/9.0/en/pcbnew/pcbnew.html`
 carries the multichannel chapter (30 occurrences of "multichannel", 7 of "Repeat Layout") but has
 no design-block chapter at all — its only two mentions of "design block" are the
@@ -127,7 +132,7 @@ What it copies, from the manual's own options table (§13.2):
 |---|---|
 | Anchor footprint | positions and rotates each channel relative to its anchor, else to the rule-area centre |
 | Copy footprint placement | footprints enclosed by **or intersecting** the reference area |
-| Copy routing | tracks and vias **fully enclosed** by the reference area; **existing target routing is deleted first** |
+| Copy routing | tracks and vias **fully enclosed** by the reference area; eligible existing target routing is removed first — inside the area, on layers enabled in that rule area, subject to the connected-only, locking and group-ownership filters, never unconditionally |
 | Restrict to routing connected within the area | sub-option: skip tracks whose net has no pad inside the area |
 | Copy other items | zones and graphics **fully enclosed** by the reference area |
 | Group items with their target rule areas | wraps each target's copied items with its rule area |
@@ -175,9 +180,15 @@ Where it lands against [`GUARDS.md`](../GUARDS.md):
   do differ can be reported OK and receive the reference channel's copper, with track nets
   reassigned through the pad mapping. The manual does not mention this path. Read in code at tag
   10.0.5; **not exercised.**
-- **It will overwrite locked target copper.** *Include locked items* is one checkbox and its own
-  documented effect is that *"items associated with target rule areas will be updated even if they
-  are locked"*, on top of the unconditional deletion of existing target routing.
+- **It will overwrite locked target copper, if you let it.** *Include locked items* is one
+  checkbox and its own documented effect is that *"items associated with target rule areas will be
+  updated even if they are locked"*. Without it, locked target routing is retained — so the
+  removal of existing target routing is filtered, not unconditional: the manual scopes it to
+  routing *"within the target rule area that is on layers enabled in the target rule area"*
+  (pcbnew.html §13.4.3), and the source applies the connected-only and group-ownership filters on
+  top (`multichannel_tool.cpp:1406`). Corrected after review: this file previously said
+  "unconditional deletion", which would have had a reader expect a clean target that Repeat Layout
+  does not promise.
 
 There is one genuinely fail-closed refusal worth naming, added in 10.0.5: if a target rule area
 resolves to the *same* footprints as the reference — two areas pointing at one sheet or component
@@ -215,10 +226,15 @@ read and placed by KiCad.
 
 - `kicad-cli` 10.0.5 exposes `fp`, `jobset`, `pcb` (`drc`, `export`, `import`, `render`,
   `upgrade`), `sch`, `sym`, `version`. No design-block and no multichannel command.
-- The IPC API at tag 10.0.5 — every `message` in `api/proto/board/board_commands.proto`,
-  `common/commands/editor_commands.proto` and `common/commands/base_commands.proto` — contains
-  nothing for design blocks or multichannel.
-- The SWIG `pcbnew` Python module exposes exactly three related symbols, all on `EDA_GROUP`:
+- The IPC API at tag 10.0.5 — every `message` in all **five** command schemas
+  (`api/proto/board/board_commands.proto`, `common/commands/editor_commands.proto`,
+  `common/commands/base_commands.proto`, `common/commands/project_commands.proto` and
+  `schematic/schematic_commands.proto`) — defines no dedicated command message for design blocks
+  or multichannel. Generic `RunAction` can name the GUI actions, but Repeat Layout needs a
+  selected rule area and then opens a modal dialog.
+- The SWIG `pcbnew` Python module exposes two further module constants,
+  `DESIGN_BLOCK_LIB_TABLE_T` (`pcbnew.py:1396`) and `PLACEMENT_SOURCE_T_DESIGN_BLOCK`
+  (`pcbnew.py:17471`), and exactly three callable design-block methods, all on `EDA_GROUP`:
   `HasDesignBlockLink`, `SetDesignBlockLibId`, `GetDesignBlockLibId`. That is the group's library
   link, not block IO and not Repeat Layout.
 - The action names exist and are reachable in principle through the API's `RunAction`

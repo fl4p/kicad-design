@@ -301,14 +301,19 @@ tag `10.0.5` defines no message for either; the SWIG `pcbnew` module exposes onl
 design-block *link* accessors. The tool actions exist and the API's `RunAction` can name them, but
 that proto's own comment is *"the TOOL_ACTIONs are specifically **not** an API … provided for
 low-level prototyping purposes only"*, and `repeatLayout` opens a modal dialog. So a generator can
-emit the reuse unit; a human still applies it.
+emit the reuse unit; applying it must currently go through an interactive GUI path. That is a
+statement about the interface, not about the operator — GUI automation is possible, and nothing
+here establishes that a person has to be the one clicking.
 
 Neither mechanism relaxes anything else in this file, and two rules above apply to their output
 with more force than usual:
 
-- **A replicated channel is a skeleton edit, so the skeleton rules apply to it.** Repeat Layout
-  deletes all existing routing in a target area before copying, and its *Include locked items*
-  option updates locked target items as well. A block placed from a library is a copy of geometry
+- **A replicated channel is a skeleton edit, so the skeleton rules apply to it.** Before copying,
+  Repeat Layout removes *eligible* existing routing in the target area — inside the rule area, on
+  layers enabled in that rule area, narrowed further by *Restrict to routing connected within the
+  area*, and skipping locked target items unless *Include locked items* is set, which then updates
+  them too. Read that as "routing can survive a purported clean copy" in both directions: some
+  target copper is deleted, and some is not. A block placed from a library is a copy of geometry
   with no link back to the authority that justified it — the same hazard as verifying a board
   against the generator sitting beside it.
 - **Do not read a completion message as verification.** Documented-not-verified, from the 10.0.5
