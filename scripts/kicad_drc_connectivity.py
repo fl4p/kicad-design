@@ -79,8 +79,17 @@ MAX_BOARD_BYTES = 256 * 1024 * 1024
 # Tolerance for KiCad's second-resolution `date` against a
 # nanosecond-resolution board mtime. Quantisation only.
 REPORT_DATE_SKEW_S = 2
-# `(net 3 "/SIG")` starting exactly at a depth-1 open paren.
-_TOP_LEVEL_NET = re.compile(r'\(net\s+\d+\s+"((?:[^"\\]|\\.)*)"\s*\)')
+# Two spellings, because KiCad changed the file format underneath this check:
+#   KiCad 8  (version 20240108): a numbered table entry, `(net 3 "/SIG")`
+#   KiCad 10 (version 20260206): a bare reference, `(net "/SIG")`, and NO
+#                                top-level net section whatsoever
+# Measured 2026-09-07 over 400 real boards: an 8.0 board carries 847 numbered
+# expressions and no bare ones; a 10.0 board carries 1207 bare ones and no
+# numbered ones. Matching only the numbered form returned an EMPTY inventory
+# for every KiCad 10 board, which would have refused every legitimate
+# --pour-net on exactly the release this skill targets.
+_NET_EXPR = re.compile(
+    r'\(net\s+(?:\d+\s+)?"((?:[^"\\]|\\.)*)"\s*\)')
 # The 199 figure is measured, but it is measured for `silk_overlap` and
 # `silk_over_copper` on KiCad 10.0.5 -- NOT for `unconnected_items`, and not on
 # any other release. See ~/dev/kb/tooling/kicad-drc-caps-reports-at-199-per-type.md,
@@ -311,7 +320,17 @@ def classify_record(
 
 
 def board_net_table(text: str) -> List[str]:
-    """Net names from the board's TOP-LEVEL net table, by structure.
+    """Every net name this board NAMES, gathered structurally.
+
+    Not "the net table": KiCad 10 has no top-level net section at all (verified
+    by walking the depth-2 heads of a real 10.0 board -- footprint, segment,
+    via, zone, and no `net`). A net exists there only as a reference inside the
+    objects that carry it, so the set of names the file references is the only
+    inventory the file offers, and that is what this returns. On a KiCad 8
+    board the numbered table entries are matched by the same expression.
+
+    The point of the check this feeds is catching a MISSPELLED --pour-net, and
+    for that "a name this board mentions" is the right question.
 
     A text regex for `(net N "name")` matched the same expression inside a
     pad, inside a comment, and inside a file that was not a board at all -- so
@@ -350,10 +369,13 @@ def board_net_table(text: str) -> List[str]:
             continue
         if char == "(":
             depth += 1
-            if depth == 2:
-                match = _TOP_LEVEL_NET.match(text, index)
-                if match:
-                    nets.append(match.group(1))
+            # Any depth inside the board: in KiCad 10 the reference IS
+            # the only mention there is. The enclosing structure still has
+            # to be a real board -- root `kicad_pcb`, balanced parens --
+            # which is what stops a garbage file from declaring a net.
+            match = _NET_EXPR.match(text, index)
+            if match:
+                nets.append(match.group(1))
             index += 1
             continue
         if char == ")":
