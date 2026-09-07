@@ -23,6 +23,10 @@ def item(description, uuid=None):
     fixture, but one that hid how much `record_id` leans on uuid uniqueness.
     """
     if uuid is None:
+        # Derived from the description, so two items with the SAME description
+        # share a uuid -- which is what a real board would do only if they
+        # were the same object. Pass `uuid=` explicitly where a test needs two
+        # distinct objects that read alike.
         uuid = hashlib.sha256(description.encode("utf-8")).hexdigest()[:12]
     return {"description": description, "uuid": uuid, "pos": {"x": 1, "y": 2}}
 
@@ -930,12 +934,23 @@ class RealKiCadExport(unittest.TestCase):
             # honest. An exporter that DID run and produced something this
             # tool cannot parse, or a different open count, is a real failure
             # and must stay one -- that is the whole point of the tier.
-            if proc.returncode != 0 or not out.exists():
+            if proc.returncode < 0:
+                # Killed by a signal: the process never got to run. That is
+                # this machine's sandbox, not KiCad. (Measured: SIGABRT under
+                # a codex seatbelt, the same denial that stops Chrome.)
                 self.skipTest(
-                    "kicad-cli did not run to completion here (exit %s); this "
-                    "is an environment limitation, not a report-format "
-                    "finding. stderr: %s"
-                    % (proc.returncode, (proc.stderr or "")[:200]))
+                    "kicad-cli was killed by signal %d before it could run; "
+                    "an environment limitation, not a report-format finding"
+                    % -proc.returncode)
+            # A POSITIVE non-zero exit means kicad-cli RAN and reported a
+            # problem, and a missing output after a clean exit means it ran
+            # and produced nothing. Both are real findings about the exporter
+            # this suite exists to track, so neither may be skipped -- the
+            # earlier branch skipped on any non-zero status, which would have
+            # hidden a genuine crash of an installed KiCad (codex review of
+            # 298ed6d).
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(out.exists(), "kicad-cli wrote no report")
             report = json.loads(out.read_text(encoding="utf-8"))
             result = split.classify_report(
                 report, str(out), [], [], strict_pour=True)
@@ -1111,6 +1126,29 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
                 drc_report([]), raw)
         self.assertEqual(code, 0, errors)
 
+    def test_a_report_dated_in_the_future_is_refused(self):
+        """A future timestamp satisfies any freshness check, forever."""
+        ahead = (datetime.datetime.now()
+                 + datetime.timedelta(days=365)).replace(
+                     microsecond=0).isoformat()
+        with tempfile.TemporaryDirectory() as raw:
+            code, errors = self._run(
+                ["--no-pour-nets", "--require-zero-signal-opens"],
+                drc_report([], date=ahead), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("in the future", errors)
+
+    def test_a_utc_z_timestamp_is_accepted_on_every_interpreter(self):
+        """`Z` is legal ISO-8601; Python 3.9 will not parse it unaided."""
+        stamp = (datetime.datetime.now(datetime.timezone.utc)
+                 + datetime.timedelta(seconds=30)).replace(
+                     microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with tempfile.TemporaryDirectory() as raw:
+            code, errors = self._run(
+                ["--no-pour-nets", "--require-zero-signal-opens"],
+                drc_report([], date=stamp), raw)
+        self.assertEqual(code, 0, errors)
+
     def test_overriding_the_cap_requires_naming_the_release_probed(self):
         """KNOWN-BAD CALIBRATION for the unverified mute switch.
 
@@ -1139,7 +1177,8 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("does not match the KiCad that wrote", errors)
 
-    def test_an_override_probed_on_this_release_is_accepted(self):
+    def test_an_override_without_a_probe_is_refused(self):
+        """Naming a version only asserts that a probe happened."""
         rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
                 for _ in range(split.KICAD_10_REPORT_CAP)]
         with tempfile.TemporaryDirectory() as raw:
@@ -1147,7 +1186,59 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
                 ["--pour-net", "/GND", "--require-zero-signal-opens",
                  "--report-cap", "none", "--report-cap-probed-on", "10.0.5"],
                 drc_report(rows), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("--report-cap-probe", errors)
+
+    def _probe_file(self, directory, findings, version="10.0.5"):
+        """A DRC report carrying more findings of one type than the cap."""
+        probe = drc_report([record("Pad 1 [/X] of R1 on F.Cu",
+                                   "Track [/X] on F.Cu")
+                            for _ in range(findings)])
+        probe["kicad_version"] = version
+        path = pathlib.Path(directory) / "probe.json"
+        path.write_text(json.dumps(probe), encoding="utf-8")
+        return path
+
+    def test_an_override_backed_by_a_real_probe_is_accepted(self):
+        """The measurement, not the label: a report from that release
+        actually containing more findings than the cap."""
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = self._probe_file(raw, split.KICAD_10_REPORT_CAP + 5)
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(probe)],
+                drc_report(rows), raw)
         self.assertEqual(code, 0, errors)
+
+    def test_a_probe_that_does_not_exceed_the_cap_proves_nothing(self):
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = self._probe_file(raw, 12)
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(probe)],
+                drc_report(rows), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("does not demonstrate", errors)
+
+    def test_a_probe_from_another_release_is_refused(self):
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = self._probe_file(raw, split.KICAD_10_REPORT_CAP + 5,
+                                     version="9.0.1")
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(probe)],
+                drc_report(rows), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("was produced by KiCad", errors)
 
 
 class PerRecordAcknowledgement(unittest.TestCase):
@@ -1188,6 +1279,30 @@ class PerRecordAcknowledgement(unittest.TestCase):
                 raw, ("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu"))
             code, errors = self._run(board, drc, ["--reviewed-record", ident])
         self.assertEqual(code, 0, errors)
+
+    def test_an_acknowledgement_does_not_cover_a_record_with_the_same_uuids(self):
+        """The sharper case: SAME objects, changed record.
+
+        The sibling test below changes the descriptions, and this file's
+        helper derives each uuid from its description -- so that test only
+        ever proved that different uuids give different ids. Keying the id on
+        uuids alone meant a zone-track record could become a moved zone-via
+        record, keep its id, and keep its waiver (codex review of 298ed6d).
+        """
+        first = record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
+        uuids = [entry["uuid"] for entry in first["items"]]
+        second = {**first, "items": [
+            item("Zone [/GND] on F.Cu", uuids[0]),
+            item("Via [/GND] on B.Cu", uuids[1]),
+        ]}
+        self.assertEqual([e["uuid"] for e in second["items"]], uuids)
+        self.assertNotEqual(split.record_id(first), split.record_id(second))
+
+    def test_a_record_whose_items_share_a_uuid_has_no_id(self):
+        """Two items claiming one object cannot be acknowledged."""
+        row = record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
+        row["items"][1]["uuid"] = row["items"][0]["uuid"]
+        self.assertIsNone(split.record_id(row))
 
     def test_an_acknowledgement_does_not_cover_a_different_record(self):
         """The id is the record's items, so it cannot be reused."""
@@ -1293,9 +1408,37 @@ class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
         self.assertEqual(
             split.board_net_table('(kicad_pcb\n (net 1 "/A)B")\n)\n'),
             ["/A)B"])
-        self.assertIn(
-            '/A\\"B',
-            split.board_net_table('(kicad_pcb\n (net 1 "/A\\"B")\n)\n'))
+
+    def test_an_escaped_quote_is_returned_in_its_RAW_spelling(self):
+        """Documented limitation, not an endorsement.
+
+        The scanner returns the bytes between the quotes, so a net whose name
+        contains a quote comes back as `/A\\"B` rather than the semantic
+        `/A"B`. A --pour-net for such a net must therefore be spelled the way
+        the file spells it. Nothing in the corpus of 400 real boards has one;
+        this test exists so the behaviour is a recorded choice rather than an
+        accident (codex review of 298ed6d).
+        """
+        raw = split.board_net_table('(kicad_pcb\n (net 1 "/A\\"B")\n)\n')
+        self.assertEqual(raw, ['/A\\"B'])
+        self.assertNotEqual(raw, ['/A"B'])
+
+    def test_net_shaped_text_under_a_plausible_root_cannot_authorise(self):
+        """The sharper case: input that DOES look like a board.
+
+        The sibling test uses a file with no `(kicad_pcb` prefix at all, which
+        the cheapest possible check already rejects. These do carry it, or
+        nearly: a near-miss root symbol, and a net expression nested in a form
+        that cannot carry a net (codex review of 298ed6d, which found both
+        accepted after the KiCad 10 fix relaxed the depth rule).
+        """
+        for text in ('(kicad_pcbx (net "/PHANTOM"))\n',
+                     '(kicad_pcb (metadata (net "/PHANTOM")))\n'):
+            with self.subTest(text=text[:24]):
+                try:
+                    self.assertEqual(split.board_net_table(text), [])
+                except split.ConnectivityError:
+                    pass  # refusing outright is also correct
 
     def test_a_garbage_file_cannot_authorise_a_pour_declaration(self):
         """KNOWN-BAD CALIBRATION: a comment-only 'inventory' passed the gate."""
@@ -1454,6 +1597,28 @@ class AnAcknowledgementIsNotEvidence(unittest.TestCase):
                             ["--pour-net", "/SIG",
                              "--reviewed-record", ident])
         self.assertEqual(code, 3, "a zoneless real open was acknowledged away")
+
+    def test_an_acknowledgement_can_carry_its_reason(self):
+        row = record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
+        ident = split.record_id(row)
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report([row])), encoding="utf-8")
+            out = directory / "split.json"
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main(
+                    [str(drc), "--board", str(board),
+                     "--trust-external-report", "--pour-net", "/GND",
+                     "--require-zero-signal-opens", "--json", str(out),
+                     "--reviewed-record",
+                     "%s=thermal relief stub, reviewed on the plot" % ident])
+            self.assertEqual(code, 0)
+            written = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(written["reviewed_records"][ident],
+                         "thermal relief stub, reviewed on the plot")
 
     def test_an_acknowledgement_still_works_on_a_mixed_zone_record(self):
         """Its actual purpose: the zone-track records real pours produce."""
