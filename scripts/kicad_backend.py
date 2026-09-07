@@ -157,9 +157,12 @@ def requested_backend(explicit=None, environ=None):
     if explicit is not None:
         name, source = explicit, SOURCE_CLI
     else:
-        from_env = environ.get(ENV_VAR)
-        if from_env:
-            name, source = from_env, SOURCE_ENV
+        if ENV_VAR in environ:
+            # PRESENCE, not truthiness. `KICAD_BACKEND=""` is a value the
+            # caller set; treating it as "unset" handed the run to the
+            # default backend, which is the same silent substitution the
+            # unknown-name check exists to prevent (codex review of 95d1e48).
+            name, source = environ[ENV_VAR], SOURCE_ENV
         else:
             return DEFAULT_BACKEND, SOURCE_DEFAULT
     if name not in BACKENDS:
@@ -319,7 +322,12 @@ def cli_serves_api(kicad_cli, runner=None):
     """
     runner = _run if runner is None else runner
     code, output = runner([kicad_cli, "--help"], _CLI_PROBE_TIMEOUT_S)
-    if code is None:
+    # A help command that FAILED tells us nothing about the subcommand list.
+    # Accepting any nonzero exit whose output happened to contain the string
+    # let `(1, "usage: api-server")` read as "this CLI serves the API"
+    # (codex review of 95d1e48), which would skip the correct
+    # ipc-no-headless-server refusal for a later, false obstacle.
+    if code != 0:
         return False
     return re.search(r"\bapi-server\b", output or "") is not None
 
@@ -409,14 +417,32 @@ def select(explicit=None, environ=None, probes=None):
             name, "backend-unknown", "no probe is registered for %r" % name
         )
     selection = probe(environ=environ)
-    # The probe reports what it found; the caller's request decides the source.
-    selection.name = name
+    # The probe's answer must BE the backend that was asked for. Overwriting
+    # the name made a SWIG selection returned for `ipc` read as
+    # `ipc / synthetic SWIG producer` (codex review of 95d1e48): a mislabelled
+    # producer is exactly the provenance failure the backend field exists to
+    # prevent, so it is unevaluable rather than renamed.
+    if selection.name != name:
+        raise BackendUnavailable(
+            name, "backend-identity-mismatch",
+            "probe for %r returned a %r selection; a backend that cannot "
+            "name itself cannot carry provenance" % (name, selection.name),
+        )
     selection.source = source
     return selection
 
 
 def require_capabilities(selection, *capabilities):
-    """Refuse a backend that cannot do what the caller needs."""
+    """Refuse a backend that cannot do what the caller needs.
+
+    SCOPE, stated because the name overpromises: for the SWIG backend the
+    capability set is DECLARED on a successful import, not probed
+    symbol-by-symbol, so an importable `pcbnew` exposing only
+    `GetBuildVersion` would be certified for all five (codex review of
+    95d1e48). It holds on the installed 10.0.5 -- every required symbol is
+    present -- but this checks membership in a declared set, and a real
+    per-symbol probe is not implemented.
+    """
     missing = [c for c in capabilities if c not in selection.capabilities]
     if missing:
         raise BackendUnavailable(

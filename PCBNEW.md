@@ -255,7 +255,8 @@ if isinstance(p, str) and self.pad_net(p) != netname:
 ```
 
 Calibrate by re-introducing the swapped pad number and watching it exit non-zero. Expect this
-to be free on an existing board — it found no false positives on ~60 routed polylines — which
+to be free on an existing board — it found no false positives on ~60 routed polylines, one board
+in one session, not replicated — which
 is the point: it costs nothing and removes a whole silent failure mode from the generator.
 
 **A schematic edit that changes no nets can still break `--schematic-parity`.** Renaming a
@@ -281,7 +282,8 @@ pours.
 
 **A zone SETTING can destroy copper asymmetrically, and nothing checks settings.**
 `island_removal_mode` on a current-path plane had reverted from `NEVER` to `ALWAYS`, and with
-it went **37 mm² from one inner plane and not its mirror** — In1 856.21 mm² against In2
+it went **37 mm² from one inner plane and not its mirror** (one board, one session, not
+replicated; the mechanism generalises, the number does not) — In1 856.21 mm² against In2
 825.65, a 30.56 mm² imbalance where the two had previously been bit-identical. No layout
 changed. The mechanism is the one under *A via that lands outside its pour* below: a
 foreign-net via cuts a corner off both planes, then on one plane the stitching row is that
@@ -376,8 +378,8 @@ load-bearing-omission rules at the end of this section apply.
   measurement and invites diagnosing a phase that was never the cost.
 - **Slice by outcome or phase, not only by function.** Success and failure share the same stacks,
   so a function profiler cannot show which outcome pays; one timer bucketed on the return value
-  can. Measured: 96 % of one router's runtime was in FAILED searches, while the profiler-suggested
-  index rewrite was worth only 1.12x end to end.
+  can. Measured on one router and one board, not replicated: 96 % of that router's runtime was in
+  FAILED searches, while the profiler-suggested index rewrite was worth only 1.12x end to end.
 - **Measure reuse before you cache — under the cache's own lifetime.** Global duplicate counts
   overestimate cacheability; count hits that survive the proposed invalidation boundary. Measured:
   a cache invalidating correctly on every mutation scored 1142 invalidations against 14 hits and no

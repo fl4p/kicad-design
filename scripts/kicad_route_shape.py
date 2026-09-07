@@ -642,6 +642,13 @@ def build_parser():
 
 
 def main(argv=None):
+    # Provenance is per-run, and this module-level global outlives a call:
+    # an early failure on a second in-process invocation emitted the PREVIOUS
+    # run's backend, breaking the "null before resolution" contract the
+    # reports promise (codex review of 95d1e48; the tests had been masking it
+    # by resetting the global in setUp).
+    global _BACKEND
+    _BACKEND = None
     argv = list(sys.argv[1:] if argv is None else argv)
     # Invalidate any pre-existing report BEFORE argparse can exit: a bad
     # argument used to leave a previous "pass" artefact standing (measured
@@ -763,7 +770,6 @@ def main(argv=None):
 
     # Resolve the backend explicitly and record it. An unavailable backend is
     # UNEVALUABLE; it never falls back to the other one.
-    global _BACKEND
     try:
         selection = kicad_backend.select(
             args.backend, probes={kicad_backend.SWIG: _swig_selection,

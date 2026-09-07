@@ -57,9 +57,18 @@ class RequestedBackend(unittest.TestCase):
             ("swig", backend.SOURCE_CLI),
         )
 
-    def test_an_empty_environment_value_is_not_a_request(self):
+    def test_an_empty_environment_value_is_a_configuration_error(self):
+        """Presence, not truthiness. `KICAD_BACKEND=""` is a value the caller
+        set, and letting it fall through to the default was the same silent
+        substitution the unknown-name check exists to prevent (codex review
+        of 95d1e48, which found this test codifying the defect)."""
+        with self.assertRaises(backend.BackendUnavailable) as caught:
+            backend.requested_backend(None, {backend.ENV_VAR: ""})
+        self.assertEqual(caught.exception.failure_id, "backend-unknown")
+
+    def test_an_absent_environment_variable_still_takes_the_default(self):
         self.assertEqual(
-            backend.requested_backend(None, {backend.ENV_VAR: ""}),
+            backend.requested_backend(None, {}),
             (backend.DEFAULT_BACKEND, backend.SOURCE_DEFAULT),
         )
 

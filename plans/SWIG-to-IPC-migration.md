@@ -50,6 +50,11 @@ The `kicad-python` 0.8.0 package README, read out of the installed
 **The installed binaries agree.** The API server class lives in the shared library, but only
 the GUI binary calls it:
 
+(The `-i` matters and was missing when this was first written: the symbols are spelled
+`KICAD_API_SERVER` in uppercase, so a case-sensitive `grep -c api_server` prints 0 even against
+the six GUI symbols, making the saved proof vacuous. Re-run case-insensitively: the GUI still
+matches, `kicad-cli` still returns 0. Codex review of 95d1e48.)
+
 ```
 $ nm -u /Applications/KiCad/KiCad.app/Contents/MacOS/kicad | grep KICAD_API_SERVER
 __ZN16KICAD_API_SERVER15RegisterHandlerEP11API_HANDLER
@@ -58,7 +63,7 @@ __ZN16KICAD_API_SERVER5StartEv
 __ZN16KICAD_API_SERVERC1Ev
 __ZNK16KICAD_API_SERVER10SocketPathEv
 __ZNK16KICAD_API_SERVER7RunningEv
-$ nm -u /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli | grep -c api_server
+$ nm -u /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli | grep -ci api_server
 0
 ```
 

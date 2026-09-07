@@ -551,6 +551,12 @@ def _prescan_json_and_board(argv):
 
 
 def main(argv=None):
+    # Provenance is per-run, and this module-level global outlives a call: an
+    # early failure on a second in-process invocation emitted the PREVIOUS
+    # run's backend, breaking the "null before resolution" contract the report
+    # promises (codex review of 95d1e48).
+    global _BACKEND
+    _BACKEND = None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     # Invalidate any stale artifact even if parsing fails below; skip when
     # the pre-scan cannot tell the artifact apart from the board.
@@ -612,7 +618,6 @@ def main(argv=None):
 
     # Resolve the backend explicitly and record it. An unavailable backend is
     # UNEVALUABLE; it never falls back to the other one.
-    global _BACKEND
     try:
         selection = kicad_backend.select(
             args.backend, probes={kicad_backend.SWIG: _swig_selection,

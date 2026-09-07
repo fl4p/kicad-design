@@ -21,7 +21,12 @@ documentation names removal in a future major release. Everything this skill mea
 ## The interpreter re-exec helper — there are three of them, not one
 
 `pcbnew` is a native extension inside KiCad's own Python framework and is not importable from an
-ordinary venv. Five scripts therefore re-execute themselves under KiCad's bundled interpreter.
+ordinary venv. Six scripts import it at HEAD -- `kicad_autoroute_scaffold.py`,
+`kicad_backend.py`, `kicad_copper_collisions.py`, `kicad_route_candidate.py`,
+`kicad_route_manifest.py`, `kicad_route_shape.py`. Five was correct against the base commit
+`7b00165`; this branch then added `kicad_backend.py` itself, which imports `pcbnew` to probe it,
+and the count was not updated (codex review of 95d1e48). Five of the six re-execute themselves
+under KiCad's bundled interpreter.
 Three *independent* implementations of that helper exist:
 
 | implementation | file | probe | selection |
