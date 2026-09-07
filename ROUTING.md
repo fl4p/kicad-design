@@ -543,11 +543,20 @@ question — that is deterministic (the geometry-hash paragraph above); the rout
 
 **Rank on signal opens; the gate is still the total.** KiCad's `unconnected_items` mixes records
 of different kinds, but its JSON contains the net only inside each item's human-readable
-description. A zone-only classifier is wrong: measured reports also contain zone-track, zone-via
-and track-via records on a pour-managed net. Conversely, not every net with a familiar power name
-is necessarily pour-managed. Make the project declare the exact pure-pour nets and classify every
-record on those nets as pour topology; leave a zone on an undeclared net, a missing net, or
-mismatched item nets ambiguous. If one net mixes routed-return obligations with refill-owned plane
+description. A zone-only classifier is wrong for *reporting*: measured reports also
+contain zone-track, zone-via and track-via records on a pour-managed net. Conversely, not every net
+with a familiar power name is necessarily pour-managed. Make the project declare the exact pure-pour
+nets; leave a zone on an undeclared net, a missing net, or mismatched item nets ambiguous.
+
+**But a net declaration is not evidence about a particular record, and the gate that closes
+fabrication treats it that way (amended 2026-09-07).** Classifying *every* record on a declared net
+as topology is what let a real `Zone [/SIG] <-> Track [/SIG]` open exit 0 merely because the caller
+had labelled `/SIG` as pour. Under `--require-zero-signal-opens` only an all-zone record — a zone
+island, which is what a refill produces — counts as topology on its own. The zone-track, zone-via
+and track-via records that real boards do produce are acknowledged one at a time with
+`--reviewed-record <id>`, using the `record_id` the JSON reports: that keeps the gate usable on a
+real pour net while making each excuse a specific, auditable claim about a specific record, and an
+id that no longer matches any record is refused rather than silently carried forward. If one net mixes routed-return obligations with refill-owned plane
 work, declare it with `--mixed-pour-net`; every record on it remains ambiguous because DRC text
 alone cannot assign the obligation safely.
 
@@ -555,7 +564,8 @@ Use the shipped parser on a fresh JSON DRC report:
 
 ```sh
 python3 scripts/kicad_drc_connectivity.py drc.json \
-    --pour-net /GND --json connectivity.json
+    --board board.kicad_pcb \
+    --pour-net /GND --require-zero-signal-opens --json connectivity.json
 ```
 
 The report must come from a full-severity run whose authoritative configuration does not ignore

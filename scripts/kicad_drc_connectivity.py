@@ -6,11 +6,24 @@ and item-kind fields.  This helper parses those descriptions fail-closed and
 splits records into:
 
 * signal opens: records on nets not declared as pour-managed;
-* pour topology: every record on an explicitly declared pour-managed net,
-  including zone-track, zone-via, track-via, and records containing no zone;
+* pour topology: records on an explicitly declared pour-managed net. In the
+  DEFAULT classification this includes zone-track, zone-via, track-via and
+  records containing no zone. Under `--require-zero-signal-opens` -- the gate
+  that closes fabrication -- it narrows to ALL-ZONE records only, plus any
+  record the caller has acknowledged individually with `--reviewed-record`;
 * ambiguous: missing/mismatched nets, malformed items, a zone on an undeclared
-  net, or any record on a declared mixed-duty pour net. The DRC text cannot
-  assign mixed-net records to authored routing versus refill-owned topology.
+  net, any record on a declared mixed-duty pour net, and under the strict gate
+  any unacknowledged record naming a pad, track or via on a declared pour net.
+  The DRC text cannot assign these to authored routing versus refill-owned
+  topology.
+
+The strict narrowing exists because a declaration is a claim about a NET's
+role and is never evidence about a particular record: a `Zone [/SIG] <->
+Track [/SIG]` record on a net labelled `--pour-net /SIG` used to exit 0 while
+being a real open. Because measured reports genuinely do contain zone-track,
+zone-via and track-via records on real pour nets (see `../ROUTING.md`), a
+blanket refusal would make the gate unusable on the boards it was written for
+-- so the escape is per-record and auditable rather than per-net.
 
 The declaration is intentionally project-owned.  The script does not assume
 that a net named GND is a plane, or that every plane net is named GND.
@@ -33,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import datetime
 import hashlib
 import json
 import math
@@ -52,8 +66,21 @@ PAD_QUALIFIERS = frozenset(("pth", "smd", "npth"))
 REQUIRED_SEVERITIES = frozenset(("error", "warning", "exclusion"))
 SUPPORTED_COORDINATE_UNITS = frozenset(("mm", "in", "mils"))
 KICAD_10_REPORT_CAP = 199
-# Net declarations in a saved board: `(net 3 "/SIG")`.
+# Net declarations in a saved board: `(net 3 "/SIG")`. Kept for the fixture
+# correspondence test; the guard itself uses `board_net_table`, because a bare
+# text regex counts this expression wherever it appears -- inside a pad, in a
+# comment, or in a file that is not a board at all.
 BOARD_NET = re.compile(r'\(net\s+\d+\s+"([^"]*)"\)')
+
+# A board this large is refused rather than read into memory. Real 4-layer
+# boards of the size this skill targets are single-digit MB; the cap exists so
+# an unbounded read cannot become a MemoryError escaping the tool's contract.
+MAX_BOARD_BYTES = 256 * 1024 * 1024
+# Tolerance for KiCad's second-resolution `date` against a
+# nanosecond-resolution board mtime. Quantisation only.
+REPORT_DATE_SKEW_S = 2
+# `(net 3 "/SIG")` starting exactly at a depth-1 open paren.
+_TOP_LEVEL_NET = re.compile(r'\(net\s+\d+\s+"((?:[^"\\]|\\.)*)"\s*\)')
 # The 199 figure is measured, but it is measured for `silk_overlap` and
 # `silk_over_copper` on KiCad 10.0.5 -- NOT for `unconnected_items`, and not on
 # any other release. See ~/dev/kb/tooling/kicad-drc-caps-reports-at-199-per-type.md,
@@ -88,6 +115,29 @@ def _item_kind(description: Any) -> str:
     return first if first in KNOWN_ITEM_KINDS else "unknown"
 
 
+def record_id(record: Any) -> Optional[str]:
+    """A stable id for one unconnected record: its items' UUIDs, hashed.
+
+    KiCad gives each ITEM a uuid but the record itself none, so a caller who
+    wants to acknowledge one specific record needs a handle. Sorting the
+    uuids makes the id independent of item order; hashing keeps it short
+    enough to paste into a command line. It changes if the record's items
+    change, which is the point -- an acknowledgement must not survive the
+    record it was about."""
+    if not isinstance(record, dict):
+        return None
+    items = record.get("items")
+    if not isinstance(items, list):
+        return None
+    uuids = sorted(
+        str(item.get("uuid")) for item in items
+        if isinstance(item, dict) and item.get("uuid") is not None
+    )
+    if not uuids:
+        return None
+    return hashlib.sha256("|".join(uuids).encode("utf-8")).hexdigest()[:12]
+
+
 def classify_record(
     record: Any,
     index: int,
@@ -95,11 +145,14 @@ def classify_record(
     mixed_pour_nets: Iterable[str] = (),
     included_severities: Optional[Iterable[str]] = None,
     strict_pour: bool = False,
+    reviewed_records: Iterable[str] = (),
 ) -> Dict[str, Any]:
     declared = frozenset(pour_nets)
     mixed = frozenset(mixed_pour_nets)
+    reviewed = frozenset(reviewed_records)
     result: Dict[str, Any] = {
         "index": index,
+        "record_id": record_id(record),
         "bucket": "ambiguous",
         "net": None,
         "item_kinds": [],
@@ -196,6 +249,21 @@ def classify_record(
         )
         return result
     if net in declared:
+        if strict_pour and set(kinds) - {"zone"} \
+                and result["record_id"] in reviewed:
+            # A named record, reviewed by a person, on a net declared pure
+            # pour. Two independent statements, and this one is about THIS
+            # record rather than about every record that ever lands on the
+            # net. The measured reality is that real pour nets do carry
+            # zone-track, zone-via and track-via records (ROUTING.md), so a
+            # blanket refusal would make the signal gate unusable on the very
+            # boards it was written for -- but a blanket LABEL is what let a
+            # real open through. Per-record acknowledgement is the difference:
+            # it is auditable, it appears in the JSON, and a stale id is
+            # refused rather than ignored.
+            result["bucket"] = "pour_topology"
+            result["reason"] = "reviewed by the caller as refill topology"
+            return result
         if strict_pour and set(kinds) - {"zone"}:
             # Tightened 2026-09-07 (codex review of 7a99de9). Requiring only
             # that a zone be PRESENT still let a real open through: a
@@ -242,6 +310,70 @@ def classify_record(
     return result
 
 
+def board_net_table(text: str) -> List[str]:
+    """Net names from the board's TOP-LEVEL net table, by structure.
+
+    A text regex for `(net N "name")` matched the same expression inside a
+    pad, inside a comment, and inside a file that was not a board at all -- so
+    a garbage file containing that substring "declared" a net and authorised a
+    --pour-net (codex review of 75c10fa). Nets are declared once, at depth 1
+    inside `(kicad_pcb ...)`; a pad's `(net ...)` is a reference at greater
+    depth and is not a declaration.
+
+    This is a scanner, not a full s-expression parser: it tracks depth, string
+    literals and escapes, which is exactly what is needed to tell a top-level
+    declaration from a nested reference. A file whose parens do not balance,
+    or whose root is not `kicad_pcb`, is refused rather than partially read.
+    """
+    if not text.lstrip().startswith("(kicad_pcb"):
+        raise ConnectivityError(
+            "board does not start with `(kicad_pcb`; this is not a saved "
+            "KiCad board, and a file that merely contains net-shaped text "
+            "does not declare nets"
+        )
+    nets: List[str] = []
+    depth = 0
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == '"':
+            index += 1
+            while index < length:
+                if text[index] == "\\":
+                    index += 2
+                    continue
+                if text[index] == '"':
+                    break
+                index += 1
+            index += 1
+            continue
+        if char == "(":
+            depth += 1
+            if depth == 2:
+                match = _TOP_LEVEL_NET.match(text, index)
+                if match:
+                    nets.append(match.group(1))
+            index += 1
+            continue
+        if char == ")":
+            depth -= 1
+            if depth < 0:
+                raise ConnectivityError(
+                    "board has unbalanced parentheses; refusing to guess at "
+                    "its net table"
+                )
+            index += 1
+            continue
+        index += 1
+    if depth != 0:
+        raise ConnectivityError(
+            "board has unbalanced parentheses; refusing to guess at its net "
+            "table"
+        )
+    return sorted(set(nets))
+
+
 def board_identity(path: pathlib.Path) -> Dict[str, Any]:
     """Digest the board, and read the net names it actually declares.
 
@@ -251,9 +383,19 @@ def board_identity(path: pathlib.Path) -> Dict[str, Any]:
     try:
         with path.open("rb") as handle:
             before = os.fstat(handle.fileno())
+            if before.st_size > MAX_BOARD_BYTES:
+                raise ConnectivityError(
+                    f"board {path} is {before.st_size} bytes, above the "
+                    f"{MAX_BOARD_BYTES}-byte cap; refusing to read it rather "
+                    "than risking a MemoryError outside this tool's contract"
+                )
             payload = handle.read()
             after = os.fstat(handle.fileno())
         current = path.stat()
+    except ConnectivityError:
+        raise
+    except MemoryError as exc:
+        raise ConnectivityError(f"board {path} could not be read: {exc}") from exc
     except OSError as exc:
         raise ConnectivityError(f"cannot read board {path}: {exc}") from exc
     identity = lambda stat: (stat.st_dev, stat.st_ino,
@@ -269,7 +411,8 @@ def board_identity(path: pathlib.Path) -> Dict[str, Any]:
         "board_name": path.name,
         "board_sha256": hashlib.sha256(payload).hexdigest(),
         "board_size": len(payload),
-        "board_nets": sorted(set(BOARD_NET.findall(text))),
+        "board_mtime_ns": after.st_mtime_ns,
+        "board_nets": board_net_table(text),
     }
 
 
@@ -294,6 +437,48 @@ def check_report_is_about_the_board(report: Any, identity: Dict[str, Any]) -> No
         )
 
 
+def check_report_is_not_stale(report: Any, identity: Dict[str, Any],
+                            skew_s: int = REPORT_DATE_SKEW_S) -> None:
+    """The report must not predate the board it claims to describe.
+
+    Basename equality cannot see time: a clean report generated before the
+    board was last edited still named the right file and passed (codex review
+    of 75c10fa). KiCad writes `date` as a local ISO-8601 timestamp with no
+    zone, so this compares it against the board's mtime in local time. It is
+    a one-sided check on purpose -- a report NEWER than the board is the
+    normal case, and a report OLDER than the board cannot describe its current
+    bytes.
+    """
+    stamp = report.get("date")
+    if not isinstance(stamp, str) or not stamp.strip():
+        raise ConnectivityError(
+            "DRC report has no usable `date`; a report that will not say when "
+            "it was taken cannot be shown to describe the board as it stands"
+        )
+    try:
+        taken = datetime.datetime.fromisoformat(stamp)
+    except ValueError as exc:
+        raise ConnectivityError(
+            f"DRC report `date` {stamp!r} is not an ISO-8601 timestamp: {exc}"
+        ) from exc
+    if taken.tzinfo is not None:
+        taken = taken.astimezone().replace(tzinfo=None)
+    edited = datetime.datetime.fromtimestamp(
+        identity["board_mtime_ns"] / 1_000_000_000)
+    # KiCad writes `date` to SECOND resolution while the board's mtime is
+    # nanoseconds, so a DRC run started in the same second as the save reads
+    # as up to a second older than the board it just measured. The tolerance
+    # is that quantisation, nothing more -- it is deliberately far too small
+    # to admit a report from an earlier editing session.
+    if taken < edited - datetime.timedelta(seconds=skew_s):
+        raise ConnectivityError(
+            "DRC report was taken %s but %s was last modified %s; a report "
+            "older than the board cannot be a verdict about its current bytes "
+            "-- re-run the DRC" % (taken.isoformat(), identity["board_name"],
+                                   edited.isoformat())
+        )
+
+
 def check_pour_nets_exist(declared: Iterable[str], identity: Dict[str, Any]) -> None:
     """A declared pour net must be a net the board actually has.
 
@@ -308,6 +493,33 @@ def check_pour_nets_exist(declared: Iterable[str], identity: Dict[str, Any]) -> 
             "declared pour net(s) %s are not nets on %s; the board declares %s"
             % (", ".join(repr(net) for net in unknown), identity["board_name"],
                ", ".join(repr(net) for net in identity["board_nets"][:12]) or "none")
+        )
+
+
+def check_cap_override_is_qualified(cap: Optional[int], report: Any,
+                                    probed_on: Optional[str]) -> None:
+    """An override away from the default must name the release it was probed on.
+
+    `--report-cap none` and `--report-cap 200` silenced the cap check with no
+    evidence at all, which is the mute button `../GUARDS.md` forbids: the
+    report does not improve, only the warning goes away (codex review of
+    75c10fa). An override now has to say which KiCad it was measured against,
+    and that has to be the KiCad that wrote this report."""
+    if cap == KICAD_10_REPORT_CAP:
+        return
+    if not probed_on:
+        raise ConnectivityError(
+            "--report-cap overrides the default %d, so it must be accompanied "
+            "by --report-cap-probed-on <kicad_version> naming the release you "
+            "measured. Without that this is a mute button, not a calibration"
+            % KICAD_10_REPORT_CAP
+        )
+    written_by = report.get("kicad_version")
+    if str(written_by) != str(probed_on):
+        raise ConnectivityError(
+            "--report-cap-probed-on %r does not match the KiCad that wrote "
+            "this report (%r); a cap measured on another release says nothing "
+            "about this one" % (probed_on, written_by)
         )
 
 
@@ -339,6 +551,7 @@ def classify_report(
     mixed_pour_nets: Sequence[str] = (),
     strict_pour: bool = False,
     cap: Optional[int] = KICAD_10_REPORT_CAP,
+    reviewed_records: Sequence[str] = (),
 ) -> Dict[str, Any]:
     if not isinstance(report, dict):
         raise ConnectivityError("DRC report root is not an object")
@@ -430,11 +643,28 @@ def classify_report(
             "net(s) declared as both pure and mixed-duty pour: " + ", ".join(overlap)
         )
 
+    reviewed = list(reviewed_records or ())
+    if any(not isinstance(one, str) or not one for one in reviewed):
+        raise ConnectivityError("--reviewed-record values must be nonempty")
+    if len(set(reviewed)) != len(reviewed):
+        raise ConnectivityError("duplicate --reviewed-record")
     classified = [
         classify_record(record, index, pour_nets, mixed_pour_nets, severities,
-                        strict_pour)
+                        strict_pour, reviewed)
         for index, record in enumerate(records)
     ]
+    # A stale acknowledgement is refused, never ignored. An id that names no
+    # record in this report is an acknowledgement that has outlived the record
+    # it was about -- the board moved on and the waiver did not, which is
+    # exactly how a stale exemption silently keeps excusing something new.
+    present = {row["record_id"] for row in classified if row["record_id"]}
+    orphaned = sorted(set(reviewed) - present)
+    if orphaned:
+        raise ConnectivityError(
+            "--reviewed-record %s names no record in this report; an "
+            "acknowledgement that outlived its record must be re-made, not "
+            "carried forward" % ", ".join(repr(one) for one in orphaned)
+        )
     counts = collections.Counter(row["bucket"] for row in classified)
     by_net: Dict[str, collections.Counter[str]] = {
         "signal_open": collections.Counter(),
@@ -473,6 +703,7 @@ def classify_report(
         "schema": SCHEMA,
         "source": source,
         "pour_nets": sorted(pour_nets),
+        "reviewed_records": sorted(reviewed_records or ()),
         "mixed_pour_nets": sorted(mixed_pour_nets),
         "counts": {
             "signal_open_records": signal,
@@ -594,6 +825,40 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--reviewed-record",
+        action="append",
+        metavar="ID",
+        help=(
+            "acknowledge ONE specific record on a declared pure-pour net as "
+            "refill topology, by the `record_id` the JSON reports. Real pour "
+            "nets do carry zone-track, zone-via and track-via records, so the "
+            "strict gate would otherwise be unusable on them -- but a blanket "
+            "net LABEL is what let a real open through, so the escape is "
+            "per-record and auditable. An id naming no record in the report "
+            "is refused, so an acknowledgement cannot outlive its record. "
+            "Repeat as needed"
+        ),
+    )
+    parser.add_argument(
+        "--report-cap-probed-on",
+        help=(
+            "the KiCad version you measured the cap on. REQUIRED whenever "
+            "--report-cap differs from the default, and it must match the "
+            "report's own kicad_version: a cap measured on another release "
+            "says nothing about this one"
+        ),
+    )
+    parser.add_argument(
+        "--allow-report-older-than-board",
+        action="store_true",
+        help=(
+            "accept a DRC report taken BEFORE the board was last modified. "
+            "Off by default: such a report cannot describe the board's "
+            "current bytes. Use only when the board's mtime moved without its "
+            "content changing, and say so in the review"
+        ),
+    )
+    parser.add_argument(
         "--report-cap",
         default=str(KICAD_10_REPORT_CAP),
         help=(
@@ -638,11 +903,12 @@ def build_parser() -> argparse.ArgumentParser:
             "signal open, whatever the pour topology count. This is the gate "
             "a board with legitimate pour records can use; "
             "--require-zero-total cannot pass on such a board. It also "
-            "tightens classification: under this gate a record on a "
-            "declared pour net that contains no zone item stays ambiguous "
-            "(exit 3) instead of counting as pour topology, because a "
-            "pad-to-track open is authored routing and a declaration is "
-            "not evidence"
+            "tightens classification: under this gate only an ALL-ZONE "
+            "record on a declared pour net counts as pour topology. Any "
+            "record naming a pad, track or via stays ambiguous (exit 3) "
+            "unless you acknowledge it individually with --reviewed-record, "
+            "because copper stranded from its pour is authored routing and a "
+            "net declaration is not evidence about a particular record"
         ),
     )
     parser.add_argument(
@@ -794,19 +1060,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "--report-only to inspect a report on its own"
             )
         report, receipt = load_report(source)
+        check_cap_override_is_qualified(cap, report, args.report_cap_probed_on)
         if identity is not None:
             check_report_is_about_the_board(report, identity)
+            if not args.allow_report_older_than_board:
+                check_report_is_not_stale(report, identity)
             check_pour_nets_exist(list(pour_nets) + list(mixed_pour_nets),
                                   identity)
         result = classify_report(
             report, str(source), pour_nets, mixed_pour_nets,
             strict_pour=args.require_zero_signal_opens,
             cap=cap,
+            reviewed_records=list(args.reviewed_record or ()),
         )
         result["strict_pour"] = bool(args.require_zero_signal_opens)
         # null rather than absent: a result that cannot name the board behind
         # its verdict must say so, not omit the field.
         result["board"] = identity
+        # The report's OWN source/date, not just the JSON pathname: a result
+        # that drops them cannot be re-checked against the board later.
+        result["report_source"] = report.get("source")
+        result["report_date"] = report.get("date")
         result.update(receipt)
         result["drc_metadata"] = {
             key: report.get(key)
