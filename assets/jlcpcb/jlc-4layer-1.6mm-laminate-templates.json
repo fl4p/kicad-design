@@ -1,0 +1,5017 @@
+[
+  {
+    "name": "JLC041612-3313",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "20220617071851",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.10mm 2/2OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.96,
+        "er": 4.38,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-3313A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20221109041028832",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0994,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.065,
+        "er": 4.38,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0994,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04162H-3313A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202311230324181592",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.065,
+        "er": 4.38,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.107,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221005122027676",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.83,
+        "er": 4.55,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20221015043406712",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.865,
+        "er": 4.55,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221104063052792",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.15mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.15,
+        "er": 4.36,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041622-7628",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "20221116055327834",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.50mm 2/2OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.5,
+        "er": 4.48,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20221118071355865",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.4mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.4,
+        "er": 4.36,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628C",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221201105010912",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.35mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.35,
+        "er": 4.36,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221206085955913",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.5mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.5,
+        "er": 4.48,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041612-7628",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "20221214094302953",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1875,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.55mm 2/2OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.55,
+        "er": 4.41,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1875,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628D",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202301020741481013",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.45mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.45,
+        "er": 4.36,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628C",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202301190342121053",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.15mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.15,
+        "er": 4.36,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-7628B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202307290658401322",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.83,
+        "er": 4.55,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628F",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202308241107591405",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.075mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.075,
+        "er": 3.99,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628G",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202309210423331453",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.5mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.5,
+        "er": 4.48,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628D",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202402021010091714",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.265,
+        "er": 4.42,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628H",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202404290450271902",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.4mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.4,
+        "er": 4.36,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04162H-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202410110444432104",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.55mm H/H不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.55,
+        "er": 4.41,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628E",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202502170326462422",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.6mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.6,
+        "er": 4.36,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628F",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202503060414532482",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.25mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.25,
+        "er": 4.23,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628E",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202504250200512573",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628J",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202509260822463119",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.075mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.075,
+        "er": 3.99,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.203,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041622-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "202606030604258051",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0765,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 2/2OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0765,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628K",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202606030132028072",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.092,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.83,
+        "er": 4.55,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "3313 RC57% 4.2mil",
+        "spec": "3313",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.092,
+        "er": 4.1,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041612-7628A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "202607091041129369",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 2/2OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0935,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628L",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202607090645129372",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.83,
+        "er": 4.55,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-7628G",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202607130748059522",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.5mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.5,
+        "er": 4.48,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-7628C",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202607230501149898",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041612-7628B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "2026073102320910279",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.50mm 2/2OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.5,
+        "er": 4.48,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-7628M",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "2026090709410711061",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20220901050831",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.6mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.6,
+        "er": 4.36,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.218,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20220916120025662",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.865,
+        "er": 4.55,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-2116A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221006031749677",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.03,
+        "er": 4.38,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116C",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20220919080311682",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.065,
+        "er": 4.38,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-2116",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221010071129693",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.23,
+        "er": 4.42,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-2116",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221103085450782",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.23,
+        "er": 4.42,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-2116B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202301180644361052",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm 1/1OZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04162H-2116",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202311230334251593",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.865,
+        "er": 4.55,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202407040505581973",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.265,
+        "er": 4.42,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116D",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202407230313541981",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.7mm H/HOZ 不含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.7,
+        "er": 4.53,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "7628 RC49% 8.6mil",
+        "spec": "7628",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.2104,
+        "er": 4.4,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-2116C",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202502241003272444",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.03,
+        "er": 4.38,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-2116E",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202505140905562583",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.865,
+        "er": 4.55,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.1164,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-2116A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202606120442248404",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "0.9mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.83,
+        "er": 4.55,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.109,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "2116  RC54% 4.9mil",
+        "spec": "2116",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.124,
+        "er": 4.16,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-1080",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20211110040316",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.265,
+        "er": 4.42,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-1080",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20220413064757",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.23,
+        "er": 4.42,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-1080A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20220926073459683",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.065,
+        "er": 4.38,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-1080A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221209035457915",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.03,
+        "er": 4.38,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041612-1080A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "202403280450261854",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.10mm 2/2OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.96,
+        "er": 4.38,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041622-1080",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "202409290909342092",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.10mm 2/2OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.96,
+        "er": 4.38,
+        "topCuMm": 0.061,
+        "botCuMm": 0.061,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0535,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-1080",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202410110307032122",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.3mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.23,
+        "er": 4.42,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-1080A",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "202501070833122383",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm 1/1OZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.03,
+        "er": 4.38,
+        "topCuMm": 0.03,
+        "botCuMm": 0.03,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.069,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-1080B",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "202601040426384154",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "芯板",
+        "materialName": "1.1mm H/HOZ 含铜",
+        "spec": "",
+        "brand": "NP-155F",
+        "dielectricThickMm": 1.065,
+        "er": 4.38,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.0764,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "PP",
+        "materialName": "1080  RC67% 3.3mil",
+        "spec": "1080",
+        "brand": "NP-155F",
+        "dielectricThickMm": 0.084,
+        "er": 3.91,
+        "topCuMm": 0,
+        "botCuMm": 0,
+        "layerName": null
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041611-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20220811093700",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04161H-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20220811093551",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC04162H-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 0.5,
+    "code": "20221024114935745",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041621-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 1,
+    "code": "20221024115125754",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041622-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "20221024115454755",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "2oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 0,
+        "topCuMm": 0.07,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  },
+  {
+    "name": "JLC041612-自定义",
+    "plateThickness": 1.6,
+    "innerCopperOz": 2,
+    "code": "20221024115406763",
+    "layers": [
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L1"
+      },
+      {
+        "material": "芯板",
+        "materialName": "自定义叠构提供人工计算阻抗及叠构服务，此层压结构仅做展示",
+        "spec": "自定义层压结构",
+        "brand": null,
+        "dielectricThickMm": 0.1,
+        "er": 0,
+        "topCuMm": 0.0152,
+        "botCuMm": 0.0152,
+        "layerName": "L2/L3"
+      },
+      {
+        "material": "铜箔",
+        "materialName": "1oz",
+        "spec": "",
+        "brand": null,
+        "dielectricThickMm": 0,
+        "er": 4.2,
+        "topCuMm": 0.035,
+        "botCuMm": 0,
+        "layerName": "L4"
+      }
+    ]
+  }
+]

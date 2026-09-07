@@ -333,3 +333,70 @@ arm64, KiCad 10.0.5, Python 3.14.7, atopile 0.15.8 — against **two** Altium pr
 not a corpus, and the tinyCurrent zone deficit (1 vs 4) is an open discrepancy, not a characterised
 behaviour. Nothing here establishes how either converter behaves on a board with blind/buried vias,
 rigid-flex, or an Altium version other than whatever wrote these two files.
+
+---
+
+## Addendum, 2026-09-07 — the sweep missed `faebryk/exporters/`, and one dataset in it
+
+Prompted by a separate read of atopile's routing story (`ATOPILE-ROUTING.md`, unreferenced).
+The ADOPT/STEAL sweep above cites `exporters/` only for mechanisms it was already chasing — the
+parameter report and the transformer's footprint deletion — and never walked the directory. Across
+both this file and the evaluation, `pinout`, `power_tree`, `testpoint`, `pick_and_place`,
+`data_interface`, `JLCPCB` and `permittivity` appear zero times. That is roughly 2 300 lines of
+0.15.8 unexamined. Note also that the exporter set differs between the frozen git `main` and the
+0.15.8 sdist, so "read atopile" is version-specific: 0.15.8 adds `pcb/stackup.py`,
+`pcb/rectangular_board_shape.py`, `pinout/pinout.py` and `documentation/data_interface_layout.py`,
+moves `power_tree` under `documentation/`, and drops `documentation/i2c.py` and
+`parameters/parameters_to_file.py`.
+
+One item in there is worth having, and it is data rather than code.
+
+### `library/JLCPCB.ato` ships a populated JLCPCB stackup — verified correct but for one number
+
+`src/faebryk/library/JLCPCB.ato` (58 lines) defines `JLC041612_3313`, `is_default_stackup = True`,
+as nine layers with literal thicknesses and per-layer relative permittivity. R1 of the evaluation
+already observed that a stackup "carries per-layer thickness, material, `epsilon_r` and
+`loss_tangent`, which are the inputs to controlled-impedance work" — and then treated stackup only
+as a hazard, because atopile overwrites yours on every build. It did not notice atopile also ships
+one.
+
+Checked against JLCPCB's own laminate template on 2026-09-07 (see the kb note
+`access/jlcpcb-laminate-templates-are-a-public-json-api.md` for how the table was obtained):
+
+| # | JLC material | JLC thickness (mm) | JLC εr | atopile thickness | atopile εr |
+|---|---|---|---|---|---|
+| L1 | copper foil 1 oz | 0.035 | — | 0.035 | — |
+| | PP 3313 RC57% 4.2mil, NP-155F | 0.107 | 4.1 | 0.107 | 4.1 |
+| | PP 2116 RC54% 4.9mil, NP-155F | 0.0935 | 4.16 | 0.0935 | 4.16 |
+| L2/L3 | core 1.10mm 2/2OZ with copper, NP-155F | 0.96 dielectric, 0.061 Cu each face | **4.38** | 0.96, 0.061 | **4.53** |
+| | PP 2116 | 0.0935 | 4.16 | 0.0935 | 4.16 |
+| | PP 3313 | 0.107 | 4.1 | 0.107 | 4.1 |
+| L4 | copper foil 1 oz | 0.035 | — | 0.035 | — |
+
+Every thickness matches exactly and both prepreg permittivities match exactly. **The core
+permittivity does not: atopile says 4.53 where JLC's template says 4.38**, ~3.4 % high, which is
+~1.7 % on a core-referenced impedance and 3.4 % on plane capacitance. Small, real, and silent.
+
+Three things that looked wrong on first read and are not:
+
+* **Inner copper thicker than outer** (0.061 vs 0.035 mm) is correct. The naming scheme is
+  `JLC` + layers + thickness + outer-oz + inner-oz, so `JLC041612` is 1 oz outer over a **2 oz**
+  inner core, and `JLC04161H` — the only 1.6 mm 4-layer family on the public impedance page — is
+  the half-ounce-inner variant. Both exist; `22` (2 oz/2 oz) does too.
+* **Two prepregs per side**, 3313 plus 2116, is JLC's actual build for this template. The
+  single-3313 stack on the impedance page belongs to `JLC04161H-3313`, a different template.
+* **Total 1.553 mm against a nominal 1.6** is JLC's own arithmetic; soldermask is not counted.
+
+What atopile drops: `loss_tangent` is declared (`library/PCBManufacturing.py:89`) and left unset,
+and the laminate brand `NP-155F` — the identity you would need to look up Df — is absent. Only one
+stackup is shipped.
+
+`assets/jlcpcb/jlc-4layer-1.6mm-laminate-templates.json` holds all 59 of JLC's 4-layer 1.6 mm
+templates as fetched, so this table can be re-derived without repeating the retrieval.
+
+### Still not swept
+
+`exporters/pcb/stackup.py` (a JSON stackup schema — the model, not data), `pinout/pinout.py`,
+`documentation/power_tree.py`, `testpoints.py`, `pick_and_place/jlcpcb.py`. `PCBManufacturing.py`
+is a schema with no vendor data behind it. None was read beyond its first screen; none is claimed
+here to be either useful or useless.
