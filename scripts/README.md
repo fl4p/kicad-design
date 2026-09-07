@@ -32,7 +32,9 @@ Run command examples from the skill repository root unless a section says otherw
 | `copper_guards.py` | copper-quality checks DRC cannot express, on a saved FILLED **2-layer** board: `vias` grades each via's annular-ring contact fraction against unioned same-net zone+pad copper per layer, plus a spoke criterion that measures the widest strip crossing the WHOLE annulus -- an angular interval covered at every radius from the drill edge to the pad edge, not arc length at one radius, because a radially thin sliver hugging the mid radius produced a long arc and passed (KiCad connectivity and via_dangling are binary — a 2% sliver "connects"; PASS needs a track through the center or contact fraction ≥ threshold), `resistance` solves terminal-pair DC resistance over the net's rasterized copper model (pad-shape/via-R approximations and 2-layer scope documented in the docstring) with **mandatory** `--max-mohm` gating; both fail closed (unfilled board, unfilled declared zone on the graded net, missing pad, off-copper terminal, disconnected pair, zero gradeable subjects, non-finite/out-of-domain parameter → error/INF, never PASS); calibration record in the tool docstring (known-bad sliver vias fail at 0.02/0.07; 66-via known-good board clean); **not stdlib-only** -- the measurement paths need numpy and shapely, `resistance` also scipy, and an absent stack exits 1 FAIL-CLOSED at the point of use rather than crashing in an import; the `--json` report is owned (a target that is not a `copper_guards` report is refused, so `BOARD --json BOARD` can no longer replace the board with JSON -- measured 2026-09-07 destroying a 343,731-byte board), written atomically, carries the graded board's SHA-256, and is invalidated before argparse can reject a malformed command line; exit contract 0 PASS / 1 fail-closed or unevaluable / 2 the gate FAILED, with argparse usage errors mapped to 1 so a missing flag is never mistaken for a board that failed (`GuardArgumentParser`, ported from `loop_inductance_guard.py`); CLI calibration in `test_copper_guards.py`; the executable backstop for the DC copper-capacity gate in `PCB.md` — required on every declared power path before the Completed-PCB gate, `--max-mohm` derived from the project current budget |
 | `loop_inductance_guard.py` | Tier-2 loop-inductance gate for high-di/dt copper loops (commutation, gate-drive, snubber lands, CSI): a fail-closed adapter over the validated KiCad→FastHenry extractor in `dcdc-tools/parasitics` (`$DCDC_PARASITICS`), gating explicit nH budgets (`--max-nh L_loop=.. probe:<name>=.. csi_hs=..`) with exit 0/2/3 = pass/fail/unevaluable; budgets are derived values the caller must supply (no defaults, no budgets → error, absent quantity → FAIL); a reused `parasitics.json` is accepted only when its `meta.pcb_sha256` matches the gated board **and** `--config` binds `meta.extract_config_sha256` (mandatory on the reuse path -- the board hash binds the BYTES, so an extraction of the right board configured for the wrong loop used to pass); a `*_ring` budget additionally requires a positive `freq_Hz`, because naming the field is not establishing the measurement; and after a fresh extraction the output must differ in CONTENT, not merely in mtime and size -- a stub that only touched the file passed a stale 0.1 nH result -- with `--allow-unchanged-extraction` as the deliberate, documented override for a deterministic extractor; extractor warnings are surfaced; calibrated on the gemini3p8flash fast-leg commutation loop (28.7 nH, pitch 3.0 vs 2.0 drift 0.1%) |
 | `kicad_footprint_swap.py` | orchestrate a deadline-bound, adapter-owned multi-target footprint migration and recoverable promotion |
-| `kicad_repro.py` | bind reproducibility evidence to outputs actually produced and detect replacement after verification |
+| `kicad_repro.py` | bind reproducibility evidence to outputs actually produced and detect replacement after verification; `frozen` additionally holds a COMMITTED artefact against today's generator, restoring the tracked bytes and exiting 3 on any difference |
+| `kicad_open_probe.py` | fail-closed precondition: is a KiCad editor holding this artefact? Reads KiCad's `~<name>.lck` lock file and enumerates its IPC sockets; tri-state (0 NOT-HELD / 1 HELD / 2 UNKNOWN) and never reaches NOT-HELD without having read the directory. Writes nothing |
+| `design_ledger.py` | `LEDGERS`-tier re-grade of the design's load-bearing inequalities against the parts actually on the BOM: provenance-tagged variables (`user\|derived\|picked\|datasheet`) with required origin citations, separate intent and as-built verdicts, uncorrelated interval arithmetic for the verdict with a symbol-correlated diagnostic beside it |
 | `kicad_autoroute.py` | load strict autoroute configuration and shared route/report contracts |
 | `kicad_autoroute_tools.py` | verify or explicitly install the pinned Freerouting/JRE toolchain |
 | `kicad_route_candidate.py` | create a scratch candidate, enforce route scope, and emit a review report |
@@ -160,6 +162,67 @@ branch, cache key, or physical model is correct on another input.
 For release, inventory every produced file in a canonical receipt with path, type, size and SHA-256;
 bind authorization to the receipt digest and call `verify_unchanged_since()` immediately before
 transfer. An input-manifest digest stored beside an unhashed output does not prevent replacement.
+
+### Hold a committed artefact frozen with `kicad_repro.py frozen`
+
+`check` answers "is the generator deterministic *today*". It cannot answer "does today's generator
+still produce the artefact that is *committed*" — run it on a tree whose generator has since drifted
+and it passes happily, because both of its runs drifted together. `frozen` answers the second
+question: it copies the tracked bytes aside and verifies the copy, runs the generator ONCE, requires
+the mtime to move (a generator that dies leaves the file untouched, which is byte-identical to a
+perfect pass), compares the result exactly, and on any difference restores the tracked bytes from the
+verified copy, keeps the regenerated file as `<name>.regenerated`, and exits **3** naming both paths
+and the first differing byte. Exit 2 stays reserved for "the check could not be run", because a
+harness fault and a moved artefact need different fixes.
+
+```sh
+python3 scripts/kicad_repro.py frozen board.kicad_pcb -- python3 gen_board.py
+```
+
+The comparison is exact bytes and no tolerance will be added. A KiCad upgrade or a formatting change
+in the generator therefore fails this gate — which is the correct verdict, since the committed
+artefact really is no longer what the generator produces — and the fix is to regenerate and commit
+deliberately with the toolchain change recorded, never to widen the comparison. The tool this idea
+came from compares at 0.01 mm, so a footprint displaced by 9 µm passes its frozen check; it also
+fails on trailing zeros alone, which is what made its users abandon the mode. Establish `check` on a
+generator before gating it with `frozen`: a non-deterministic generator fails `frozen` every run for
+a reason that has nothing to do with the committed artefact.
+
+### Refuse to write a board KiCad has open, with `kicad_open_probe.py`
+
+Run before any script that rewrites a tracked artefact. Tri-state and deliberately asymmetric: exit 0
+NOT-HELD, 1 HELD, 2 UNKNOWN. It reads KiCad's own `~<name>.lck` lock file (per-path, but carrying no
+pid and no timestamp — so a lock left by a crashed KiCad is byte-identical to a live one, and HELD
+means *refuse to write*, never *a human is there*) and enumerates KiCad's IPC sockets in `/tmp/kicad`
+(live, but path-blind without `kipy`, and the API server is off by default so an absent socket is
+worth nothing). Neither signal can prove a file is free, so no branch reaches NOT-HELD without having
+positively read the directory: an unreadable parent, an unlistable socket directory, or any live
+socket is UNKNOWN. The probe writes nothing — in particular it does not switch KiCad's API server on
+to make itself work, which is what the tool this was reimplemented from does.
+
+### Re-grade the design arithmetic against the BOM with `design_ledger.py`
+
+`LEDGERS` tier. Reads a JSON ledger, not a board: every load-bearing quantity with its provenance tag
+(`user | derived | picked | datasheet`), a required free-text `origin` citation, the interval the
+design intended (`spec`), and the interval the chosen part actually delivers (`actual`). Every
+constraint is evaluated in both tiers; a release gates on **as-built**. An intent FAIL is a design
+error and an as-built FAIL under an intent PASS is a sourcing error, and they are fixed by different
+people, so the two verdicts are printed separately and never merged.
+
+```sh
+python3 scripts/design_ledger.py project/design-ledger.json --tier=as-built --json=out/ledger.json
+```
+
+Fail-closed throughout: a missing `actual` is UNVERIFIED and is never inherited from `spec` nor
+omitted from the report; an undefined variable, a zero-constraint ledger, an untagged `source`, a
+variable or constraint with no `origin`, and a division by an interval spanning zero all refuse;
+UNVERIFIED outranks FAIL. Every violation prints the requirement, the constraint's origin, and the
+origin and source tag of each variable on both sides.
+
+The verdict comes from **uncorrelated** interval arithmetic, which is always an outer bound, so the
+gate can be pessimistic but never kind. A **symbol-correlated** value is printed beside it whenever a
+variable appears more than once; see [`../POWER.md`](../POWER.md), "A tolerance does not cancel
+against itself unless it is the same part", for what to do when they disagree.
 
 ## Run an incremental footprint swap
 
