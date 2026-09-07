@@ -52,6 +52,8 @@ PAD_QUALIFIERS = frozenset(("pth", "smd", "npth"))
 REQUIRED_SEVERITIES = frozenset(("error", "warning", "exclusion"))
 SUPPORTED_COORDINATE_UNITS = frozenset(("mm", "in", "mils"))
 KICAD_10_REPORT_CAP = 199
+# Net declarations in a saved board: `(net 3 "/SIG")`.
+BOARD_NET = re.compile(r'\(net\s+\d+\s+"([^"]*)"\)')
 # The 199 figure is measured, but it is measured for `silk_overlap` and
 # `silk_over_copper` on KiCad 10.0.5 -- NOT for `unconnected_items`, and not on
 # any other release. See ~/dev/kb/tooling/kicad-drc-caps-reports-at-199-per-type.md,
@@ -194,6 +196,25 @@ def classify_record(
         )
         return result
     if net in declared:
+        if strict_pour and set(kinds) - {"zone"}:
+            # Tightened 2026-09-07 (codex review of 7a99de9). Requiring only
+            # that a zone be PRESENT still let a real open through: a
+            # `Zone [/SIG] <-> Track [/SIG]` record on a net the caller
+            # declared as pour was classified as refill topology and exited 0,
+            # even though a track stranded from its pour is authored copper
+            # that does not connect. A declaration is a claim about the NET's
+            # role; it is never evidence about a particular record. Under the
+            # fabrication-closing gate only an all-zone record -- a zone
+            # island, which is what refill actually produces -- is pour
+            # topology. Anything naming a pad, track or via stays ambiguous,
+            # which forces exit 3 rather than a pass.
+            result["reason"] = (
+                f"record on declared pour net {net!r} names non-zone copper "
+                f"({', '.join(sorted(set(kinds))) or 'no recognised items'}); "
+                "under a signal-open gate a pad, track or via stranded from "
+                "its pour is an authored-routing open, not refill topology"
+            )
+            return result
         if strict_pour and "zone" not in kinds:
             # A record with no zone item on a declared pure-pour net is not
             # self-evidently refill topology: a pad-to-track open is
@@ -219,6 +240,75 @@ def classify_record(
         return result
     result["bucket"] = "signal_open"
     return result
+
+
+def board_identity(path: pathlib.Path) -> Dict[str, Any]:
+    """Digest the board, and read the net names it actually declares.
+
+    The DRC JSON's own digest proves which REPORT bytes were parsed, never
+    which board produced them. Gating fabrication on a report whose board is
+    unnamed is gating on a filename."""
+    try:
+        with path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            payload = handle.read()
+            after = os.fstat(handle.fileno())
+        current = path.stat()
+    except OSError as exc:
+        raise ConnectivityError(f"cannot read board {path}: {exc}") from exc
+    identity = lambda stat: (stat.st_dev, stat.st_ino,
+                             stat.st_size, stat.st_mtime_ns)
+    if identity(before) != identity(after) or identity(after) != identity(current):
+        raise ConnectivityError(f"board {path} changed while it was read")
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeError as exc:
+        raise ConnectivityError(f"board {path} is not UTF-8: {exc}") from exc
+    return {
+        "board_path": str(path),
+        "board_name": path.name,
+        "board_sha256": hashlib.sha256(payload).hexdigest(),
+        "board_size": len(payload),
+        "board_nets": sorted(set(BOARD_NET.findall(text))),
+    }
+
+
+def check_report_is_about_the_board(report: Any, identity: Dict[str, Any]) -> None:
+    """The report's own `source` must name the board that was digested.
+
+    KiCad writes `source` as the board file it was run on. Comparing basenames
+    is deliberately weak -- it cannot prove the bytes match, only that nobody
+    handed us a report for a different design. Refusing is the only safe
+    action: the alternative is a zero-open report for another board exiting 0.
+    """
+    named = report.get("source")
+    if not isinstance(named, str) or not named.strip():
+        raise ConnectivityError(
+            "DRC report does not name the board it describes (`source`)"
+        )
+    if pathlib.PurePath(named).name != identity["board_name"]:
+        raise ConnectivityError(
+            "DRC report is about %r but --board names %r; a report for another "
+            "board is not a verdict about this one"
+            % (pathlib.PurePath(named).name, identity["board_name"])
+        )
+
+
+def check_pour_nets_exist(declared: Iterable[str], identity: Dict[str, Any]) -> None:
+    """A declared pour net must be a net the board actually has.
+
+    A misspelled or phantom `--pour-net` silently declared nothing, so every
+    record on the net the caller MEANT stayed graded -- or, worse, a typo that
+    happened to match nothing left a real pour net undeclared and the run
+    unevaluable for the wrong reason. Either way the caller's declaration was
+    never checked against the design."""
+    unknown = sorted(set(declared) - set(identity["board_nets"]))
+    if unknown:
+        raise ConnectivityError(
+            "declared pour net(s) %s are not nets on %s; the board declares %s"
+            % (", ".join(repr(net) for net in unknown), identity["board_name"],
+               ", ".join(repr(net) for net in identity["board_nets"][:12]) or "none")
+        )
 
 
 def _parse_report_cap(value: Any) -> Optional[int]:
@@ -255,10 +345,18 @@ def classify_report(
     required = {
         "$schema",
         "coordinate_units",
+        # `source` and `date` name the board this report is ABOUT and when it
+        # was taken. Both are present in every real KiCad 10.0.5 export
+        # (verified against scripts/fixtures/open-net.drc.json). Without them
+        # a report cannot be checked against the board being gated, and a
+        # zero-open report for a DIFFERENT board exits 0 (codex review of
+        # 7a99de9).
+        "date",
         "ignored_checks",
         "included_severities",
         "kicad_version",
         "schematic_parity",
+        "source",
         "unconnected_items",
         "violations",
     }
@@ -483,6 +581,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("drc_json", type=pathlib.Path)
     parser.add_argument(
+        "--board",
+        type=pathlib.Path,
+        help=(
+            "the .kicad_pcb this DRC report describes. REQUIRED for a gating "
+            "run: the report's own digest proves which report bytes were "
+            "parsed, never which board produced them, so without this a "
+            "zero-open report for a DIFFERENT board exits 0. The board is "
+            "digested into the result, its `source` is checked against the "
+            "report's, and every --pour-net is checked against the nets the "
+            "board actually declares"
+        ),
+    )
+    parser.add_argument(
         "--report-cap",
         default=str(KICAD_10_REPORT_CAP),
         help=(
@@ -670,13 +781,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "--require-zero-total (the aggregate), or --report-only"
             )
         cap = _parse_report_cap(args.report_cap)
+        identity = None
+        if args.board is not None:
+            identity = board_identity(args.board)
+        elif not args.report_only:
+            # Fail closed, exactly as "no gate and no --report-only" does.
+            raise ConnectivityError(
+                "a gating run must name the board with --board: this tool "
+                "grades a DRC JSON, and a report is bound to its own bytes, "
+                "not to the copper they describe. Without the board a "
+                "zero-open report for another design passes. Use "
+                "--report-only to inspect a report on its own"
+            )
         report, receipt = load_report(source)
+        if identity is not None:
+            check_report_is_about_the_board(report, identity)
+            check_pour_nets_exist(list(pour_nets) + list(mixed_pour_nets),
+                                  identity)
         result = classify_report(
             report, str(source), pour_nets, mixed_pour_nets,
             strict_pour=args.require_zero_signal_opens,
             cap=cap,
         )
         result["strict_pour"] = bool(args.require_zero_signal_opens)
+        # null rather than absent: a result that cannot name the board behind
+        # its verdict must say so, not omit the field.
+        result["board"] = identity
         result.update(receipt)
         result["drc_metadata"] = {
             key: report.get(key)

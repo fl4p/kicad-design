@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -21,14 +22,40 @@ def record(*descriptions):
     }
 
 
-def drc_report(records):
+BOARD_TEXT = """(kicad_pcb
+	(version 20241229)
+	(net 0 "")
+	(net 1 "/SIG")
+	(net 2 "/GND")
+)
+"""
+
+
+def write_board(directory, name="fixture.kicad_pcb"):
+    """A saved board declaring /SIG and /GND.
+
+    A gating run needs one: the report's digest binds the REPORT, and the
+    board is what is being fabricated."""
+    path = pathlib.Path(directory) / name
+    path.write_text(BOARD_TEXT, encoding="utf-8")
+    return path
+
+
+def drc_report(records, source="fixture.kicad_pcb"):
+    """Shaped like a REAL KiCad 10.0.5 export, including `source` and `date`.
+
+    Both are present in every real export -- verified against the committed
+    fixtures/open-net.drc.json -- and the guard now requires them, because a
+    report that cannot name its board cannot be checked against one."""
     return {
         "$schema": split.KICAD_DRC_SCHEMA,
         "coordinate_units": "mm",
+        "date": "2026-09-07T09:51:08",
         "ignored_checks": [],
         "included_severities": ["error", "warning", "exclusion"],
         "kicad_version": "10.0.5",
         "schematic_parity": [],
+        "source": source,
         "unconnected_items": records,
         "violations": [],
     }
@@ -278,6 +305,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(
                 json.dumps(
                     drc_report(
@@ -298,6 +326,8 @@ class ConnectivitySplitTests(unittest.TestCase):
                     split.main(
                         [
                             str(drc),
+                            "--board",
+                            str(board),
                             "--pour-net",
                             "/GND",
                             "--report-only",
@@ -309,7 +339,8 @@ class ConnectivitySplitTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     split.main(
-                        [str(drc), "--pour-net", "/GND", "--require-zero-total"]
+                        [str(drc), "--board", str(board),
+                         "--pour-net", "/GND", "--require-zero-total"]
                     ),
                     4,
                 )
@@ -324,6 +355,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(
                 json.dumps(
                     drc_report(
@@ -339,6 +371,8 @@ class ConnectivitySplitTests(unittest.TestCase):
                     split.main(
                         [
                             str(drc),
+                            "--board",
+                            str(board),
                             "--no-pour-nets",
                             "--require-zero-total",
                             "--json",
@@ -414,6 +448,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             out.write_text(
                 json.dumps({"schema": split.SCHEMA, "classification_evaluable": True}),
@@ -431,6 +466,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             out.write_text(
                 json.dumps({"schema": split.SCHEMA, "classification_evaluable": True}),
@@ -457,6 +493,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             original = json.dumps(
                 {"schema": split.SCHEMA, "classification_evaluable": True}
@@ -551,6 +588,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -562,6 +600,7 @@ class ConnectivitySplitTests(unittest.TestCase):
     def test_cli_rejects_no_pour_with_declaration(self):
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -576,6 +615,7 @@ class ConnectivitySplitTests(unittest.TestCase):
     def test_cli_accepts_explicit_no_pour_nets(self):
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -593,42 +633,53 @@ class ConnectivitySplitTests(unittest.TestCase):
         opening = record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(json.dumps(drc_report([opening])), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
             ):
                 self.assertEqual(
-                    split.main([str(drc), "--no-pour-nets",
+                    split.main([str(drc), "--board", str(board),
+                                "--no-pour-nets",
                                 "--require-zero-signal-opens"]), 4)
                 # The same record, relabelled: unevaluable, never a pass.
                 self.assertEqual(
-                    split.main([str(drc), "--pour-net", "/SIG",
+                    split.main([str(drc), "--board", str(board),
+                                "--pour-net", "/SIG",
                                 "--require-zero-signal-opens"]), 3)
                 # The aggregate gate keeps its recorded behaviour.
                 self.assertEqual(
-                    split.main([str(drc), "--pour-net", "/SIG",
+                    split.main([str(drc), "--board", str(board),
+                                "--pour-net", "/SIG",
                                 "--require-zero-total"]), 4)
 
     def test_a_genuine_pour_record_still_passes_the_signal_gate(self):
-        """The tightening must not manufacture false failures: a zone/track
-        record on a declared pour net is what the split exists to excuse."""
+        """The tightening must not manufacture false failures.
+
+        An all-zone record on a declared pour net -- a zone island, which is
+        what a refill actually produces -- is what the split exists to excuse,
+        and it still passes.
+        """
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(
                 json.dumps(drc_report([
-                    record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")])),
+                    record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")])),
                 encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
             ):
                 self.assertEqual(
-                    split.main([str(drc), "--pour-net", "/GND",
+                    split.main([str(drc), "--board", str(board),
+                                "--pour-net", "/GND",
                                 "--require-zero-signal-opens"]), 0)
 
     def test_cli_refuses_an_ungraded_gating_run(self):
         """No gate and no --report-only must not read as a pass."""
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             stderr = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
@@ -640,6 +691,7 @@ class ConnectivitySplitTests(unittest.TestCase):
     def test_cli_rejects_report_only_with_a_gate(self):
         with tempfile.TemporaryDirectory() as raw_dir:
             drc = pathlib.Path(raw_dir) / "drc.json"
+            board = write_board(raw_dir)
             drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -661,13 +713,14 @@ class ConnectivitySplitTests(unittest.TestCase):
         report = drc_report(
             [
                 record("Pad 1 [/SENSE] of R1 on F.Cu", "Track [/SENSE] on F.Cu"),
-                record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu"),
+                record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu"),
             ]
         )
         with tempfile.TemporaryDirectory() as raw_dir:
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(report), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -676,6 +729,8 @@ class ConnectivitySplitTests(unittest.TestCase):
                     split.main(
                         [
                             str(drc),
+                            "--board",
+                            str(board),
                             "--pour-net",
                             "/GND",
                             "--require-zero-signal-opens",
@@ -693,12 +748,13 @@ class ConnectivitySplitTests(unittest.TestCase):
 
     def test_signal_open_gate_passes_with_pour_records_present(self):
         report = drc_report(
-            [record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")]
+            [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")]
         )
         with tempfile.TemporaryDirectory() as raw_dir:
             directory = pathlib.Path(raw_dir)
             drc = directory / "drc.json"
             out = directory / "split.json"
+            board = write_board(directory)
             drc.write_text(json.dumps(report), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
@@ -707,6 +763,8 @@ class ConnectivitySplitTests(unittest.TestCase):
                     split.main(
                         [
                             str(drc),
+                            "--board",
+                            str(board),
                             "--pour-net",
                             "/GND",
                             "--require-zero-signal-opens",
@@ -718,6 +776,176 @@ class ConnectivitySplitTests(unittest.TestCase):
                 )
             written = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(written["signal_open_gate"], "pass")
+
+
+KICAD_CLI = pathlib.Path(
+    "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+
+
+class RealKiCadExport(unittest.TestCase):
+    """The artefact tier: a real board, a real `kicad-cli pcb drc` export.
+
+    Every other test in this file builds its report from this file's own
+    helpers, so they cannot catch exporter or schema drift, real
+    item-description grammar, or the provenance fields KiCad actually writes.
+    Finding 5 of the 2026-09-07 codex review of 7a99de9 asked for exactly this.
+    """
+
+    def test_the_committed_fixture_is_a_real_export_with_two_real_opens(self):
+        report = json.loads(
+            (FIXTURES / "open-net.drc.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["$schema"], split.KICAD_DRC_SCHEMA)
+        self.assertEqual(report["kicad_version"], "10.0.5")
+        self.assertEqual(report["source"], "open-net.kicad_pcb")
+        result = split.classify_report(
+            report, "open-net.drc.json", [], [], strict_pour=True)
+        self.assertEqual(result["counts"]["signal_open_records"], 2)
+        self.assertEqual(result["counts"]["ambiguous_records"], 0)
+        self.assertTrue(result["classification_evaluable"])
+
+    def test_the_gate_fails_on_the_real_board(self):
+        board = FIXTURES / "open-net.kicad_pcb"
+        drc = FIXTURES / "open-net.drc.json"
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = split.main([str(drc), "--board", str(board),
+                               "--no-pour-nets", "--require-zero-signal-opens"])
+        self.assertEqual(code, 4, "two real opens must fail the gate")
+
+    @unittest.skipUnless(KICAD_CLI.exists(), "KiCad 10 CLI not installed")
+    def test_kicad_still_exports_what_this_tool_parses(self):
+        """Re-run the real exporter and re-parse it.
+
+        This is the check that notices when a KiCad upgrade changes the
+        report: the committed fixture alone would go stale silently.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            board = pathlib.Path(raw) / "open-net.kicad_pcb"
+            board.write_bytes((FIXTURES / "open-net.kicad_pcb").read_bytes())
+            out = pathlib.Path(raw) / "fresh.drc.json"
+            proc = subprocess.run(
+                [str(KICAD_CLI), "pcb", "drc", "--format", "json",
+                 "--severity-all", "--units", "mm", "-o", str(out), str(board)],
+                capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(out.read_text(encoding="utf-8"))
+            result = split.classify_report(
+                report, str(out), [], [], strict_pour=True)
+            self.assertEqual(result["counts"]["signal_open_records"], 2)
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main([str(out), "--board", str(board),
+                                   "--no-pour-nets",
+                                   "--require-zero-signal-opens"])
+            self.assertEqual(code, 4)
+
+
+class ReportMustBeAboutTheBoard(unittest.TestCase):
+    """Finding 1: the report was bound to its own JSON bytes, not the board."""
+
+    def test_a_gating_run_must_name_the_board(self):
+        with tempfile.TemporaryDirectory() as raw:
+            drc = pathlib.Path(raw) / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main([str(drc), "--no-pour-nets",
+                                   "--require-zero-signal-opens"])
+            self.assertEqual(code, 2)
+            self.assertIn("--board", errors.getvalue())
+
+    def test_a_clean_report_for_another_board_is_refused(self):
+        """KNOWN-BAD CALIBRATION. A zero-open report naming a DIFFERENT design
+        exited 0 and read as 'this board is connected'."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory, "the-board-being-made.kicad_pcb")
+            drc = directory / "drc.json"
+            drc.write_text(
+                json.dumps(drc_report([], source="some-other-board.kicad_pcb")),
+                encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main([str(drc), "--board", str(board),
+                                   "--no-pour-nets",
+                                   "--require-zero-signal-opens"])
+            self.assertEqual(code, 2, "a report for another board passed")
+            self.assertIn("is not a verdict about this one", errors.getvalue())
+
+    def test_report_only_may_still_inspect_a_report_alone(self):
+        with tempfile.TemporaryDirectory() as raw:
+            drc = pathlib.Path(raw) / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main([str(drc), "--no-pour-nets", "--report-only"])
+            self.assertEqual(code, 0)
+
+    def test_a_report_missing_its_provenance_is_refused(self):
+        for key in ("source", "date"):
+            with self.subTest(missing=key):
+                fixture = drc_report([])
+                del fixture[key]
+                with self.assertRaisesRegex(split.ConnectivityError,
+                                            "missing key"):
+                    split.classify_report(fixture, "f.json", [])
+
+    def test_a_declared_pour_net_must_exist_on_the_board(self):
+        """A misspelled --pour-net declared nothing, silently."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main([str(drc), "--board", str(board),
+                                   "--pour-net", "/GNDD",
+                                   "--require-zero-signal-opens"])
+            self.assertEqual(code, 2)
+            self.assertIn("not nets on", errors.getvalue())
+
+
+class PourDeclarationIsNotEvidenceAboutARecord(unittest.TestCase):
+    """Finding 2: requiring only that a zone be PRESENT still laundered opens."""
+
+    def _classify(self, *descriptions):
+        return split.classify_report(
+            drc_report([record(*descriptions)]), "f.json", ["/SIG"],
+            [], strict_pour=True)
+
+    def test_a_track_stranded_from_its_pour_is_not_refill_topology(self):
+        """KNOWN-BAD CALIBRATION for the laundering the reviewer demonstrated.
+
+        `Zone [/SIG] <-> Track [/SIG]` with `--pour-net /SIG` was classified
+        as pour topology and exited 0. A track that does not reach its pour is
+        authored copper that does not connect; DRC text cannot tell it from a
+        refill artefact, so it is ambiguous -- which forces exit 3, never a
+        pass.
+        """
+        result = self._classify("Zone [/SIG] on F.Cu", "Track [/SIG] on F.Cu")
+        self.assertEqual(result["counts"]["signal_open_records"], 0)
+        self.assertEqual(result["counts"]["pour_topology_records"], 0)
+        self.assertEqual(result["counts"]["ambiguous_records"], 1)
+        self.assertFalse(result["classification_evaluable"])
+
+    def test_a_pad_stranded_from_its_pour_is_not_refill_topology(self):
+        result = self._classify("Pad 1 [/SIG] of R1 on F.Cu",
+                                "Zone [/SIG] on F.Cu")
+        self.assertEqual(result["counts"]["ambiguous_records"], 1)
+
+    def test_a_via_stranded_from_its_pour_is_not_refill_topology(self):
+        result = self._classify("Via [/SIG] on F.Cu", "Zone [/SIG] on F.Cu")
+        self.assertEqual(result["counts"]["ambiguous_records"], 1)
+
+    def test_an_all_zone_record_is_still_pour_topology(self):
+        result = self._classify("Zone [/SIG] on F.Cu", "Zone [/SIG] on B.Cu")
+        self.assertEqual(result["counts"]["pour_topology_records"], 1)
+        self.assertTrue(result["classification_evaluable"])
 
 
 if __name__ == "__main__":

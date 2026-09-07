@@ -146,8 +146,19 @@ routing, or an existing-board release review, inventory **every emitted pad and 
 empty-number mechanical pads, NPTHs, slots and repeated pad numbers. Record each one's attribute,
 drill/slot dimensions, local offset from the footprint origin and transformed position on the
 board. Compare that inventory with the vendor drawing and with the placement envelope the floorplan
-actually reserved. Produce the inventory with a project generator assertion or a board parser; a
-visual glance at the electrical pad cluster is not inventory evidence.
+actually reserved. Produce the inventory by **reparsing the emitted artefact** -- the saved `.kicad_pcb`, or the
+`.kicad_mod` the placement actually used -- not by asking the generator what it believes it
+placed. A visual glance at the electrical pad cluster is not inventory evidence either.
+
+Review correction, 2026-09-07: this paragraph used to accept "a project generator assertion
+**or** a board parser", which equates a construction-model claim with an observation of the
+artefact and contradicts [`GUARDS.md`](GUARDS.md)'s artefact rule. The incident that motivated
+the whole section is the refutation: the remote NPTH was missing *because the placement model
+itself did not know about it*, so the generator would have asserted a complete inventory and
+been wrong in exactly the way the check exists to catch. A model that omits a hole cannot
+report that it omitted it. A generator assertion is still useful as a **cross-check against**
+the reparsed inventory -- a disagreement between the two is itself a finding -- but it cannot
+establish what was emitted. (Finding 6, `reviews/2026-09-07-codex-review-7a99de9.md`.)
 
 Flag any unexplained pad or hole outside the expected body, courtyard or declared cable/fixture
 envelope for review; there is no universal maximum offset because a legitimate mounting or strain-
