@@ -1204,11 +1204,54 @@ class PerRecordAcknowledgement(unittest.TestCase):
 class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
     """Finding 3: a text regex counted net-shaped text anywhere in the file."""
 
-    def test_a_pad_reference_is_not_a_declaration(self):
+    def test_kicad_10_bare_net_references_are_found(self):
+        """KiCad 10 has NO top-level net section; a reference is all there is.
+
+        Measured 2026-09-07 over 400 real boards: a KiCad 8 board (version
+        20240108) carries 847 numbered `(net N "name")` expressions and no
+        bare ones; a KiCad 10 board (version 20260206) carries 1207 bare
+        `(net "name")` references and no numbered ones. Matching only the
+        numbered form returned an EMPTY inventory for every KiCad 10 board,
+        which would have refused every legitimate --pour-net on exactly the
+        release this skill targets.
+        """
+        board = (FIXTURES / "kicad10-bare-nets.kicad_pcb").read_text(
+            encoding="utf-8")
+        self.assertIn("(version 20260206)", board)
+        self.assertNotIn('(net 1 "', board)
+        self.assertEqual(split.board_net_table(board), ["/GND", "/SIG"])
+
+    def test_kicad_8_numbered_net_table_is_still_found(self):
         self.assertEqual(
             split.board_net_table(
-                '(kicad_pcb\n (footprint "x" (pad "1" (net 7 "/FAKE")))\n)\n'),
-            [])
+                '(kicad_pcb\n (net 0 "")\n (net 1 "/SIG")\n (net 2 "/GND")\n)\n'),
+            ["", "/GND", "/SIG"])
+
+    def test_a_declared_pour_net_is_accepted_on_a_kicad_10_board(self):
+        """The end-to-end consequence of the two spellings."""
+        with tempfile.TemporaryDirectory() as raw:
+            board = pathlib.Path(raw) / "b.kicad_pcb"
+            board.write_bytes(
+                (FIXTURES / "kicad10-bare-nets.kicad_pcb").read_bytes())
+            drc = pathlib.Path(raw) / "drc.json"
+            drc.write_text(
+                json.dumps(drc_report(
+                    [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")],
+                    source="b.kicad_pcb")),
+                encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main([str(drc), "--board", str(board),
+                                   "--pour-net", "/GND",
+                                   "--require-zero-signal-opens"])
+        self.assertEqual(code, 0, errors.getvalue())
+
+    def test_a_truncated_board_is_refused(self):
+        """A real board in the tree ends mid-structure; refusing it is right."""
+        with self.assertRaisesRegex(split.ConnectivityError, "unbalanced"):
+            split.board_net_table(
+                '(kicad_pcb\n (footprint "x" (pad "1" (net 2))\n )\n)\n)\n')
 
     def test_a_file_that_is_not_a_board_is_refused(self):
         for text in ('hello (net 99 "/GND") world\n',
