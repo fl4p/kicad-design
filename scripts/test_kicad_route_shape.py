@@ -27,6 +27,7 @@ import contextlib
 import io
 import math
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -364,12 +365,22 @@ class LayerDirectionParsing(unittest.TestCase):
 
 
 class CliContract(unittest.TestCase):
-    def run_cli(self, argv):
+    def run_cli(self, argv, board_bytes=b"(kicad_pcb)\n"):
+        """Run the CLI against a REAL file on disk carrying `board_bytes`.
+
+        `pcbnew` stays faked -- these are CLI-contract tests, not parser tests
+        -- but the board argument must name bytes that exist, because the
+        report binds the board's digest and a path that cannot be read is
+        unevaluable by design."""
         board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
-        with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
-                mock.patch.object(audit.os.path, "isfile", return_value=True), \
-                contextlib.redirect_stdout(io.StringIO()):
-            return audit.main(argv)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "b.kicad_pcb"
+            path.write_bytes(board_bytes)
+            argv = [str(path) if token == "b.kicad_pcb" else token
+                    for token in argv]
+            with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                return audit.main(argv)
 
     def test_no_threshold_and_no_report_only_is_unevaluable(self):
         self.assertEqual(self.run_cli(["b.kicad_pcb"]), 1)
@@ -544,18 +555,25 @@ class BackendSelection(unittest.TestCase):
 
     def setUp(self):
         self._saved = audit._BACKEND
+        self._saved_identity = audit._BOARD_IDENTITY
         audit._BACKEND = None
+        audit._BOARD_IDENTITY = None
 
     def tearDown(self):
         audit._BACKEND = self._saved
+        audit._BOARD_IDENTITY = self._saved_identity
 
     def _run(self, argv, **patches):
         board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
-        with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
-                mock.patch.object(audit.os.path, "isfile", return_value=True), \
-                contextlib.redirect_stdout(io.StringIO()) as out, \
-                contextlib.redirect_stderr(io.StringIO()) as err:
-            code = audit.main(argv)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "b.kicad_pcb"
+            path.write_bytes(b"(kicad_pcb)\n")
+            argv = [str(path) if token == "b.kicad_pcb" else token
+                    for token in argv]
+            with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                code = audit.main(argv)
         return code, out.getvalue(), err.getvalue()
 
     def test_a_requested_backend_that_is_unavailable_is_unevaluable(self):
@@ -636,6 +654,175 @@ class BackendSelection(unittest.TestCase):
                 self.assertIsNone(_json.load(stream)["backend"])
         finally:
             _os.unlink(path)
+
+
+class ReportBindsTheBoardBytes(unittest.TestCase):
+    """A verdict names a board's BYTES, not its path.
+
+    Without this binding a `"pass"` written for one revision of a board still
+    reads as a verdict about whatever now sits at that path -- the stale
+    clean-report failure `../GUARDS.md` exists to prevent. Findings 7 of
+    `reviews/2026-09-07-claude-review-a5c83c2-7a99de9.md`.
+    """
+
+    def setUp(self):
+        self._saved = audit._BOARD_IDENTITY
+        audit._BOARD_IDENTITY = None
+
+    def tearDown(self):
+        audit._BOARD_IDENTITY = self._saved
+
+    def _run(self, argv, board_bytes, directory, measure=None):
+        board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
+        path = Path(directory) / "b.kicad_pcb"
+        path.write_bytes(board_bytes)
+        argv = [str(path) if token == "b.kicad_pcb" else token
+                for token in argv]
+        stack = contextlib.ExitStack()
+        with stack:
+            stack.enter_context(
+                mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            errors = stack.enter_context(
+                contextlib.redirect_stderr(io.StringIO()))
+            if measure is not None:
+                stack.enter_context(
+                    mock.patch.object(audit, "measure", measure))
+            code = audit.main(argv)
+        return code, path, errors.getvalue()
+
+    def test_the_report_records_the_digest_of_the_bytes_it_graded(self):
+        import hashlib as _hashlib
+        import json as _json
+        payload = b"(kicad_pcb (version 20240108))\n"
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "r.json"
+            code, path, _ = self._run(
+                ["b.kicad_pcb", "--report-only", "--json", str(report)],
+                payload, directory)
+            self.assertEqual(code, 0)
+            document = _json.loads(report.read_text())
+            self.assertEqual(document["verdict"], "reported")
+            self.assertEqual(document["source"]["sha256"],
+                             _hashlib.sha256(payload).hexdigest())
+            self.assertEqual(document["source"]["size"], len(payload))
+
+    def test_a_report_written_before_the_digest_carries_a_null_source(self):
+        """The placeholder must not claim a binding it does not have."""
+        import json as _json
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "r.json"
+            # No threshold and no --report-only: unevaluable before measuring.
+            code, _, _ = self._run(["b.kicad_pcb", "--json", str(report)],
+                                   b"(kicad_pcb)\n", directory)
+            self.assertEqual(code, 1)
+            document = _json.loads(report.read_text())
+            self.assertNotEqual(document["verdict"], "pass")
+            self.assertIsNone(document["source"])
+
+    def test_a_board_rewritten_mid_measurement_is_unevaluable_not_a_pass(self):
+        """KNOWN-BAD CALIBRATION: construct the failure, watch the guard fail.
+
+        A board edited while the audit runs yields metrics that describe no
+        single revision. Graded against a threshold the old bytes satisfied,
+        it would exit 0."""
+        import json as _json
+        real_measure = audit.measure
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "b.kicad_pcb"
+            report = Path(directory) / "r.json"
+
+            def mutating_measure(board_path, *args, **kwargs):
+                metrics = real_measure(board_path, *args, **kwargs)
+                # The edit a human makes in KiCad while the guard is running.
+                Path(board_path).write_bytes(b"(kicad_pcb (edited))\n")
+                return metrics
+
+            code, _, errors = self._run(
+                ["b.kicad_pcb", "--max-vias-on-any-net", "2",
+                 "--json", str(report)],
+                b"(kicad_pcb)\n", directory, measure=mutating_measure)
+
+            self.assertEqual(code, 1)
+            self.assertIn("changed while it was being measured", errors)
+            document = _json.loads(report.read_text())
+            self.assertEqual(document["verdict"], "unevaluable")
+
+    def test_a_board_that_cannot_be_digested_is_unevaluable(self):
+        """A failed observation is not a clean observation."""
+        board = FakeBoard([FakeTrack("/A", F_CU, 0, 0, 10, 0)])
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "gone.kicad_pcb"
+            with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                    mock.patch.object(audit.os.path, "isfile",
+                                      return_value=True), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                code = audit.main([str(missing), "--report-only"])
+        self.assertEqual(code, 1)
+        self.assertIn("to digest it", errors.getvalue())
+
+
+class ShortSegmentGateIsCalibrated(unittest.TestCase):
+    """Findings 3 and 4: the two dilution/mute paths need a known-bad case."""
+
+    def _run(self, argv, tracks):
+        board = FakeBoard(tracks)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "b.kicad_pcb"
+            path.write_bytes(b"(kicad_pcb)\n")
+            argv = [str(path) if token == "b.kicad_pcb" else token
+                    for token in argv]
+            with mock.patch.dict(sys.modules, {"pcbnew": FakePcbnew(board)}), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                code = audit.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def _short_board(self):
+        """Every segment 0.1 mm: a 1.000 short fraction at the 0.2 mm default."""
+        return [FakeTrack("/N%d" % index, F_CU,
+                          index * 1.0, 0.0, index * 1.0 + 0.1, 0.0)
+                for index in range(6)]
+
+    def test_the_short_segment_gate_fails_on_a_board_built_to_fail_it(self):
+        code, _, _ = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15"],
+            self._short_board())
+        self.assertEqual(code, 2)
+
+    def test_shrinking_the_definition_cannot_mute_that_failure(self):
+        """KNOWN-BAD CALIBRATION for the mute button of finding 4.
+
+        `--short-segment-mm 1e-9` once turned the FAIL above into
+        ROUTE-SHAPE-OK without touching one millimetre of copper."""
+        code, out, err = self._run(
+            ["b.kicad_pcb", "--max-short-segment-fraction", "0.15",
+             "--short-segment-mm", "1e-9"],
+            self._short_board())
+        self.assertEqual(code, 1)
+        self.assertNotIn(audit._OK_LINE, out)
+        self.assertIn("a gate that cannot fail", err)
+
+    def test_the_graded_via_metric_is_the_undilutable_maximum(self):
+        """KNOWN-BAD CALIBRATION for the dilution of finding 3.
+
+        Adding via-free nets lowers the MEAN. The graded metric is the per-net
+        maximum, which no added net can lower, so the verdict must not move."""
+        offending = [FakeTrack("/HOT", F_CU, 0, 0, 1, 0)]
+        offending += [FakeVia("/HOT", F_CU, B_CU) for _ in range(4)]
+        code, _, _ = self._run(
+            ["b.kicad_pcb", "--max-vias-on-any-net", "2"], offending)
+        self.assertEqual(code, 2)
+
+        diluted = list(offending)
+        diluted += [FakeTrack("/CLEAN%d" % index, F_CU,
+                              0, index + 5.0, 10, index + 5.0)
+                    for index in range(50)]
+        code, _, _ = self._run(
+            ["b.kicad_pcb", "--max-vias-on-any-net", "2"], diluted)
+        self.assertEqual(code, 2, "50 via-free nets diluted the graded metric")
 
 
 if __name__ == "__main__":

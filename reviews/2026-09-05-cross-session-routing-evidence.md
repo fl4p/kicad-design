@@ -120,7 +120,10 @@ find out why.
 9. **Signal opens vs pour islands (measured 2026-09-05, fable session).** One Freerouting board
    graded 16 signal / 36 islands / 52 total under `pcbnew.ZONE_FILLER` and 16 / 26 / 42 under
    `kicad-cli --refill-zones`; another 21 / 5 / 26 under both. Signal opens are refill-invariant,
-   islands are not. Codex's `final-zero-signal` (113 footprints) then reached 0 signal opens with
+   islands are not. Review correction (2026-09-07): stated flatly, this is stronger than
+   n=2 candidates of one design can carry. `ROUTING.md` hedges the same result correctly --
+   "not a proof of refill invariance on arbitrary designs" -- and that scope belongs here
+   too, because this file is the authority the skill body cites. Codex's `final-zero-signal` (113 footprints) then reached 0 signal opens with
    43 islands (my harness: 47) and reported the task complete; its later `final-bom39-zero`
    (100 footprints, 2026-09-06 01:34) grades in my harness at **0 signal / 3 GND records / no
    copper violations** (0 / 0 / 0 under codex's `kicad-cli` refill). Of the three GND records two
