@@ -348,6 +348,7 @@ class ConnectivitySplitTests(unittest.TestCase):
                             str(drc),
                             "--board",
                             str(board),
+                            "--trust-external-report",
                             "--pour-net",
                             "/GND",
                             "--report-only",
@@ -360,6 +361,7 @@ class ConnectivitySplitTests(unittest.TestCase):
                 self.assertEqual(
                     split.main(
                         [str(drc), "--board", str(board),
+                                "--trust-external-report",
                          "--pour-net", "/GND", "--require-zero-total"]
                     ),
                     4,
@@ -393,6 +395,7 @@ class ConnectivitySplitTests(unittest.TestCase):
                             str(drc),
                             "--board",
                             str(board),
+                            "--trust-external-report",
                             "--no-pour-nets",
                             "--require-zero-total",
                             "--json",
@@ -574,8 +577,14 @@ class ConnectivitySplitTests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                 io.StringIO()
-            ), self.assertRaises(SystemExit):
-                split.main(["--pour-net", "/GND", "--json", str(out)])
+            ):
+                # The positional became optional when --run-drc was added, so
+                # omitting it is now a controlled configuration error instead
+                # of an argparse usage error. Same exit code, and -- the point
+                # of this test -- the pre-parse invalidation still fires, so a
+                # stale clean report cannot survive the bad invocation.
+                code = split.main(["--pour-net", "/GND", "--json", str(out)])
+            self.assertEqual(code, 2)
             self.assertFalse(json.loads(out.read_text())["classification_evaluable"])
 
     def test_prescan_does_not_treat_tokens_after_terminator_as_options(self):
@@ -660,16 +669,19 @@ class ConnectivitySplitTests(unittest.TestCase):
             ):
                 self.assertEqual(
                     split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                 "--no-pour-nets",
                                 "--require-zero-signal-opens"]), 4)
                 # The same record, relabelled: unevaluable, never a pass.
                 self.assertEqual(
                     split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                 "--pour-net", "/SIG",
                                 "--require-zero-signal-opens"]), 3)
                 # The aggregate gate keeps its recorded behaviour.
                 self.assertEqual(
                     split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                 "--pour-net", "/SIG",
                                 "--require-zero-total"]), 4)
 
@@ -692,6 +704,7 @@ class ConnectivitySplitTests(unittest.TestCase):
             ):
                 self.assertEqual(
                     split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                 "--pour-net", "/GND",
                                 "--require-zero-signal-opens"]), 0)
 
@@ -751,6 +764,7 @@ class ConnectivitySplitTests(unittest.TestCase):
                             str(drc),
                             "--board",
                             str(board),
+                            "--trust-external-report",
                             "--pour-net",
                             "/GND",
                             "--require-zero-signal-opens",
@@ -785,6 +799,7 @@ class ConnectivitySplitTests(unittest.TestCase):
                             str(drc),
                             "--board",
                             str(board),
+                            "--trust-external-report",
                             "--pour-net",
                             "/GND",
                             "--require-zero-signal-opens",
@@ -880,6 +895,7 @@ class RealKiCadExport(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                # The fixture's mtime is its checkout time, so
                                # the committed export is "older than the
                                # board" by construction. This is the flag's
@@ -927,6 +943,7 @@ class RealKiCadExport(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()):
                 code = split.main([str(out), "--board", str(board),
+                                "--trust-external-report",
                                    "--no-pour-nets",
                                    "--require-zero-signal-opens"])
             self.assertEqual(code, 4)
@@ -942,7 +959,8 @@ class ReportMustBeAboutTheBoard(unittest.TestCase):
             errors = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
-                code = split.main([str(drc), "--no-pour-nets",
+                code = split.main([str(drc), "--trust-external-report",
+                                   "--no-pour-nets",
                                    "--require-zero-signal-opens"])
             self.assertEqual(code, 2)
             self.assertIn("--board", errors.getvalue())
@@ -961,6 +979,7 @@ class ReportMustBeAboutTheBoard(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
                 code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                    "--no-pour-nets",
                                    "--require-zero-signal-opens"])
             self.assertEqual(code, 2, "a report for another board passed")
@@ -995,6 +1014,7 @@ class ReportMustBeAboutTheBoard(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
                 code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                    "--pour-net", "/GNDD",
                                    "--require-zero-signal-opens"])
             self.assertEqual(code, 2)
@@ -1049,7 +1069,8 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
         errors = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(errors):
-            code = split.main([str(drc), "--board", str(board)] + argv)
+            code = split.main([str(drc), "--board", str(board),
+                               "--trust-external-report"] + argv)
         return code, errors.getvalue()
 
     def test_a_report_older_than_the_board_is_refused(self):
@@ -1149,7 +1170,8 @@ class PerRecordAcknowledgement(unittest.TestCase):
         errors = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(errors):
-            code = split.main([str(drc), "--board", str(board), "--pour-net",
+            code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report", "--pour-net",
                                "/GND", "--require-zero-signal-opens"] + extra)
         return code, errors.getvalue()
 
@@ -1190,7 +1212,8 @@ class PerRecordAcknowledgement(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
                 code = split.main(
-                    [str(drc), "--board", str(board), "--no-pour-nets",
+                    [str(drc), "--board", str(board),
+                                "--trust-external-report", "--no-pour-nets",
                      "--require-zero-signal-opens",
                      "--reviewed-record", split.record_id(row)])
         self.assertEqual(code, 4, "a real signal open was acknowledged away")
@@ -1243,6 +1266,7 @@ class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
                 code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                    "--pour-net", "/GND",
                                    "--require-zero-signal-opens"])
         self.assertEqual(code, 0, errors.getvalue())
@@ -1287,6 +1311,7 @@ class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(errors):
                 code = split.main([str(drc), "--board", str(board),
+                                "--trust-external-report",
                                    "--pour-net", "/GND",
                                    "--require-zero-signal-opens"])
         self.assertEqual(code, 2)
@@ -1300,6 +1325,144 @@ class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
                 with self.assertRaisesRegex(split.ConnectivityError,
                                             "above the"):
                     split.board_identity(board)
+
+
+class AVerdictMustBeBoundToTheBoard(unittest.TestCase):
+    """P0 findings of the 2026-09-07 codex review of 298ed6d."""
+
+    def test_a_clean_report_from_another_board_of_the_same_name_is_refused(self):
+        """KNOWN-BAD CALIBRATION, the one that matters most.
+
+        Measured before the fix: a board with 11 real opens exited 0 when
+        handed a zero-item report from a DIFFERENT board that merely shared
+        its filename and carried a later timestamp. Basename equality plus a
+        timestamp ordering is not a binding.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory, "board.kicad_pcb")
+            later = (datetime.datetime.now()
+                     + datetime.timedelta(minutes=5)).replace(
+                         microsecond=0).isoformat()
+            clean = directory / "clean.json"
+            clean.write_text(
+                json.dumps(drc_report([], source="board.kicad_pcb",
+                                      date=later)),
+                encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main([str(clean), "--board", str(board),
+                                   "--no-pour-nets",
+                                   "--require-zero-signal-opens"])
+        self.assertEqual(code, 2, "an unowned report gated silently")
+        self.assertIn("--run-drc", errors.getvalue())
+
+    def test_trusting_an_external_report_is_explicit_and_recorded(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            out = directory / "split.json"
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main([str(drc), "--board", str(board),
+                                   "--trust-external-report", "--no-pour-nets",
+                                   "--require-zero-signal-opens",
+                                   "--json", str(out)])
+            self.assertEqual(code, 0)
+            written = json.loads(out.read_text(encoding="utf-8"))
+        provenance = written["drc_provenance"]
+        self.assertFalse(provenance["produced_by_this_tool"])
+        self.assertTrue(provenance["trusted_external_report"])
+
+    @unittest.skipUnless(KICAD_CLI is not None, "kicad-cli not found")
+    def test_run_drc_grades_the_board_it_digested(self):
+        """The owned path: the report cannot be about another board, because
+        this tool made it from the bytes it hashed."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = directory / "open-net.kicad_pcb"
+            board.write_bytes((FIXTURES / "open-net.kicad_pcb").read_bytes())
+            out = directory / "split.json"
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main(["--run-drc", "--board", str(board),
+                                   "--no-pour-nets",
+                                   "--require-zero-signal-opens",
+                                   "--json", str(out)])
+            if code == 2 and "kicad-cli" in errors.getvalue():
+                self.skipTest("kicad-cli could not run here: %s"
+                              % errors.getvalue().strip()[:120])
+            self.assertEqual(code, 4, "the board's two real opens must fail")
+            written = json.loads(out.read_text(encoding="utf-8"))
+        self.assertTrue(written["drc_provenance"]["produced_by_this_tool"])
+        self.assertEqual(written["counts"]["signal_open_records"], 2)
+
+    def test_run_drc_and_an_explicit_report_cannot_be_combined(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report([])), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main([str(drc), "--run-drc", "--board",
+                                   str(board), "--no-pour-nets",
+                                   "--require-zero-signal-opens"])
+        self.assertEqual(code, 2)
+
+
+class AnAcknowledgementIsNotEvidence(unittest.TestCase):
+    """The regression I introduced in 9551cd4's predecessor, and its fix."""
+
+    def _run(self, descriptions, extra):
+        row = record(*descriptions)
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report([row])), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = split.main(
+                    [str(drc), "--board", str(board),
+                     "--trust-external-report",
+                     "--require-zero-signal-opens"] + extra)
+        return code, split.record_id(row)
+
+    def test_two_caller_labels_cannot_launder_a_zoneless_open(self):
+        """KNOWN-BAD CALIBRATION.
+
+        Measured on a plain `Pad 1 [/SIG] <-> Track [/SIG]` record, no zone
+        anywhere:
+            no declaration, no acknowledgement -> 4
+            declaration only                   -> 3
+            acknowledgement only               -> 4
+            declaration + acknowledgement      -> 0   <-- a REAL OPEN
+
+        I had called those "two independent statements". They are two
+        statements, but both come from the caller, so neither is evidence --
+        and stacking two labels is exactly what the all-zone rule exists to
+        stop.
+        """
+        descriptions = ("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
+        _, ident = self._run(descriptions, ["--no-pour-nets"])
+        code, _ = self._run(descriptions,
+                            ["--pour-net", "/SIG",
+                             "--reviewed-record", ident])
+        self.assertEqual(code, 3, "a zoneless real open was acknowledged away")
+
+    def test_an_acknowledgement_still_works_on_a_mixed_zone_record(self):
+        """Its actual purpose: the zone-track records real pours produce."""
+        descriptions = ("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
+        _, ident = self._run(descriptions, ["--no-pour-nets"])
+        code, _ = self._run(descriptions,
+                            ["--pour-net", "/GND",
+                             "--reviewed-record", ident])
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

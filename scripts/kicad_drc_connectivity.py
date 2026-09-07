@@ -53,6 +53,8 @@ import math
 import os
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -258,20 +260,34 @@ def classify_record(
         )
         return result
     if net in declared:
-        if strict_pour and set(kinds) - {"zone"} \
+        if strict_pour and set(kinds) - {"zone"} and "zone" in kinds \
                 and result["record_id"] in reviewed:
-            # A named record, reviewed by a person, on a net declared pure
-            # pour. Two independent statements, and this one is about THIS
-            # record rather than about every record that ever lands on the
-            # net. The measured reality is that real pour nets do carry
-            # zone-track, zone-via and track-via records (ROUTING.md), so a
-            # blanket refusal would make the signal gate unusable on the very
-            # boards it was written for -- but a blanket LABEL is what let a
-            # real open through. Per-record acknowledgement is the difference:
-            # it is auditable, it appears in the JSON, and a stale id is
-            # refused rather than ignored.
+            # An acknowledgement can only ever narrow a MIXED record -- one
+            # that actually names a zone -- to refill topology. It cannot make
+            # a record with no zone in it into pour topology.
+            #
+            # REGRESSION FIXED 2026-09-07 (codex review of 298ed6d). This
+            # branch shipped without the `"zone" in kinds` clause and reopened
+            # the exact laundering the all-zone rule had closed one commit
+            # earlier. Measured on a plain `Pad 1 [/SIG] <-> Track [/SIG]`
+            # record with no zone anywhere:
+            #     no declaration, no acknowledgement -> exit 4 (signal open)
+            #     declaration only                   -> exit 3 (ambiguous)
+            #     acknowledgement only               -> exit 4 (signal open)
+            #     declaration + acknowledgement      -> exit 0   <-- a REAL
+            #                                                        OPEN
+            # I had argued the two flags were "two independent statements".
+            # They are two statements, but both come from the caller, so they
+            # are not two pieces of EVIDENCE -- and stacking two labels was
+            # precisely the failure the all-zone rule exists to prevent. The
+            # zone is the only physical evidence in the record; requiring one
+            # keeps the acknowledgement to its actual purpose, which is the
+            # zone-track/zone-via/track-via records real pours do produce.
             result["bucket"] = "pour_topology"
-            result["reason"] = "reviewed by the caller as refill topology"
+            result["reason"] = (
+                "mixed zone record acknowledged by the caller as refill "
+                "topology"
+            )
             return result
         if strict_pour and set(kinds) - {"zone"}:
             # Tightened 2026-09-07 (codex review of 7a99de9). Requiring only
@@ -394,6 +410,58 @@ def board_net_table(text: str) -> List[str]:
             "table"
         )
     return sorted(set(nets))
+
+
+def find_kicad_cli(explicit: Optional[pathlib.Path] = None) -> pathlib.Path:
+    """Locate kicad-cli, or refuse. A missing exporter is never a clean run."""
+    if explicit is not None:
+        if not (explicit.is_file() and os.access(explicit, os.X_OK)):
+            raise ConnectivityError(f"--kicad-cli {explicit} is not executable")
+        return explicit
+    found = shutil.which("kicad-cli")
+    if found:
+        return pathlib.Path(found)
+    for candidate in (
+        "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+        "/usr/bin/kicad-cli",
+        "/usr/local/bin/kicad-cli",
+        "/opt/homebrew/bin/kicad-cli",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return pathlib.Path(candidate)
+    raise ConnectivityError(
+        "--run-drc needs kicad-cli and none was found; pass --kicad-cli PATH"
+    )
+
+
+def run_drc(board: pathlib.Path, destination: pathlib.Path,
+            kicad_cli: pathlib.Path) -> Dict[str, Any]:
+    """Produce the DRC report ourselves, from the board we digested.
+
+    This is the binding every metadata check was standing in for. A report the
+    tool did not produce can only be tied to a board by what it says about
+    itself -- a filename and a timestamp -- and both are satisfied by a report
+    from a different board that happens to share the name."""
+    command = [str(kicad_cli), "pcb", "drc", "--format", "json",
+               "--severity-all", "--units", "mm",
+               "-o", str(destination), str(board)]
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True,
+                              timeout=600)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ConnectivityError(f"could not run kicad-cli: {exc}") from exc
+    if proc.returncode != 0 or not destination.exists():
+        raise ConnectivityError(
+            "kicad-cli exited %s and produced no usable report; a DRC that "
+            "did not run is not a clean DRC. stderr: %s"
+            % (proc.returncode, (proc.stderr or "").strip()[:400])
+        )
+    return {
+        "kicad_cli": str(kicad_cli),
+        "command": command,
+        "kicad_cli_sha256": hashlib.sha256(
+            kicad_cli.read_bytes()).hexdigest() if kicad_cli.is_file() else None,
+    }
 
 
 def board_identity(path: pathlib.Path) -> Dict[str, Any]:
@@ -832,7 +900,37 @@ def write_json(path: pathlib.Path, result: Dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("drc_json", type=pathlib.Path)
+    parser.add_argument("drc_json", type=pathlib.Path, nargs="?")
+    parser.add_argument(
+        "--run-drc",
+        action="store_true",
+        help=(
+            "run the DRC on --board and grade THAT, instead of grading a "
+            "report someone else produced. This is the only mode in which the "
+            "verdict is bound to the board's bytes: the tool digests the "
+            "board, invokes kicad-cli on that exact file, and classifies the "
+            "output it just produced. Without it the report's correspondence "
+            "to the board rests on a filename and a timestamp, which a report "
+            "from another board of the same name satisfies"
+        ),
+    )
+    parser.add_argument(
+        "--kicad-cli",
+        type=pathlib.Path,
+        help="path to kicad-cli for --run-drc; discovered if not given",
+    )
+    parser.add_argument(
+        "--trust-external-report",
+        action="store_true",
+        help=(
+            "gate on a DRC report this tool did not produce. Required for a "
+            "gating run without --run-drc, because a report is bound to the "
+            "board only by its filename and timestamp: measured 2026-09-07, a "
+            "board with 11 real opens exited 0 when handed a clean report "
+            "from a different board of the same name. Recorded in the result "
+            "so a pass taken on that basis is auditable"
+        ),
+    )
     parser.add_argument(
         "--board",
         type=pathlib.Path,
@@ -1040,7 +1138,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"UNEVALUABLE: {exc}", file=sys.stderr)
             return 2
     args = build_parser().parse_args(raw_argv)
+    owned_drc = None
+    owned_dir = None
     try:
+        if args.run_drc:
+            if args.board is None:
+                raise ConnectivityError("--run-drc needs --board")
+            if args.drc_json is not None:
+                raise ConnectivityError(
+                    "--run-drc produces the report; do not also name one"
+                )
+            kicad_cli = find_kicad_cli(args.kicad_cli)
+            owned_dir = tempfile.mkdtemp(prefix=".drc-owned-")
+            produced = pathlib.Path(owned_dir) / "owned.drc.json"
+            owned_drc = run_drc(args.board, produced, kicad_cli)
+            args.drc_json = produced
+        elif args.drc_json is None:
+            raise ConnectivityError(
+                "name a DRC JSON, or use --run-drc to produce one"
+            )
         source = args.drc_json.resolve()
         if args.json:
             prepare_json(args.json, source)
@@ -1069,6 +1185,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "--require-zero-total (the aggregate), or --report-only"
             )
         cap = _parse_report_cap(args.report_cap)
+        if not args.run_drc and not args.report_only \
+                and not args.trust_external_report:
+            raise ConnectivityError(
+                "a gating run must either produce its own report (--run-drc) "
+                "or say explicitly that it is trusting one it did not make "
+                "(--trust-external-report). A report is tied to a board only "
+                "by its filename and its timestamp, and a clean report from a "
+                "different board of the same name satisfies both: measured "
+                "2026-09-07, a board with 11 real opens exited 0 that way"
+            )
         identity = None
         if args.board is not None:
             identity = board_identity(args.board)
@@ -1101,6 +1227,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         result["board"] = identity
         # The report's OWN source/date, not just the JSON pathname: a result
         # that drops them cannot be re-checked against the board later.
+        # Provenance of the verdict's own trust basis, so a pass taken on a
+        # weaker footing is auditable rather than indistinguishable.
+        result["drc_provenance"] = {
+            "produced_by_this_tool": bool(args.run_drc),
+            "owned_run": owned_drc,
+            "trusted_external_report": bool(args.trust_external_report),
+            "staleness_check_skipped": bool(args.allow_report_older_than_board),
+            "report_cap_probed_on": args.report_cap_probed_on,
+            "pour_nets_explicitly_none": bool(args.no_pour_nets),
+        }
         result["report_source"] = report.get("source")
         result["report_date"] = report.get("date")
         result.update(receipt)
