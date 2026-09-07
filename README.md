@@ -40,7 +40,8 @@ Topics covered:
 - **Verification ladder** — what ERC catches, what DRC catches, and the large class of
   defects that neither does.
 - **File-format gotchas** for `.kicad_sch` / `.kicad_pcb` / `.kicad_sym` / `.kicad_mod`.
-- **`pcbnew` scripting** notes, including zone fills as a cache.
+- **`pcbnew` scripting** notes, including zone fills as a cache, scoped as SWIG-specific with the
+  KiCad 11 removal timeline and the migration state.
 - **Copper, mask and paste are three independent layers** — narrowing a pad for creepage
   does not move its solder-mask or paste aperture.
 - **Datasheet discipline** — read the land-pattern page, don't recall it.

@@ -31,10 +31,20 @@ router produces wholesale and DRC then reports as hundreds of
 routing pass; repeated collisions at the same pins are placement evidence,
 not routing bad luck.
 
+Backend: the numbers come from a named board-access backend, and every verdict
+line and JSON report says which one and how it was chosen (`--backend`,
+`$KICAD_BACKEND`, or the default). Only `swig` can serve this audit today —
+`GetEffectiveShape`/`Collide` has no IPC equivalent and the IPC API cannot open
+a saved board without a running KiCad. Asking for a backend that is
+unavailable, or one that lacks a capability this audit needs, is UNEVALUABLE
+with a stable failure ID; it never falls back to the other backend. See
+`kicad_backend.py` and `../plans/SWIG-to-IPC-inventory.md`.
+
 Exit codes (fail closed, per GUARDS.md):
   0  audited, no collisions — and only with the explicit OK verdict line
   1  unevaluable — board missing/unloadable, nothing to audit, no usable
-     pcbnew interpreter, bad CLI value or parse error, worker timeout, or an
+     pcbnew interpreter, the requested backend unavailable or lacking a
+     required capability, bad CLI value or parse error, worker timeout, or an
      exception
   2  collisions found
 `--help`/`--version`-style informational exits follow CLI convention (exit 0
@@ -57,7 +67,7 @@ sharing one `--json` path are unsupported — last completed writer wins.
 
 Usage:
   kicad_copper_collisions.py BOARD.kicad_pcb [--max-report N] [--json OUT]
-                             [--timeout SECONDS]
+                             [--timeout SECONDS] [--backend swig|ipc]
 
 Runs itself under KiCad's bundled interpreter when `pcbnew` is not importable.
 Set KICAD_PYTHON to override discovery; a configured interpreter that cannot
@@ -85,6 +95,8 @@ import sys
 import tempfile
 import traceback
 
+import kicad_backend
+
 MAX_REPORT_DEFAULT = 40
 WORKER_TIMEOUT_DEFAULT = 600
 # Probed on 10.0.5: clearance 0 misses exact tangency; clearance 1 IU (1 nm)
@@ -96,6 +108,53 @@ _WORKER_ENV = "KICAD_COPPER_COLLISIONS_WORKER"
 # /bin/echo) must not be able to satisfy the probe.
 _PROBE_MARKER = "PCBNEW-" + "PROBE-OK"
 _OK_LINE = "COPPER-COLLISIONS-OK"
+# Provenance of the backend that produced this run's numbers. None until the
+# backend is resolved: a verdict printed before that says so rather than
+# implying a backend it has not established.
+_BACKEND = None
+
+
+def _backend_suffix():
+    return "" if _BACKEND is None else " [%s]" % _BACKEND["provenance"]
+
+
+def _swig_selection(environ=None):
+    """SWIG probe for `kicad_backend.select`, reusing THIS module's discovery.
+
+    The launcher probe here is calibrated against argument-echoing and
+    silent-exit-zero executables (see `LauncherTests`); the backend module
+    exists to own the *contract*, not to replace that calibration.
+    """
+    del environ
+    # In-process availability is decided by the IMPORT, exactly as it was
+    # before the backend layer existed. A pcbnew that imports but cannot report
+    # its version is still the pcbnew this process will use; downgrading it to
+    # "no backend" here would re-execute a worker that is already home.
+    try:
+        import pcbnew
+    except Exception:
+        pcbnew = None
+    if pcbnew is not None:
+        try:
+            version = str(pcbnew.GetBuildVersion())
+        except Exception:
+            version = "version-unreported"
+        return kicad_backend.Selection(
+            kicad_backend.SWIG, None,
+            "pcbnew %s in-process under %s" % (version, sys.executable),
+            kicad_backend.SWIG_CAPABILITIES)
+    interpreter, error = _find_kicad_python()
+    if not interpreter:
+        # A configured interpreter that fails its probe is a DIFFERENT fault
+        # from finding none at all, and the two want different fixes.
+        failure = ("swig-configured-interpreter-bad"
+                   if os.environ.get(kicad_backend.INTERPRETER_ENV_VAR)
+                   else "swig-no-interpreter")
+        raise kicad_backend.BackendUnavailable(
+            kicad_backend.SWIG, failure, error)
+    return kicad_backend.Selection(
+        kicad_backend.SWIG, None, "pcbnew via %s" % interpreter,
+        kicad_backend.SWIG_CAPABILITIES, interpreter=interpreter)
 
 
 # --------------------------------------------------------------------------- audit
@@ -223,6 +282,9 @@ def _write_json(json_out, board_path, verdict, findings, inventory,
         "verdict": verdict,  # "collisions" | "clean" | "unevaluable"
         "findings": findings,
         "inventory": inventory,
+        # null until the backend is resolved. A report that cannot name the
+        # backend that produced its numbers must say so, not omit the field.
+        "backend": _BACKEND,
     }
     if reason:
         payload["reason"] = reason
@@ -251,7 +313,7 @@ def _write_json(json_out, board_path, verdict, findings, inventory,
 
 def _unevaluable(json_out, board_path, reason, inventory=None):
     _write_json(json_out, board_path, "unevaluable", [], inventory or {}, reason)
-    print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}")
+    print(f"COPPER-COLLISIONS-UNEVALUABLE: {reason}{_backend_suffix()}")
     return 1
 
 
@@ -312,10 +374,12 @@ def run_audit(board_path, max_report=MAX_REPORT_DEFAULT, json_out=None):
     )
     if findings:
         print(f"COPPER-COLLISIONS-FAIL: {len(findings)} certain shorts "
-              f"({inventory['items']} copper items; {layer_counts})")
+              f"({inventory['items']} copper items; {layer_counts})"
+              f"{_backend_suffix()}")
         return 2
     print(f"{_OK_LINE}: 0 collisions "
-          f"({inventory['items']} copper items; {layer_counts})")
+          f"({inventory['items']} copper items; {layer_counts})"
+          f"{_backend_suffix()}")
     return 0
 
 
@@ -376,6 +440,11 @@ def _run_worker(interpreter, args):
            "--max-report", str(args.max_report)]
     if args.json_out:
         cmd += ["--json", args.json_out]
+    # Name the backend explicitly in the child: a worker that re-resolved it
+    # from its own defaults could grade with a backend the parent did not pick.
+    backend = getattr(args, "backend", None)
+    if backend:
+        cmd += ["--backend", backend]
     env = dict(os.environ, **{_WORKER_ENV: "1"})
     try:
         proc = subprocess.run(
@@ -482,6 +551,12 @@ def _prescan_json_and_board(argv):
 
 
 def main(argv=None):
+    # Provenance is per-run, and this module-level global outlives a call: an
+    # early failure on a second in-process invocation emitted the PREVIOUS
+    # run's backend, breaking the "null before resolution" contract the report
+    # promises (codex review of 95d1e48).
+    global _BACKEND
+    _BACKEND = None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     # Invalidate any stale artifact even if parsing fails below; skip when
     # the pre-scan cannot tell the artifact apart from the board.
@@ -501,6 +576,7 @@ def main(argv=None):
     parser.add_argument("--json", dest="json_out")
     parser.add_argument("--timeout", type=int, default=WORKER_TIMEOUT_DEFAULT,
                         help="worker re-execution timeout, seconds")
+    kicad_backend.add_backend_argument(parser)
     args = parser.parse_args(raw_argv)
     # Exit-code contract reserves 2 for collisions, so reject bad values with
     # the unevaluable code instead of argparse's exit(2).
@@ -524,22 +600,39 @@ def main(argv=None):
     )
     try:
         import pcbnew  # noqa: F401
+        in_process = True
     except ImportError:
-        if os.environ.get(_WORKER_ENV):
-            return _unevaluable(
-                args.json_out, args.board,
-                "re-executed interpreter still cannot import pcbnew",
-            )
-        interpreter, error = _find_kicad_python()
-        if not interpreter:
-            return _unevaluable(args.json_out, args.board, error)
-        return _run_worker(interpreter, args)
+        in_process = False
     except Exception:
         sys.stderr.write(traceback.format_exc())
         return _unevaluable(
             args.json_out, args.board, "pcbnew import failed (see stderr)"
         )
+    # A worker that re-executed and STILL cannot import pcbnew must fail here,
+    # before any discovery, or it respawns itself forever.
+    if not in_process and os.environ.get(_WORKER_ENV):
+        return _unevaluable(
+            args.json_out, args.board,
+            "re-executed interpreter still cannot import pcbnew",
+        )
 
+    # Resolve the backend explicitly and record it. An unavailable backend is
+    # UNEVALUABLE; it never falls back to the other one.
+    try:
+        selection = kicad_backend.select(
+            args.backend, probes={kicad_backend.SWIG: _swig_selection,
+                                  kicad_backend.IPC: kicad_backend.probe_ipc})
+        kicad_backend.require_capabilities(
+            selection,
+            kicad_backend.CAP_OPEN_BOARD_FROM_PATH,
+            kicad_backend.CAP_EFFECTIVE_SHAPE_COLLIDE,
+        )
+    except kicad_backend.BackendUnavailable as error:
+        return _unevaluable(args.json_out, args.board, str(error))
+    _BACKEND = dict(selection.as_dict(), provenance=selection.provenance())
+
+    if selection.interpreter is not None:
+        return _run_worker(selection.interpreter, args)
     return run_audit(args.board, args.max_report, args.json_out)
 
 

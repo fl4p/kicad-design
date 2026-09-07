@@ -8,12 +8,42 @@ calibrates domain checks, and for the semantic zone-fill finalization contract.
 
 ## Contents
 
+- [Scope: this file is about SWIG, which is being removed](#scope-this-file-is-about-swig-which-is-being-removed)
 - [Probe the installed pcbnew API](#pcb--pcbnew-notes)
 - [Make layout generation reproducible](#making-a-pcbnew-layout-reproducible--there-are-two-causes-not-one)
 - [Treat geometry helpers as guards](#geometry-helpers-are-guards-and-fail-the-same-way)
 - [Profile slow generators by outcome](#a-slow-generator-profile-by-outcome-and-measure-reuse-before-you-cache)
 
-## PCB / `pcbnew` notes
+## Scope: this file is about SWIG, which is being removed
+
+**Everything below was measured through the in-process SWIG `pcbnew` module, and nothing
+below transfers to the IPC API by assumption.** The `Save()` semantics, the `.kicad_pro`
+side effects, the UUID-ordering nondeterminism, the proxy invalidation after `Remove()`,
+the object-lifetime SIGBUS — all of those are properties of *that binding* reaching *that
+in-process board object*. The IPC path serialises through a different code path in a
+different process, so each one becomes an open question again, not a carried-over result.
+
+State of the migration, as of **2026-09-07**:
+
+| | |
+|---|---|
+| SWIG `pcbnew` | deprecated in KiCad 9.0; the runtime warns on every import in 10.0.5. **Already deleted from KiCad's development branch** — commit `65a442b1d2bf`, 2026-03-22, "REMOVED: SWIG, wxPython, and Python integration". `pcbnew/python` holds `examples, plugins, scripting, swig` on the `10.0.6` tag and only `wizards` on `master` (which is `10.99.0`, i.e. KiCad 11 development) |
+| removal release | KiCad 11. KiCad's dev docs: "The current plan is to remove the SWIG bindings in KiCad 11.0." `kicad-python` 0.8.0's README: "The SWIG bindings still exist in KiCad 9 and 10, but are removed in KiCad 11." No release date is published; the last two majors shipped 2025-02-20 and 2026-03-20, so Q1 2027 is an extrapolation from two points, not a schedule |
+| the replacement | the IPC API, Python client `kicad-python` (`kipy`), 0.8.0 released 2026-08-30 |
+| **can it run this skill's guards?** | **Not yet.** On KiCad 9 and 10 the IPC server is started only by the GUI application, and the protocol has no command that opens a file from disk. Headless serving (`kicad-cli api-server [PROJECT_OR_FILE]`) was added on `master` in commit `caf1bcc4559b`, 2026-03-21 — one day before SWIG was removed — so it arrives with KiCad 11 and not before |
+| two operations have no IPC equivalent at all | `GetEffectiveShape(layer)` + `Collide` (which *is* the certain-short audit), and Specctra DSN export / SES import (which is the entire Freerouting boundary). Neither is waiting on a release |
+
+The measurements, the operation-by-operation mapping and the migration plan are in
+[`plans/SWIG-to-IPC-migration.md`](plans/SWIG-to-IPC-migration.md); the call-site inventory
+is in [`plans/SWIG-to-IPC-inventory.md`](plans/SWIG-to-IPC-inventory.md).
+
+Practical consequence for anything written against this file: name the backend in the
+verdict. `scripts/kicad_backend.py` resolves one explicitly, records whether it was asked
+for or inherited, refuses an unavailable one as UNEVALUABLE rather than falling back, and
+puts the answer in every verdict line and JSON report — so a number produced here can never
+be read without knowing which binding produced it.
+
+## PCB / `pcbnew` notes (SWIG)
 
 Run layout scripts with KiCad's **bundled** Python — `pcbnew` is not importable from a normal
 venv:
@@ -151,7 +181,14 @@ row("PAD.GetFPRelativePosition",    lambda: p.GetFPRelativePosition(),       "wo
 
 Distances come back in internal units — `pcbnew.ToMM()` everything before comparing.
 
-**`LoadBoard` → `Save` DOES NOT round-trip bit-identically on 10.0.5.** This paragraph used to
+**`LoadBoard` → `Save` DOES NOT round-trip bit-identically on 10.0.5 (SWIG).** This is a
+measurement of the SWIG save path specifically. The IPC API's `Board.save_as(filename,
+overwrite, include_project)` writes through KiCad's own editor, which is a different code
+path with its own project-write behaviour; when a headless IPC session first becomes
+available, re-measure the round trip, the item ordering and the 9.x migration on it rather
+than carrying these three findings across.
+
+**The SWIG measurement:** This paragraph used to
 claim it did, verified as zero diff lines on a 12 000-line `.kicad_pcb` under 9.0.4. Re-tested
 on 10.0.5, it is false on every board tried, by two separate mechanisms:
 
@@ -218,7 +255,8 @@ if isinstance(p, str) and self.pad_net(p) != netname:
 ```
 
 Calibrate by re-introducing the swapped pad number and watching it exit non-zero. Expect this
-to be free on an existing board — it found no false positives on ~60 routed polylines — which
+to be free on an existing board — it found no false positives on ~60 routed polylines, one board
+in one session, not replicated — which
 is the point: it costs nothing and removes a whole silent failure mode from the generator.
 
 **A schematic edit that changes no nets can still break `--schematic-parity`.** Renaming a
@@ -244,7 +282,8 @@ pours.
 
 **A zone SETTING can destroy copper asymmetrically, and nothing checks settings.**
 `island_removal_mode` on a current-path plane had reverted from `NEVER` to `ALWAYS`, and with
-it went **37 mm² from one inner plane and not its mirror** — In1 856.21 mm² against In2
+it went **37 mm² from one inner plane and not its mirror** (one board, one session, not
+replicated; the mechanism generalises, the number does not) — In1 856.21 mm² against In2
 825.65, a 30.56 mm² imbalance where the two had previously been bit-identical. No layout
 changed. The mechanism is the one under *A via that lands outside its pour* below: a
 foreign-net via cuts a corner off both planes, then on one plane the stitching row is that
@@ -339,8 +378,8 @@ load-bearing-omission rules at the end of this section apply.
   measurement and invites diagnosing a phase that was never the cost.
 - **Slice by outcome or phase, not only by function.** Success and failure share the same stacks,
   so a function profiler cannot show which outcome pays; one timer bucketed on the return value
-  can. Measured: 96 % of one router's runtime was in FAILED searches, while the profiler-suggested
-  index rewrite was worth only 1.12x end to end.
+  can. Measured on one router and one board, not replicated: 96 % of that router's runtime was in
+  FAILED searches, while the profiler-suggested index rewrite was worth only 1.12x end to end.
 - **Measure reuse before you cache — under the cache's own lifetime.** Global duplicate counts
   overestimate cacheability; count hits that survive the proposed invalidation boundary. Measured:
   a cache invalidating correctly on every mutation scored 1142 invalidations against 14 hits and no
