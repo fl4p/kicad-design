@@ -661,7 +661,7 @@ class ConnectivitySplitTests(unittest.TestCase):
     def test_declaring_a_net_pour_cannot_launder_a_real_signal_open(self):
         """A pad-to-track open is authored routing. Classifying every record
         on a declared net as pour topology let the caller turn a real open
-        into a fabrication-closing PASS by labelling its net (codex review
+        into a passing signal gate by labelling its net (codex review
         of 7b00165): --no-pour-nets exited 4, --pour-net /SIG exited 0."""
         opening = record("Pad 1 [/SIG] of R1 on F.Cu", "Track [/SIG] on F.Cu")
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -935,13 +935,30 @@ class RealKiCadExport(unittest.TestCase):
             # tool cannot parse, or a different open count, is a real failure
             # and must stay one -- that is the whole point of the tier.
             if proc.returncode < 0:
-                # Killed by a signal: the process never got to run. That is
-                # this machine's sandbox, not KiCad. (Measured: SIGABRT under
-                # a codex seatbelt, the same denial that stops Chrome.)
-                self.skipTest(
-                    "kicad-cli was killed by signal %d before it could run; "
-                    "an environment limitation, not a report-format finding"
-                    % -proc.returncode)
+                # A signal death is ambiguous on its own: this sandbox kills
+                # kicad-cli at bootstrap (SIGABRT, the same denial that stops
+                # Chrome), but a genuine KiCad crash is also a signal death,
+                # and skipping both would hide the second (codex review of
+                # a760a18). Ask the binary to do the most trivial thing it
+                # can. If even `version` dies by a signal, the exporter cannot
+                # run here at all and this is the environment; if `version`
+                # works and the DRC then dies, KiCad crashed and that is a
+                # finding.
+                try:
+                    probe = subprocess.run([str(KICAD_CLI), "version"],
+                                           capture_output=True, text=True,
+                                           timeout=60)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    self.skipTest("kicad-cli cannot be executed here: %s" % exc)
+                if probe.returncode != 0:
+                    self.skipTest(
+                        "kicad-cli cannot run here at all (`version` exited "
+                        "%s); an environment limitation, not a finding"
+                        % probe.returncode)
+                self.fail(
+                    "kicad-cli runs here (`version` works) but crashed with "
+                    "signal %d on this board: %s"
+                    % (-proc.returncode, (proc.stderr or "")[:300]))
             # A POSITIVE non-zero exit means kicad-cli RAN and reported a
             # problem, and a missing output after a clean exit means it ran
             # and produced nothing. Both are real findings about the exporter
@@ -1126,6 +1143,97 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
                 drc_report([]), raw)
         self.assertEqual(code, 0, errors)
 
+    def test_report_cap_none_cannot_be_evidenced_at_all(self):
+        """A bounded observation can justify a higher FINITE cap, never "no cap".
+
+        A probe of M findings proves the release's cap is at least M. It is
+        equally consistent with the cap being exactly M, so it says nothing
+        about M+1 and cannot support `none` (codex review of a760a18).
+        """
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = self._probe_file(raw, 320)
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(probe)],
+                drc_report(rows), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be evidenced", errors)
+
+    def test_a_probe_of_mixed_types_does_not_qualify_a_cap(self):
+        """Counting a whole list conflated several types."""
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = drc_report([])
+            probe["violations"] = (
+                [{"type": "silk_overlap", "severity": "error"}] * 160
+                + [{"type": "silk_over_copper", "severity": "error"}] * 160)
+            path = pathlib.Path(raw) / "probe.json"
+            path.write_text(json.dumps(probe), encoding="utf-8")
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "300", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(path)],
+                drc_report(rows), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("supports a cap of at most", errors)
+
+    def test_a_probe_of_non_objects_does_not_qualify_a_cap(self):
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(split.KICAD_10_REPORT_CAP)]
+        with tempfile.TemporaryDirectory() as raw:
+            probe = drc_report([])
+            probe["unconnected_items"] = [None] * 320
+            path = pathlib.Path(raw) / "probe.json"
+            path.write_text(json.dumps(probe), encoding="utf-8")
+            code, errors = self._run(
+                ["--pour-net", "/GND", "--require-zero-signal-opens",
+                 "--report-cap", "300", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap-probe", str(path)],
+                drc_report(rows), raw)
+        self.assertEqual(code, 2)
+
+    def test_a_report_cannot_be_its_own_cap_probe(self):
+        rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
+                for _ in range(320)]
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            board = write_board(directory)
+            drc = directory / "drc.json"
+            drc.write_text(json.dumps(drc_report(rows)), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(errors):
+                code = split.main(
+                    [str(drc), "--board", str(board),
+                     "--trust-external-report", "--pour-net", "/GND",
+                     "--require-zero-signal-opens", "--report-cap", "300",
+                     "--report-cap-probed-on", "10.0.5",
+                     "--report-cap-probe", str(drc)])
+        self.assertEqual(code, 2)
+        self.assertIn("its own evidence", errors.getvalue())
+
+    def test_the_staleness_escape_does_not_also_disable_the_future_ceiling(self):
+        """The escape suppresses one comparison, not the whole check."""
+        with tempfile.TemporaryDirectory() as raw:
+            code, errors = self._run(
+                ["--no-pour-nets", "--require-zero-signal-opens",
+                 "--allow-report-older-than-board"],
+                drc_report([], date="2099-01-01T00:00:00Z"), raw)
+        self.assertEqual(code, 2)
+        self.assertIn("in the future", errors)
+
+    def test_the_staleness_escape_does_not_disable_date_parsing(self):
+        with tempfile.TemporaryDirectory() as raw:
+            code, _ = self._run(
+                ["--no-pour-nets", "--require-zero-signal-opens",
+                 "--allow-report-older-than-board"],
+                drc_report([], date="not-a-date"), raw)
+        self.assertEqual(code, 2)
+
     def test_a_report_dated_in_the_future_is_refused(self):
         """A future timestamp satisfies any freshness check, forever."""
         ahead = (datetime.datetime.now()
@@ -1205,10 +1313,10 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
         rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
                 for _ in range(split.KICAD_10_REPORT_CAP)]
         with tempfile.TemporaryDirectory() as raw:
-            probe = self._probe_file(raw, split.KICAD_10_REPORT_CAP + 5)
+            probe = self._probe_file(raw, 320)
             code, errors = self._run(
                 ["--pour-net", "/GND", "--require-zero-signal-opens",
-                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap", "300", "--report-cap-probed-on", "10.0.5",
                  "--report-cap-probe", str(probe)],
                 drc_report(rows), raw)
         self.assertEqual(code, 0, errors)
@@ -1220,21 +1328,20 @@ class ReportFreshnessAndCapEvidence(unittest.TestCase):
             probe = self._probe_file(raw, 12)
             code, errors = self._run(
                 ["--pour-net", "/GND", "--require-zero-signal-opens",
-                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap", "300", "--report-cap-probed-on", "10.0.5",
                  "--report-cap-probe", str(probe)],
                 drc_report(rows), raw)
         self.assertEqual(code, 2)
-        self.assertIn("does not demonstrate", errors)
+        self.assertIn("supports a cap of at most", errors)
 
     def test_a_probe_from_another_release_is_refused(self):
         rows = [record("Zone [/GND] on F.Cu", "Zone [/GND] on B.Cu")
                 for _ in range(split.KICAD_10_REPORT_CAP)]
         with tempfile.TemporaryDirectory() as raw:
-            probe = self._probe_file(raw, split.KICAD_10_REPORT_CAP + 5,
-                                     version="9.0.1")
+            probe = self._probe_file(raw, 320, version="9.0.1")
             code, errors = self._run(
                 ["--pour-net", "/GND", "--require-zero-signal-opens",
-                 "--report-cap", "none", "--report-cap-probed-on", "10.0.5",
+                 "--report-cap", "300", "--report-cap-probed-on", "10.0.5",
                  "--report-cap-probe", str(probe)],
                 drc_report(rows), raw)
         self.assertEqual(code, 2)
@@ -1298,6 +1405,23 @@ class PerRecordAcknowledgement(unittest.TestCase):
         self.assertEqual([e["uuid"] for e in second["items"]], uuids)
         self.assertNotEqual(split.record_id(first), split.record_id(second))
 
+    def test_moving_an_item_changes_the_record_id(self):
+        """Geometry is part of what was reviewed.
+
+        Omitting `pos` meant an item could move from x=1 to x=999 keeping its
+        uuid and description, and keep its acknowledgement with it -- the
+        position-dependent exemption GUARDS.md warns about (codex review of
+        a760a18).
+        """
+        first = record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
+        moved = {**first, "items": [
+            dict(first["items"][0]),
+            dict(first["items"][1], pos={"x": 999.0, "y": 2}),
+        ]}
+        self.assertEqual([e["uuid"] for e in moved["items"]],
+                         [e["uuid"] for e in first["items"]])
+        self.assertNotEqual(split.record_id(first), split.record_id(moved))
+
     def test_a_record_whose_items_share_a_uuid_has_no_id(self):
         """Two items claiming one object cannot be acknowledged."""
         row = record("Zone [/GND] on F.Cu", "Track [/GND] on F.Cu")
@@ -1358,6 +1482,34 @@ class BoardNetTableIsParsedNotGrepped(unittest.TestCase):
         self.assertIn("(version 20260206)", board)
         self.assertNotIn('(net 1 "', board)
         self.assertEqual(split.board_net_table(board), ["/GND", "/SIG"])
+
+    def test_a_graphical_item_cannot_name_a_net(self):
+        """`gr_line` and `target` were wrongly in the allowlist.
+
+        KiCad's grammar defines gr_line as a graphical item with no net
+        member; the track forms are segment/via/arc. Including them let
+        `(kicad_pcb (gr_line (net "/PHANTOM")))` name a net -- the same
+        net-shaped-text acceptance the allowlist exists to stop (codex review
+        of a760a18). Nothing in the 400-board corpus used them.
+        """
+        for form in ("gr_line", "target", "gr_text", "metadata"):
+            with self.subTest(form=form):
+                self.assertEqual(
+                    split.board_net_table(
+                        '(kicad_pcb (%s (net "/PHANTOM")))\n' % form),
+                    [])
+
+    def test_a_bare_net_at_the_top_level_is_not_a_table_entry(self):
+        """A stray token reparents the expression to the board itself.
+
+        `(kicad_pcb # (net "/PHANTOM"))` named a net because the bare form was
+        accepted at the top level. Only the KiCad 8 NUMBERED entry is a table
+        entry there.
+        """
+        self.assertEqual(
+            split.board_net_table('(kicad_pcb # (net "/PHANTOM"))\n'), [])
+        self.assertEqual(
+            split.board_net_table('(kicad_pcb (net 3 "/REAL"))\n'), ["/REAL"])
 
     def test_kicad_8_numbered_net_table_is_still_found(self):
         self.assertEqual(
@@ -1537,8 +1689,19 @@ class AVerdictMustBeBoundToTheBoard(unittest.TestCase):
                                    "--require-zero-signal-opens",
                                    "--json", str(out)])
             if code == 2 and "kicad-cli" in errors.getvalue():
-                self.skipTest("kicad-cli could not run here: %s"
-                              % errors.getvalue().strip()[:120])
+                # Same discrimination as above: only skip when the binary
+                # genuinely cannot run here.
+                try:
+                    probe = subprocess.run([str(KICAD_CLI), "version"],
+                                           capture_output=True, text=True,
+                                           timeout=60)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    self.skipTest("kicad-cli cannot be executed here: %s" % exc)
+                if probe.returncode != 0:
+                    self.skipTest("kicad-cli cannot run here at all: %s"
+                                  % errors.getvalue().strip()[:120])
+                self.fail("kicad-cli runs here but --run-drc failed: %s"
+                          % errors.getvalue().strip()[:300])
             self.assertEqual(code, 4, "the board's two real opens must fail")
             written = json.loads(out.read_text(encoding="utf-8"))
         self.assertTrue(written["drc_provenance"]["produced_by_this_tool"])

@@ -115,11 +115,17 @@ _ROOT_SYMBOL = re.compile(r'\(\s*([A-Za-z_][A-Za-z_0-9]*)')
 # Forms that can carry a net. A `(net ...)` anywhere else is not a
 # mention of a net by this board -- it is net-shaped text.
 NET_BEARING_FORMS = frozenset((
-    "pad", "segment", "via", "zone", "arc", "gr_line", "target",
+    "pad", "segment", "via", "zone", "arc",
 ))
+# `gr_line` and `target` were in this set and should never have been: KiCad's
+# grammar defines gr_line as a GRAPHICAL item with no net member, and the
+# track forms are segment/via/arc (codex review of a760a18, citing
+# dev-docs.kicad.org). Including them let `(kicad_pcb (gr_line (net
+# "/PHANTOM")))` name a net, which is the same net-shaped-text acceptance the
+# allowlist exists to stop. Nothing in the 400-board corpus used them.
 
 _NET_EXPR = re.compile(
-    r'\(net\s+(?:\d+\s+)?"((?:[^"\\]|\\.)*)"\s*\)')
+    r'\(net\s+(\d+\s+)?"((?:[^"\\]|\\.)*)"\s*\)')
 # The 199 figure is measured, but it is measured for `silk_overlap` and
 # `silk_over_copper` on KiCad 10.0.5 -- NOT for `unconnected_items`, and not on
 # any other release. See ~/dev/kb/tooling/kicad-drc-caps-reports-at-199-per-type.md,
@@ -185,7 +191,21 @@ def record_id(record: Any) -> Optional[str]:
             # acknowledgement keyed on it would not identify one record.
             return None
         seen.add(uuid)
-        parts.append((str(uuid), description))
+        # Position is part of what was reviewed. Omitting it meant an item
+        # could move from x=1 to x=999 and keep both its id and its waiver
+        # (codex review of a760a18) -- the position-dependent exemption
+        # GUARDS.md warns about. Rounded to nanometres, KiCad's own internal
+        # resolution, so float formatting cannot churn ids.
+        position = entry.get("pos")
+        if isinstance(position, dict):
+            located = tuple(
+                None if not isinstance(position.get(axis), (int, float))
+                else round(float(position[axis]), 6)
+                for axis in ("x", "y")
+            )
+        else:
+            located = None
+        parts.append((str(uuid), description, located))
     # Hash the record's CONTENT, not just which objects it names. Keying on
     # uuids alone meant an acknowledgement survived the record changing
     # underneath it: a zone-track record could become a moved zone-via record
@@ -465,9 +485,19 @@ def board_net_table(text: str) -> List[str]:
             # directly inside the object that carries the net.
             if symbol == "net":
                 match = _NET_EXPR.match(text, index)
-                if match and (parent == "kicad_pcb"
-                              or parent in NET_BEARING_FORMS):
-                    nets.append(match.group(1))
+                if match:
+                    numbered = match.group(1) is not None
+                    if parent == "kicad_pcb":
+                        # At the top level only the KiCad 8 NUMBERED table
+                        # entry is a net table entry. A bare `(net "x")` there
+                        # is not something KiCad writes, and accepting it let
+                        # `(kicad_pcb # (net "/PHANTOM"))` name a net, because
+                        # the stray token left the expression parented to the
+                        # board itself.
+                        if numbered:
+                            nets.append(match.group(2))
+                    elif parent in NET_BEARING_FORMS:
+                        nets.append(match.group(2))
             index += 1
             continue
         if char == ")":
@@ -606,7 +636,8 @@ def check_report_is_about_the_board(report: Any, identity: Dict[str, Any]) -> No
 
 
 def check_report_is_not_stale(report: Any, identity: Dict[str, Any],
-                            skew_s: int = REPORT_DATE_SKEW_S) -> None:
+                            skew_s: int = REPORT_DATE_SKEW_S,
+                            compare_to_board: bool = True) -> None:
     """The report must not predate the board it claims to describe.
 
     Basename equality cannot see time: a clean report generated before the
@@ -660,7 +691,7 @@ def check_report_is_not_stale(report: Any, identity: Dict[str, Any],
     # as up to a second older than the board it just measured. The tolerance
     # is that quantisation, nothing more -- it is deliberately far too small
     # to admit a report from an earlier editing session.
-    if taken < edited - datetime.timedelta(seconds=skew_s):
+    if compare_to_board and taken < edited - datetime.timedelta(seconds=skew_s):
         raise ConnectivityError(
             "DRC report was taken %s but %s was last modified %s; a report "
             "older than the board cannot be a verdict about its current bytes "
@@ -686,6 +717,36 @@ def check_pour_nets_exist(declared: Iterable[str], identity: Dict[str, Any]) -> 
         )
 
 
+def provenance_notes(provenance: Dict[str, Any],
+                     reviewed: Dict[str, Optional[str]]) -> List[str]:
+    """One line per escape in force. Silence means none were used."""
+    notes: List[str] = []
+    if provenance.get("produced_by_this_tool"):
+        notes.append("PROVENANCE: report produced by this tool from the board")
+    if provenance.get("trusted_external_report"):
+        notes.append(
+            "PROVENANCE: graded a DRC report this tool did not produce; its "
+            "correspondence to the board rests on a filename and a timestamp")
+    if provenance.get("staleness_check_skipped"):
+        notes.append(
+            "PROVENANCE: the report may predate the board "
+            "(--allow-report-older-than-board)")
+    if provenance.get("report_cap_probed_on"):
+        notes.append(
+            "PROVENANCE: report cap overridden, probed on KiCad %s"
+            % provenance["report_cap_probed_on"])
+    if provenance.get("assumed_timezone"):
+        notes.append(
+            "PROVENANCE: the report's naive timestamp was read as local time "
+            "in %s" % provenance["assumed_timezone"])
+    for identifier, reason in sorted(reviewed.items()):
+        notes.append(
+            "PROVENANCE: record %s accepted as refill topology by the caller%s"
+            % (identifier, ": %s" % reason if reason else
+               " WITH NO REASON GIVEN"))
+    return notes
+
+
 def read_cap_probe(path: pathlib.Path, cap: Optional[int]) -> Dict[str, Any]:
     """Read a DRC report offered as EVIDENCE that a release does not cap.
 
@@ -704,31 +765,41 @@ def read_cap_probe(path: pathlib.Path, cap: Optional[int]) -> Dict[str, Any]:
             f"cannot read --report-cap-probe {path}: {exc}") from exc
     if not isinstance(probe, dict):
         raise ConnectivityError("--report-cap-probe is not a DRC report")
-    counts = {}
+    # Count PER TYPE, and only real records. Counting a whole list conflated
+    # several types (100 parity findings of type A plus 100 of type B
+    # "qualified" an override), and counting non-object entries let 200 nulls
+    # qualify one (codex review of a760a18).
+    by_type: Dict[str, int] = {}
     for key in ("unconnected_items", "violations", "schematic_parity"):
         rows = probe.get(key)
-        if isinstance(rows, list):
-            if key == "violations":
-                by_type: Dict[str, int] = {}
-                for row in rows:
-                    if isinstance(row, dict) and isinstance(row.get("type"), str):
-                        by_type[row["type"]] = by_type.get(row["type"], 0) + 1
-                counts.update(by_type)
-            else:
-                counts[key] = len(rows)
-    best = max(counts.values(), default=0)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            kind = row.get("type")
+            if not isinstance(kind, str) or not kind:
+                continue
+            by_type[kind] = by_type.get(kind, 0) + 1
+    best = max(by_type.values(), default=0)
+    # An observation is bounded, so it can only ever justify a HIGHER FINITE
+    # cap. A report of M findings of one type proves the release's cap is at
+    # least M; it says nothing about M+1, and is equally consistent with the
+    # cap being exactly M. `none` claims no cap at all, which no finite
+    # report can evidence -- so `none` is not a qualifiable override.
     if cap is None:
-        # `none` claims the release does not cap AT ALL, so the evidence must
-        # exceed the default boundary this tool would otherwise apply.
-        needed = KICAD_10_REPORT_CAP
-    else:
-        needed = cap - 1
-    if best <= needed:
         raise ConnectivityError(
-            "--report-cap-probe %s shows at most %d findings of one type, "
-            "which does not demonstrate that this release reports more than "
-            "%d; a probe has to contain the counts it claims are possible"
-            % (path, best, needed)
+            "--report-cap none cannot be evidenced: a probe showing %d "
+            "findings proves the cap is at least %d, never that there is no "
+            "cap. Set a finite --report-cap you have actually observed"
+            % (best, best)
+        )
+    if best + 1 < cap:
+        raise ConnectivityError(
+            "--report-cap-probe %s shows at most %d findings of a single "
+            "type, which supports a cap of at most %d, not %d; a probe has "
+            "to contain the counts it claims are possible"
+            % (path, best, best + 1, cap)
         )
     return {
         "path": str(path),
@@ -1404,6 +1475,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "type than the cap. Naming the version only asserts the "
                     "probe happened"
                 )
+            if args.report_cap_probe.resolve() == source:
+                raise ConnectivityError(
+                    "--report-cap-probe is the report being graded; a report "
+                    "cannot be its own evidence that it was not truncated"
+                )
             cap_probe = read_cap_probe(args.report_cap_probe, cap)
             if str(cap_probe["kicad_version"]) != str(args.report_cap_probed_on):
                 raise ConnectivityError(
@@ -1413,8 +1489,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
         if identity is not None:
             check_report_is_about_the_board(report, identity)
-            if not args.allow_report_older_than_board:
-                check_report_is_not_stale(report, identity)
+            # The escape suppresses ONE comparison, not the whole check. It
+            # used to skip the function outright, so `--allow-report-older-
+            # than-board` also disabled ISO parsing and the future ceiling: a
+            # report dated 2099 exited 0 (codex review of a760a18). An
+            # unparseable or impossible timestamp is wrong regardless of which
+            # side of the board's mtime it claims to fall on.
+            check_report_is_not_stale(
+                report, identity,
+                compare_to_board=not args.allow_report_older_than_board)
             check_pour_nets_exist(list(pour_nets) + list(mixed_pour_nets),
                                   identity)
         result = classify_report(
@@ -1439,6 +1522,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "report_cap_probed_on": args.report_cap_probed_on,
             "report_cap_probe": cap_probe,
             "pour_nets_explicitly_none": bool(args.no_pour_nets),
+            # A naive KiCad timestamp is read as local time, so the checker's
+            # zone is part of the freshness verdict: the same stale report was
+            # refused under Europe/Berlin and accepted under UTC.
+            "assumed_timezone": str(
+                datetime.datetime.now().astimezone().tzinfo),
         }
         result["report_source"] = report.get("source")
         result["report_date"] = report.get("date")
@@ -1480,6 +1568,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "{pour_topology_records} | ambiguous {ambiguous_records} | total "
         "{total_unconnected_records}".format(**counts)
     )
+    # Every escape that could have changed this verdict, on stdout, next to
+    # the verdict. `--json` is optional, so provenance recorded only there was
+    # provenance a CI log need never show (codex review of a760a18): a PASS
+    # resting on a trusted external report or a cap override read exactly like
+    # one that rested on nothing.
+    for line in provenance_notes(result.get("drc_provenance") or {},
+                                 result.get("reviewed_records") or {}):
+        print(line)
     if counts["ambiguous_records"]:
         print("UNEVALUABLE: ambiguous unconnected records remain", file=sys.stderr)
         return 3
