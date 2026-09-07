@@ -4,3 +4,6 @@
 # repo, so an unguarded `git add -A` would commit them.
 .claude/
 .playwright-mcp/
+
+# KiCad per-user local settings, written by kicad-cli next to a board
+*.kicad_prl
