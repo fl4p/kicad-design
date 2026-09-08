@@ -409,3 +409,23 @@ observation.
 
 Report what was verified, what remains `unverified`, which tool and datasheet revisions were used,
 and which source artefact owns future edits.
+
+## Analysis companions from kicad-happy
+
+Deeper analyzers live outside this skill as plain Markdown. Load one only when the task
+calls for it. Resolve the version glob first:
+
+```bash
+KH=$(ls -d ~/.claude/plugins/cache/kicad-happy/kicad-happy/*/skills | tail -1)
+```
+
+| load | when |
+|---|---|
+| `$KH/kicad/SKILL.md` | Parsing `.kicad_sch`/`.kicad_pcb`/Gerbers or a PDF schematic from a dev board, reference design or eval kit; net tracing, DRC/ERC, DFM, power-tree and regulator checks. Every finding carries a confidence label and evidence source. |
+| `$KH/emc/SKILL.md` | EMC pre-compliance risk: 18 check categories / 44 rule IDs — ground planes, decoupling, I/O filtering, switching harmonics, clock routing, diff-pair skew, edge radiation, PDN impedance, return paths, ESD. FCC Part 15, CISPR 32/25, MIL-STD-461G. Produces a test plan. |
+| `$KH/spice/SKILL.md` | Simulating a subcircuit — filter corners, divider ratios, opamp gain, LC resonance, crystal load caps. Auto-detects ngspice/LTspice/Xyce and generates testbenches. |
+| `$KH/datasheets/SKILL.md` | Extracting structured specs from a datasheet PDF (pinouts, electrical characteristics, EN thresholds, PG presence) for the analyzers above to consume. |
+
+Sourcing, pricing and BOM work is the `kicad-sourcing` skill; ordering boards is
+`kicad-fab`. This skill stays authoritative for design intent, generation, and the
+guards — the companions are analysis, not authority.
