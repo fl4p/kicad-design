@@ -182,6 +182,32 @@ per loop why no numeric budget applies, and names the analysis or decision it re
 budgeted loop are demonstrably the same loop, and gate `*_ring` quantities when the budget comes
 from a ring-frequency analysis.
 
+**Prove the solver runs before reporting the gate blocked on tooling.** `fasthenry` is not on
+`PATH`. `dcdc-tools/parasitics/lib/solve_reduce.py` resolves it from `$FASTHENRY`, defaulting to
+`/Users/fab/dev/vendor/FastHenry2/bin/fasthenry`, so `which fasthenry` returns nothing on a machine
+where the solver is installed and working. Check the resolved path and execute it — its startup
+banner or a completed solve is the evidence, never a `PATH` lookup. Measured 2026-09-16: that
+substitution was asserted three times in one session, twice inside answers to direct engineering
+questions, and was used to justify leaving the loop-L gate unrun; the binary was present the whole
+time. A dependency reported absent on the strength of a cheap proxy is a false blocker, and it is
+worse than an open gate because it looks like a finding.
+
+**An integrated power stage is a gate OUTCOME, not a gate skip.** `extract_parasitics.py` closes
+the commutation loop through declared FET dies (`hs_ref`/`ls_ref`) and refuses a board without
+them — `no high-side FET found on '<sw>' (drain to a non-GND rail)`. A regulator MODULE (TI
+TPSM/LMZM and similar parts carrying both FETs, and usually the inductor, inside one package) has
+no such refs, and `probe_ports` does not substitute for them: the input loop closes through the die
+and through CIN, neither of which is meshed copper, so the pads bounding it sit on different nets
+with no galvanic path and there is no loop to solve. On such a board the valid record states that
+the extractor structurally cannot reach the geometry, names the loop it would have bounded by
+refdes/pad, and carries whatever bound does exist — the part's own datasheet layout example and
+EMI report, or a bench measurement — as the basis. What is never valid is hand-computed nH
+presented with the authority of an extraction: on 2026-09-16 a module board's input loop was
+quoted three times at "~4-5 nH" from microstrip and via formulas with no error bar, while the only
+quantities on that board later checked against vendor data (an MLCC's ESL, ESR and DC-bias
+capacitance) came back 20-37 % off the assumed values. Estimate if nothing better exists, but label
+the estimate, state its assumptions, and do not let it close the gate.
+
 Represent board-level routed slots and cutouts as closed `Edge.Cuts` contours under a declared
 mechanical authority. Direct board drawings are valid; an intentional board-only footprint is also
 valid when it owns a reusable local contour, is marked not-in-schematic, is protected from
