@@ -269,6 +269,31 @@ and it is worth extracting on its own terms.
   Keep the low-ESL part nearest, but check the ladder's anti-resonance rather than assuming the
   smallest value wins — and keep one lossy element (the input-ladder damping note above).
 
+**What computes all of the above is `dcdc-tools/mlcc`** — the bias derate, the anti-resonance
+pair, the per-harmonic ripple and the nameplate/effective split are its output, not hand
+algebra. It models one capacitor from vendor data, puts N of them behind extracted copper, and
+returns a verdict against a requirement the caller records. Three things govern using it:
+
+- **It answers on TWO impedance bases and refuses to average them.** A vendor's SPICE model and
+  its own published |Z|/ESR curves disagree on ESL by a median 1.79×, always in the same
+  direction (`~/dev/kb/spice/mlcc-model-and-curve-disagree-on-esl.md`). A bank passes only when
+  both bases agree; one basis alone is a weaker verdict and is reported as one. Only TDK and
+  Samsung publish both — for a Murata or Taiyo Yuden part the second basis does not exist and
+  cannot be manufactured by assuming the first.
+- **It needs two inputs that are not in any repo**: the vendorpull store (gitignored, ~1.8 GB on
+  disk, so a fresh clone does not have it) and a `parasitics.json` from the extractor above.
+  Without the store it skips the vendor-data checks rather than substituting values; without an
+  extraction there is no bank, only parts. Neither absence is a reason to fall back to
+  hand-computed nH or an assumed derate — that is the failure [`PCB.md`](PCB.md) records.
+- **It judges banks; it does not choose parts.** `mlcc.select` screens and ranks candidates
+  handed to it, but nothing enumerates candidates from the store yet. Do not ask it "which
+  capacitor should I fit".
+
+`mlcc/README.md` is the interface. Its one runnable module, `vin_budget_tpsm33610.py`, is a
+single board's **worked example**, not an entry point — it fuses that board's parts, datasheet
+limits and report format, so starting a second board by copying it inherits whatever was
+specific to the first.
+
 ## Name the loop arrangement before quoting any number about it
 
 Three vocabularies are in circulation and **two use "vertical" for opposite physical objects**.

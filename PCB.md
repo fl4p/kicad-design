@@ -206,7 +206,10 @@ presented with the authority of an extraction: on 2026-09-16 a module board's in
 quoted three times at "~4-5 nH" from microstrip and via formulas with no error bar, while the only
 quantities on that board later checked against vendor data (an MLCC's ESL, ESR and DC-bias
 capacitance) came back 20-37 % off the assumed values. Estimate if nothing better exists, but label
-the estimate, state its assumptions, and do not let it close the gate.
+the estimate, state its assumptions, and do not let it close the gate. For the capacitor half of that
+gap something better does exist: `dcdc-tools/mlcc` reads ESL, ESR(f) and DC-bias capacitance out
+of vendor data on two independent bases instead of assuming them ([`POWER.md`](POWER.md),
+"Integrated power modules").
 
 Represent board-level routed slots and cutouts as closed `Edge.Cuts` contours under a declared
 mechanical authority. Direct board drawings are valid; an intentional board-only footprint is also
