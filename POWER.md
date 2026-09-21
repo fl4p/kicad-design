@@ -57,7 +57,7 @@ rates, allowed loop inductance, and package geometry):
 | RC snubber string (per switch) | that switch's D-S / C-E pads | 15 mm, same layer as the loop |
 | gate series resistor | the gate pad (`AnchorPad`) | 20 mm, routed with its source/kelvin return |
 | bootstrap capacitor | driver VB-VS pins | 10 mm |
-| HF loop / DC-link film caps | the bridge rail pads | 15 mm |
+| HF loop / DC-link caps (one HF cap per switching cell) | the rail pads of the cell it serves (BUS+/RTN at that half-bridge) | 15 mm |
 | IC decoupling | the supply pin it serves (`AnchorPad`) | 5 mm |
 | sense-divider top / feedback tap | the tapped node | 20 mm, routed away from switch nodes |
 | kelvin shunt sense pair | the shunt pad heads | from the pad heads, differential |
@@ -159,7 +159,26 @@ fault can put it at bus potential.
 Minimal loop first: DC+ → high-side → output → low-side → DC−, with the DC-link/loop
 caps at the bridge, then everything else placed around that loop — never a floorplan
 that bins parts by category (all axials in a row, all discs in a row): category binning
-is exactly how satellites drift from their anchors. Devices switching an inductive bus
+is exactly how satellites drift from their anchors.
+
+- **Every switching cell needs its own verified low-inductance HF return to DC-link
+  capacitance.** A full/H-bridge has ≥2 commutation loops, not one, and the count of caps is
+  neither necessary nor sufficient — what each cell needs is a short HF path back to the link.
+  *Default* for separated discrete legs: a dedicated local HF cap (the low-ESL ceramic of the
+  "nearest capacitor carries the loop" note below) hard against each cell's high/low pair.
+  Shared-bank and laminated-busbar arrangements legitimately serve both legs *when each cell's
+  commutation path is shown to meet its budget* — permit them on that evidence, not by default.
+  Clustering the only HF caps beside one leg extends the far leg's commutation path; audit per
+  cell that its HF return is in budget, not that a global bank exists.
+- **When a per-cell loop-L comes out far above its sibling's, validate the extraction before
+  assigning a cause.** A physical defect (cap on the wrong side of the bridge) and a modeling
+  defect (bad ports, omitted conductors, unconverged coarse mesh) can coexist, and a *PENDING or
+  failed* extraction is unevaluable — not a confirmed large loop. Check the cap's side of the
+  bridge *and* the extractor's ports/connectivity/boundaries/convergence; do not dismiss a real
+  tool error as "just placement," nor a real placement error as "just the extractor." A confirmed
+  excess inductance fails its budget; an invalid extraction stays unevaluable until re-run.
+
+Devices switching an inductive bus
 must be rated for bus + real overshoot with margin: one measured failure put devices
 rated ~1.2× the bus voltage on the bridge and lost three of four to avalanche under a
 load transient, while a co-packaged device rated ~3.8× survived. Derate meaningfully or
@@ -202,6 +221,53 @@ operating points ([`LOOPS.md`](LOOPS.md)) — a reasonable default, not a univer
   But the bound decides how much effort layout deserves: package-dominated specimens leave layout
   little to win (parallel devices or change the package instead), while chip-scale LGA is the
   opposite regime. Figures and their scope: [`LOOPS.md`](LOOPS.md).
+
+## Integrated power modules: the board owns the input loop and nothing else
+
+When the switches, driver and inductor are inside the package (TI TPSM/LMZM, ADI LTM,
+Murata MYx), `fet_discovery` style tooling correctly refuses the board — the commutation loop
+closes through dies the board cannot see. What remains board-side is the **input capacitor loop**,
+and it is worth extracting on its own terms.
+
+- **Close the loop at the package pads and label the result a LOWER BOUND.** The pad-to-die path
+  is not published for any module surveyed (TI SNVSCS7E gives a land pattern and layout guidance
+  and no internal geometry), so an extraction that stops at the pads under-reports by an unknown
+  amount. Say so wherever the number is quoted; do not invent an internal figure.
+- **The limit to judge input ripple against is usually the VIN ABSOLUTE MAXIMUM, not a ripple
+  spec.** Module datasheets rarely state one; they state a rating and often warn about it
+  explicitly (SNVSCS7E §6.1 40 V abs max against a 36 V recommended maximum; §7.3.1 "voltage
+  ringing at the VIN pins that exceeds the absolute maximum ratings can damage the IC"). At the
+  top of the input range the whole ripple-plus-ring budget is the difference — 4.0 V there — and
+  it collapses as VIN rises. Check the pins tied to VIN too (an EN strap shares the rail).
+- **Do not quote a summed-harmonic input ripple.** The pulse train's harmonics fall as 1/n while a
+  real bank's |Z| rises above resonance, so the magnitude sum does not converge and any figure is
+  really the harmonic count you chose. Per-harmonic ripple is well defined; the full waveform needs
+  a time-domain model whose **switch edge time is an explicit parameter**, never a default. On one
+  extracted 2-layer module board the pin overshoot ran 3.93 V at a 1 ns edge and 0.13 V at 20 ns —
+  the same board. Details and the failed convergence guards:
+  `~/dev/kb/power/input-ripple-harmonic-magnitude-sum-diverges.md`.
+- **Compare the OVERSHOOT with the rating, not the pp or the dip.** A converter DRAWS its input
+  pulse, so the pin's excursion above the rail and below it are different numbers once the network
+  is damped (1.66 V up against 1.90 V down at a 2 ns edge on the same board). Only the upward one
+  meets an absolute maximum.
+- **Put an HF ceramic on the BACK side, under the pins.** TI's own layout example does this
+  (SNVSCS7E Figure 8-21: ~100 nF 0402/0603 on the bottom, "through via nearest to VIN pin") and it
+  is the cheapest way to give the pin a branch with almost no shared copper. A board whose input
+  caps are all top-side pays the whole shared-trunk `L·di/dt`.
+- **Vendor minimum input capacitance is ambiguous between nameplate and effective — resolve it
+  before claiming a PASS.** TI's application sections say values are effective "unless otherwise
+  stated" while the recommended-parts table is footnoted as nameplate. Measured consequence: a
+  4.7 µF 50 V 1210 X7R delivers 1.92 µF at 36 V (−57 %), so TI's own EVM ceramics reach only 0.82×
+  their stated 4.7 µF minimum — the EVM meets an effective reading **only** through its 100 µF
+  aluminium bulk. If the requirement is effective, the answer is bulk, not a bigger MLCC: no
+  reasonable ceramic addition closes that gap. Evaluate both readings and report UNRESOLVED when
+  they disagree.
+- **"Smallest cap nearest" is not unconditional — the VALUE RATIO sets the anti-resonance.** With a
+  large branch-inductance imbalance, a very small nearest cap rings harder against the far bulk
+  than a mid-value one does: on one extracted board TI's own 4.7 µF + 0.1 µF pair gave a 4.34 Ω
+  peak at 13.3 MHz and 931 mV worst harmonic where the fitted 10 µF + 1 µF gave 1.36 Ω and 436 mV.
+  Keep the low-ESL part nearest, but check the ladder's anti-resonance rather than assuming the
+  smallest value wins — and keep one lossy element (the input-ladder damping note above).
 
 ## Name the loop arrangement before quoting any number about it
 
