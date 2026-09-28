@@ -277,11 +277,18 @@ returns a verdict against a requirement the caller records. Three things govern 
 - **It answers on TWO impedance bases and refuses to average them.** A vendor's SPICE model and
   its own published |Z|/ESR curves disagree on ESL by a median 1.79×, always in the same
   direction (`~/dev/kb/spice/mlcc-model-and-curve-disagree-on-esl.md`). A bank passes only when
-  both bases agree; one basis alone is a weaker verdict and is reported as one. Only TDK and
-  Samsung publish both — for a Murata or Taiyo Yuden part the second basis does not exist and
-  cannot be manufactured by assuming the first.
-- **It needs two inputs that are not in any repo**: the vendorpull store (gitignored, ~1.8 GB on
-  disk, so a fresh clone does not have it) and a `parasitics.json` from the extractor above.
+  both bases agree; one basis alone is a weaker verdict and is reported as one. **Only 18,997 of
+  217,855 stored parts (8.7 %) can reach a two-basis verdict at all** — the model basis needs a
+  *simple* lumped netlist with one readable ESL, which only TDK (`_s.mod`) and Samsung
+  (`Simple_*.lib`) ship. Murata, Taiyo Yuden and Kemet do publish SPICE models, but ladder ones
+  that `mlcc/part.py` refuses because no single element is their ESL; Yageo ships S-parameters
+  and no netlist at all. Of the 96,602 stored parts that ship a netlist, **77,528 (80 %) are
+  ladders** — so "it has a vendor SPICE model" is a true statement that tells you nothing about
+  whether a second basis exists. Where it does not, it cannot be manufactured by assuming the
+  first.
+- **It needs two inputs that are not in any repo**: the vendorpull store (gitignored, 1.9 GB on
+  disk at 2026-09-28 and still growing, so a fresh clone does not have it) and a
+  `parasitics.json` from the extractor above.
   Without the store it skips the vendor-data checks rather than substituting values; without an
   extraction there is no bank, only parts. Neither absence is a reason to fall back to
   hand-computed nH or an assumed derate — that is the failure [`PCB.md`](PCB.md) records.
