@@ -184,9 +184,12 @@ per loop why no numeric budget applies, and names the analysis or decision it re
 budgeted loop are demonstrably the same loop, and gate `*_ring` quantities when the budget comes
 from a ring-frequency analysis.
 
-**Extraction choices the caller owns.** The extractor refuses floating ports, duplicate ports and
-disconnected loops by itself; it cannot know the following, and each has produced a plausible wrong
-number. Record each choice in the committed YAML:
+**Extraction choices the caller owns.** The extractor handles some deck defects by itself. It prunes
+input-cap ports that never bonded to the mesh, and it folds a duplicate anchor port. In `module:`
+mode it also refuses a `P_pwr` whose terminals are not connected. On the discrete path it checks
+that the required ports exist, **not** that `P_pwr`'s terminals are connected, so there a
+disconnected loop is not yet a guaranteed error. The extractor cannot know the following, and each
+has produced a plausible wrong number. Record each choice in the committed YAML:
 
 1. **Package inductance has exactly one owner.** `--lead-mm` is an artificial die-plane riser,
    default 3 mm. On a leadless GaN LGA it added ~4.6 nH of fictitious copper (2.64 → 7.25 nH) and
@@ -204,9 +207,12 @@ number. Record each choice in the committed YAML:
 6. **Altium sources:** the programmatic importer flips the board and silently drops copper pours;
    treat its result as provisional (`parasitics/docs/FINDINGS.md` §5, §8).
 
-FastHenry gives L and R only; Coss resonance stays in SPICE. The guard pins the extractor to a
-minimum commit that contains these fail-closed fixes and prints the commit it ran. The
-tool-independent FastHenry pitfalls are in `~/dev/kb/tooling/fasthenry-deck-pitfalls.md`.
+FastHenry gives L and R only; Coss resonance stays in SPICE. The guard binds every verdict to the
+code that produced it. The extractor stamps its commit and `git status` into `meta`. Whether the
+extraction is fresh or reused, the guard refuses an unstamped extraction, a commit older than its
+pinned minimum, and uncommitted extractor code (`--allow-dirty-extractor` accepts that last case
+knowingly, and the verdict then says it is not release evidence). The tool-independent FastHenry
+pitfalls are in `~/dev/kb/tooling/fasthenry-deck-pitfalls.md`.
 
 **Prove the solver runs before reporting the gate blocked on tooling.** `fasthenry` is not on
 `PATH`. `dcdc-tools/parasitics/lib/solve_reduce.py` resolves it from `$FASTHENRY`, defaulting to
@@ -219,16 +225,18 @@ questions, and was used to justify leaving the loop-L gate unrun; the binary was
 time. A dependency reported absent on the strength of a cheap proxy is a false blocker, and it is
 worse than an open gate because it looks like a finding.
 
-**An integrated power stage is a gate OUTCOME, not a gate skip.** `extract_parasitics.py` closes
-the commutation loop through declared FET dies (`hs_ref`/`ls_ref`) and refuses a board without
-them — `no high-side FET found on '<sw>' (drain to a non-GND rail)`. A regulator MODULE (TI
-TPSM/LMZM and similar parts carrying both FETs, and usually the inductor, inside one package) has
-no such refs, and `probe_ports` does not substitute for them: the input loop closes through the die
-and through CIN, neither of which is meshed copper, so the pads bounding it sit on different nets
-with no galvanic path and there is no loop to solve. On such a board the valid record states that
-the extractor structurally cannot reach the geometry, names the loop it would have bounded by
-refdes/pad, and carries whatever bound does exist — the part's own datasheet layout example and
-EMI report, or a bench measurement — as the basis. What is never valid is hand-computed nH
+**An integrated power stage is a gate OUTCOME, not a gate skip.** A regulator MODULE (TI TPSM/LMZM
+and similar parts carrying both FETs, and usually the inductor, inside one package) has no
+`hs_ref`/`ls_ref` for the discrete path, which refuses it: `no high-side FET found on '<sw>'`.
+`probe_ports` does not substitute. Declare a `module:` block instead (`parasitics/README.md`,
+"`module`"). It closes the input loop at the package pads, with an `internal_closure` that has no
+default. Its `L_loop` is **board copper only**, a *lower bound* on the physical loop, because the
+pad-to-die geometry is not public. So a module-mode PASS proves the board copper meets the budget,
+not the total loop. The record gates `L_loop` against the budget minus a declared internal
+contribution (`declared_internal`, whose `internal_source` must name the source), or states that the
+internal part is unbounded and names the basis that covers it: the part's own datasheet layout
+example and EMI report, or a bench measurement. Gate loops and CSI do not exist on a module board
+and are reported `null`, never 0. What is never valid is hand-computed nH
 presented with the authority of an extraction: on 2026-09-16 a module board's input loop was
 quoted three times at "~4-5 nH" from microstrip and via formulas with no error bar, while the only
 quantities on that board later checked against vendor data (an MLCC's ESL, ESR and DC-bias

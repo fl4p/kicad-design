@@ -54,11 +54,14 @@ Extractor location: $DCDC_PARASITICS (default
 ~/dev/pv/ee/dcdc-tools/parasitics). FastHenry: $FASTHENRY (default
 ~/dev/tools/fasthenry/bin/fasthenry).
 
-Extractor version: a fresh extraction requires the extractor to be a git
-checkout containing MIN_EXTRACTOR_COMMIT (the fail-closed connectivity
-fixes); an older or unidentifiable extractor is unevaluable. The commit and
-a dirty-tree flag are printed with the verdict. A reused --json extraction
-carries no extractor commit, so its version is reported as unrecorded.
+Extractor provenance: the extractor stamps meta.extractor_commit and
+meta.extractor_status (git status lines) into every parasitics.json. Fresh
+or reused, the verdict requires that stamp, a commit containing
+MIN_EXTRACTOR_COMMIT, and no uncommitted change to extractor code (tests,
+docs, examples and untracked non-.py files excepted). $DCDC_PARASITICS must
+be the root of that git checkout, and a fresh run's stamp must equal the
+checkout's HEAD. Anything else is unevaluable; --allow-dirty-extractor
+accepts uncommitted code knowingly and says so in the verdict.
 """
 
 import argparse
@@ -80,14 +83,20 @@ SCALAR_KEYS = {
 }
 PROBE_PREFIXES = {"probe:": "L", "probe_ring:": "L_ring"}
 
-# Oldest dcdc-parasitics commit this guard trusts. Older extractors return
-# plausible numbers on decks the current one refuses: a floating port NaNs or
-# poisons the solve (pruned since 47c93c2), zero-impedance .equiv bridges
-# teleport current past copper (finite spokes since f0ef514/f2dae41), and a
-# port spanning disconnected copper makes FastHenry exit 0 with ~4e16 nH
-# (named error since 33e2e41; ~/dev/kb/tooling/
+# Oldest dcdc-parasitics commit this guard trusts: the first that stamps its
+# own provenance into meta (085948f). It also contains the fixes after which
+# older extractors are not trusted: floating-port pruning (47c93c2),
+# deterministic terminal bonding (5a891b9), finite-impedance terminal spokes
+# instead of .equiv (f2dae41, f0ef514), and module-mode port connectivity
+# validation (eab60ee). That validation covers the MODULE path only; the
+# discrete path checks that required ports exist, not that P_pwr's terminals
+# are connected (~/dev/kb/tooling/
 # fasthenry-ports-across-disconnected-conductors.md).
-MIN_EXTRACTOR_COMMIT = "33e2e4141cffff8d81e3344d6b3483ed2d13a59a"
+MIN_EXTRACTOR_COMMIT = "085948f8c22fc1fb366d626750b4f889ee6047fd"
+
+# Uncommitted changes under these prefixes do not alter what the extractor
+# computes; the caller's own config is bound separately by its hash.
+EXTRACTOR_NONCODE_PREFIXES = ("test/", "docs/", "examples/")
 
 
 def die(msg, code=EXIT_UNEVALUABLE) -> NoReturn:
@@ -174,47 +183,106 @@ def lookup(data, key):
     return float(val), ""
 
 
-def extractor_revision(root):
-    """Return (HEAD sha, dirty) of the extractor checkout at root.
-
-    Unevaluable unless root is a git checkout whose HEAD contains
-    MIN_EXTRACTOR_COMMIT: an extractor whose version cannot be established
-    is not evidence that it has the fail-closed fixes.
-    """
-    def git(*a):
+def git(root, *a):
+    try:
         return subprocess.run(["git", "-C", root, *a],
                               capture_output=True, text=True)
-    head = git("rev-parse", "HEAD")
-    if head.returncode != 0:
-        die(f"extractor at {root} is not a git checkout "
-            f"({head.stderr.strip()}) - cannot verify it contains "
-            f"{MIN_EXTRACTOR_COMMIT[:12]}")
-    sha = head.stdout.strip()
-    anc = git("merge-base", "--is-ancestor", MIN_EXTRACTOR_COMMIT, sha)
-    if anc.returncode == 1:
-        die(f"extractor at {root} is {sha[:12]}, older than "
-            f"{MIN_EXTRACTOR_COMMIT[:12]} - it lacks the fail-closed "
-            f"connectivity checks; update it")
-    if anc.returncode != 0:
-        # 128: the minimum commit is unknown here (shallow clone, a
-        # different repository) - "not proven older" is not "proven newer"
-        die(f"cannot establish that extractor {sha[:12]} contains "
-            f"{MIN_EXTRACTOR_COMMIT[:12]}: {anc.stderr.strip()}")
-    st = git("status", "--porcelain", "--untracked-files=no")
-    if st.returncode != 0:
-        die(f"git status failed in {root}: {st.stderr.strip()}")
-    return sha, bool(st.stdout.strip())
+    except OSError as e:
+        die(f"cannot run git ({e}) - the extractor's provenance cannot be "
+            f"established without it")
 
 
-def run_extractor(board, outdir, config, extra_args,
-                  allow_unchanged=False):
-    root = os.environ.get(
+def extractor_checkout():
+    """Return (resolved root, HEAD sha) of the extractor checkout.
+
+    $DCDC_PARASITICS must resolve to the TOP of a git checkout that tracks
+    extract_parasitics.py: git discovers repositories upward, so an
+    untracked copy nested inside some checkout would otherwise inherit that
+    checkout's commit (Codex review of 342b5e7, finding 1).
+    """
+    root = os.path.realpath(os.environ.get(
         "DCDC_PARASITICS",
-        os.path.expanduser("~/dev/pv/ee/dcdc-tools/parasitics"))
+        os.path.expanduser("~/dev/pv/ee/dcdc-tools/parasitics")))
+    if not os.path.isfile(os.path.join(root, "extract_parasitics.py")):
+        die(f"extractor not found at {root} (set $DCDC_PARASITICS)")
+    top = git(root, "rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        die(f"extractor at {root} is not a git checkout "
+            f"({top.stderr.strip()}) - its version cannot be established")
+    if os.path.realpath(top.stdout.strip()) != root:
+        die(f"extractor at {root} is inside the checkout "
+            f"{top.stdout.strip()} but is not its root - a copy there "
+            f"would inherit that checkout's commit")
+    if git(root, "ls-files", "--error-unmatch",
+           "extract_parasitics.py").returncode != 0:
+        die(f"extract_parasitics.py is not tracked in {root}")
+    head = git(root, "rev-parse", "HEAD")
+    if head.returncode != 0:
+        die(f"git rev-parse HEAD failed in {root}: {head.stderr.strip()}")
+    return root, head.stdout.strip()
+
+
+def require_min_commit(root, commit):
+    anc = git(root, "merge-base", "--is-ancestor", MIN_EXTRACTOR_COMMIT,
+              commit)
+    if anc.returncode == 1:
+        die(f"extractor commit {commit[:12]} is older than "
+            f"{MIN_EXTRACTOR_COMMIT[:12]}, the minimum this guard trusts; "
+            f"update the extractor and re-extract")
+    if anc.returncode != 0:
+        # 128: a commit unknown here (shallow clone, another repository) -
+        # "not proven older" is not "proven newer"
+        die(f"cannot establish that extractor commit {commit[:12]} "
+            f"contains {MIN_EXTRACTOR_COMMIT[:12]}: {anc.stderr.strip()}")
+
+
+def is_code_change(line):
+    """A `git status --porcelain` line that can change what is computed."""
+    xy, path = line[:2], line[3:]
+    if path.startswith(EXTRACTOR_NONCODE_PREFIXES) or path.endswith(".md"):
+        return False
+    return not (xy == "??" and not path.endswith(".py"))
+
+
+def check_provenance(meta, root, allow_dirty, expect_commit=None):
+    """Validate the extractor stamp in meta; return a printable summary.
+
+    An unstamped extraction is unevaluable, fresh or reused: an ancestry
+    check on the checkout says nothing about the code that produced a
+    stored artifact (Codex review of 342b5e7, findings 2 and 3).
+    """
+    commit = meta.get("extractor_commit")
+    status = meta.get("extractor_status")
+    if not (isinstance(commit, str) and commit
+            and isinstance(status, list)
+            and all(isinstance(s, str) for s in status)):
+        die(f"extraction carries no extractor provenance "
+            f"(meta.extractor_commit={commit!r}) - it predates "
+            f"{MIN_EXTRACTOR_COMMIT[:12]} or its extractor could not run "
+            f"git; re-extract")
+    if expect_commit is not None and commit != expect_commit:
+        die(f"the extraction was stamped {commit[:12]} but the extractor "
+            f"checkout is at {expect_commit[:12]} - the output was not "
+            f"produced by the checked code")
+    require_min_commit(root, commit)
+    code = [s for s in status if is_code_change(s)]
+    if code and not allow_dirty:
+        die(f"extractor {commit[:12]} ran with {len(code)} uncommitted "
+            f"code change(s) ({', '.join(s[3:] for s in code[:5])}"
+            f"{', ...' if len(code) > 5 else ''}) - the result is not bound "
+            f"to a revision. Commit them, or pass --allow-dirty-extractor "
+            f"knowingly")
+    summary = f"{commit[:12]} (>= {MIN_EXTRACTOR_COMMIT[:12]})"
+    if code:
+        summary += (f" with {len(code)} UNCOMMITTED code change(s), "
+                    f"accepted by --allow-dirty-extractor: not bound to a "
+                    f"revision")
+    return summary, bool(code)
+
+
+def run_extractor(root, board, outdir, config, extra_args,
+                  allow_unchanged=False):
     tool = os.path.join(root, "extract_parasitics.py")
-    if not os.path.isfile(tool):
-        die(f"extractor not found at {tool} (set $DCDC_PARASITICS)")
-    rev = extractor_revision(root)
     env = dict(os.environ)
     env.setdefault("FASTHENRY", os.path.expanduser(
         "~/dev/tools/fasthenry/bin/fasthenry"))
@@ -254,7 +322,7 @@ def run_extractor(board, outdir, config, extra_args,
             f"rewritten at all. Delete it and re-extract, or pass "
             f"--allow-unchanged-extraction if the extractor is known "
             f"deterministic")
-    return jpath, rev
+    return jpath
 
 
 def main():
@@ -270,6 +338,10 @@ def main():
                     help="accept an extractor run that left its output "
                          "byte-identical; only for an extractor known to "
                          "be deterministic, and never to silence a stub")
+    ap.add_argument("--allow-dirty-extractor", action="store_true",
+                    help="accept an extraction made with uncommitted "
+                         "extractor code changes; the verdict then states "
+                         "it is not bound to a revision")
     ap.add_argument("--config", help="extractor YAML (sw/gnd/vin/"
                     "probe_ports/... - the reproducible per-project way)")
     ap.add_argument("--max-nh", nargs="+", required=True,
@@ -287,20 +359,32 @@ def main():
         die(f"board {args.board!r} not found")
     board_sha = sha256(args.board)
 
+    # a reused extraction needs the checkout too: its stamped commit is
+    # checked for ancestry against the minimum there
+    root, head = extractor_checkout()
     if args.json:
         jpath = args.json
         if not os.path.isfile(jpath):
             die(f"--json {jpath!r} not found")
-        extractor = "unrecorded (reused --json carries no extractor commit)"
     else:
         if not args.out:
             die("need -o OUTDIR to run the extraction (or --json to gate "
                 "an existing one)")
-        jpath, (rev, dirty) = run_extractor(
-            args.board, args.out, args.config, args.extractor_args,
-            args.allow_unchanged_extraction)
-        extractor = (f"{rev[:12]}{' +uncommitted changes' if dirty else ''}"
-                     f" (>= {MIN_EXTRACTOR_COMMIT[:12]})")
+        # refuse an old or dirty checkout before spending minutes on a
+        # solve; the dirty check is also our own reading, not the stamp's
+        require_min_commit(root, head)
+        st = git(root, "status", "--porcelain", "--untracked-files=all")
+        if st.returncode != 0:
+            die(f"git status failed in {root}: {st.stderr.strip()}")
+        own = [s for s in st.stdout.splitlines() if is_code_change(s)]
+        if own and not args.allow_dirty_extractor:
+            die(f"extractor checkout {root} has {len(own)} uncommitted code "
+                f"change(s) ({', '.join(s[3:] for s in own[:5])}"
+                f"{', ...' if len(own) > 5 else ''}) - commit them, or pass "
+                f"--allow-dirty-extractor knowingly")
+        jpath = run_extractor(root, args.board, args.out, args.config,
+                              args.extractor_args,
+                              args.allow_unchanged_extraction)
 
     try:
         data = json.load(open(jpath))
@@ -311,6 +395,11 @@ def main():
             f"(got {type(data).__name__}) - not a parasitics.json")
 
     meta = data.get("meta") or {}
+    if not isinstance(meta, dict):
+        die(f"{jpath} meta is not an object")
+    extractor, dirty = check_provenance(
+        meta, root, args.allow_dirty_extractor,
+        expect_commit=None if args.json else head)
     if args.json and not args.config:
         # meta.pcb_sha256 binds the BOARD BYTES, never the loop the budget
         # means: an extraction of the same board configured for the wrong
@@ -390,7 +479,8 @@ def main():
         print(f"\nFAIL: {len(failures)}/{len(budgets)} budget(s) violated "
               f"or unevaluable: {', '.join(sorted(failures))}")
         sys.exit(EXIT_FAIL)
-    print(f"\nPASS: all {len(budgets)} budget(s) met")
+    print(f"\nPASS: all {len(budgets)} budget(s) met"
+          f"{' - by an extractor with UNCOMMITTED code changes, not release evidence' if dirty else ''}")
     sys.exit(EXIT_PASS)
 
 
