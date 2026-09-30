@@ -237,11 +237,48 @@ def require_min_commit(root, commit):
 
 
 def is_code_change(line):
-    """A `git status --porcelain` line that can change what is computed."""
-    xy, path = line[:2], line[3:]
-    if path.startswith(EXTRACTOR_NONCODE_PREFIXES) or path.endswith(".md"):
-        return False
-    return not (xy == "??" and not path.endswith(".py"))
+    """A `git status --porcelain` line that can change what is computed.
+
+    A rename names both endpoints ("R  a -> b") and either one can be code:
+    docs/x.py -> lib/x.py adds code, lib/x.py -> docs/x.md removes it. Paths
+    with spaces come quoted, so strip the quotes before testing the suffix
+    (Codex review of d43ba52, finding 2).
+    """
+    xy = line[:2]
+    for path in line[3:].split(" -> "):
+        path = path.strip('"')
+        if path.startswith(EXTRACTOR_NONCODE_PREFIXES) or path.endswith(".md"):
+            continue
+        if xy == "??" and not path.endswith(".py"):
+            continue
+        return True
+    return False
+
+
+def importable_strays(root):
+    """Untracked or IGNORED modules where the extractor imports from.
+
+    `git status` never lists ignored files, and an ignored lib/numpy.py
+    shadows the real one (Codex review of d43ba52, finding 1). Only the two
+    directories on the extractor's sys.path are checked (root and lib/,
+    one level, packages by __init__.py); __pycache__ is Python's own cache
+    and is validated against its source.
+    """
+    pats = [f":(glob){d}{p}" for d in ("", "lib/")
+            for p in ("*.py", "*.pyc", "*.so", "*/__init__.py")]
+    r = git(root, "ls-files", "--others", "--ignored", "--exclude-standard",
+            "--", *pats)
+    if r.returncode != 0:
+        die(f"git ls-files failed in {root}: {r.stderr.strip()}")
+    return [f"!! {p}" for p in r.stdout.splitlines()]
+
+
+def checkout_code_changes(root):
+    st = git(root, "status", "--porcelain", "--untracked-files=all")
+    if st.returncode != 0:
+        die(f"git status failed in {root}: {st.stderr.strip()}")
+    return ([s for s in st.stdout.splitlines() if is_code_change(s)]
+            + importable_strays(root))
 
 
 def check_provenance(meta, root, allow_dirty, expect_commit=None):
@@ -284,6 +321,12 @@ def run_extractor(root, board, outdir, config, extra_args,
                   allow_unchanged=False):
     tool = os.path.join(root, "extract_parasitics.py")
     env = dict(os.environ)
+    # a caller's PYTHONPATH puts modules from outside the checkout ahead of
+    # the site ones - a clean checkout would then not be the code that ran
+    # (Codex review of d43ba52, finding 1). The extractor puts lib/ on its
+    # own path and needs nothing from the environment.
+    for var in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
+        env.pop(var, None)
     env.setdefault("FASTHENRY", os.path.expanduser(
         "~/dev/tools/fasthenry/bin/fasthenry"))
     if not os.path.isfile(env["FASTHENRY"]):
@@ -373,10 +416,7 @@ def main():
         # refuse an old or dirty checkout before spending minutes on a
         # solve; the dirty check is also our own reading, not the stamp's
         require_min_commit(root, head)
-        st = git(root, "status", "--porcelain", "--untracked-files=all")
-        if st.returncode != 0:
-            die(f"git status failed in {root}: {st.stderr.strip()}")
-        own = [s for s in st.stdout.splitlines() if is_code_change(s)]
+        own = checkout_code_changes(root)
         if own and not args.allow_dirty_extractor:
             die(f"extractor checkout {root} has {len(own)} uncommitted code "
                 f"change(s) ({', '.join(s[3:] for s in own[:5])}"
@@ -385,6 +425,18 @@ def main():
         jpath = run_extractor(root, args.board, args.out, args.config,
                               args.extractor_args,
                               args.allow_unchanged_extraction)
+        # a solve takes minutes and other sessions edit this checkout; the
+        # extractor samples its stamp once, so re-read HEAD and the tree
+        # after the run (Codex review of d43ba52, finding 4)
+        _, head_after = extractor_checkout()
+        if head_after != head:
+            die(f"extractor HEAD moved during the run ({head[:12]} -> "
+                f"{head_after[:12]}) - the code that ran is not identified")
+        after = checkout_code_changes(root)
+        if after != own:
+            die(f"extractor checkout changed during the run "
+                f"({len(own)} -> {len(after)} code change(s)) - the code "
+                f"that ran is not identified; re-extract")
 
     try:
         data = json.load(open(jpath))

@@ -207,12 +207,21 @@ has produced a plausible wrong number. Record each choice in the committed YAML:
 6. **Altium sources:** the programmatic importer flips the board and silently drops copper pours;
    treat its result as provisional (`parasitics/docs/FINDINGS.md` §5, §8).
 
-FastHenry gives L and R only; Coss resonance stays in SPICE. The guard binds every verdict to the
-code that produced it. The extractor stamps its commit and `git status` into `meta`. Whether the
-extraction is fresh or reused, the guard refuses an unstamped extraction, a commit older than its
-pinned minimum, and uncommitted extractor code (`--allow-dirty-extractor` accepts that last case
-knowingly, and the verdict then says it is not release evidence). The tool-independent FastHenry
-pitfalls are in `~/dev/kb/tooling/fasthenry-deck-pitfalls.md`.
+FastHenry gives L and R only; Coss resonance stays in SPICE. The guard catches a stale or modified
+extractor **by accident, not by intent**. The extractor stamps its commit and `git status` into
+`meta`. Whether the extraction is fresh or reused, the guard refuses an unstamped extraction, a
+commit older than its pinned minimum, and uncommitted extractor code (`--allow-dirty-extractor`
+accepts that last case knowingly, and the verdict then says it is not release evidence).
+
+On a fresh run the guard also:
+- strips `PYTHONPATH` from the extractor's environment;
+- refuses untracked or ignored modules where the extractor imports from;
+- refuses if the checkout changed during the solve.
+
+A reused `parasitics.json` is trusted as the extractor wrote it: its stamp is self-reported, so a
+hand-edited or fabricated file with a plausible stamp still passes. Treat reused artifacts as caller
+evidence, and re-extract for a release. The tool-independent FastHenry pitfalls are in
+`~/dev/kb/tooling/fasthenry-deck-pitfalls.md`.
 
 **Prove the solver runs before reporting the gate blocked on tooling.** `fasthenry` is not on
 `PATH`. `dcdc-tools/parasitics/lib/solve_reduce.py` resolves it from `$FASTHENRY`, defaulting to
