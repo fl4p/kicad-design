@@ -53,6 +53,12 @@ Usage:
 Extractor location: $DCDC_PARASITICS (default
 ~/dev/pv/ee/dcdc-tools/parasitics). FastHenry: $FASTHENRY (default
 ~/dev/tools/fasthenry/bin/fasthenry).
+
+Extractor version: a fresh extraction requires the extractor to be a git
+checkout containing MIN_EXTRACTOR_COMMIT (the fail-closed connectivity
+fixes); an older or unidentifiable extractor is unevaluable. The commit and
+a dirty-tree flag are printed with the verdict. A reused --json extraction
+carries no extractor commit, so its version is reported as unrecorded.
 """
 
 import argparse
@@ -73,6 +79,15 @@ SCALAR_KEYS = {
     "L_loop_ring", "L_gate_hs", "L_gate_ls", "csi_hs", "csi_ls",
 }
 PROBE_PREFIXES = {"probe:": "L", "probe_ring:": "L_ring"}
+
+# Oldest dcdc-parasitics commit this guard trusts. Older extractors return
+# plausible numbers on decks the current one refuses: a floating port NaNs or
+# poisons the solve (pruned since 47c93c2), zero-impedance .equiv bridges
+# teleport current past copper (finite spokes since f0ef514/f2dae41), and a
+# port spanning disconnected copper makes FastHenry exit 0 with ~4e16 nH
+# (named error since 33e2e41; ~/dev/kb/tooling/
+# fasthenry-ports-across-disconnected-conductors.md).
+MIN_EXTRACTOR_COMMIT = "33e2e4141cffff8d81e3344d6b3483ed2d13a59a"
 
 
 def die(msg, code=EXIT_UNEVALUABLE) -> NoReturn:
@@ -159,6 +174,38 @@ def lookup(data, key):
     return float(val), ""
 
 
+def extractor_revision(root):
+    """Return (HEAD sha, dirty) of the extractor checkout at root.
+
+    Unevaluable unless root is a git checkout whose HEAD contains
+    MIN_EXTRACTOR_COMMIT: an extractor whose version cannot be established
+    is not evidence that it has the fail-closed fixes.
+    """
+    def git(*a):
+        return subprocess.run(["git", "-C", root, *a],
+                              capture_output=True, text=True)
+    head = git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        die(f"extractor at {root} is not a git checkout "
+            f"({head.stderr.strip()}) - cannot verify it contains "
+            f"{MIN_EXTRACTOR_COMMIT[:12]}")
+    sha = head.stdout.strip()
+    anc = git("merge-base", "--is-ancestor", MIN_EXTRACTOR_COMMIT, sha)
+    if anc.returncode == 1:
+        die(f"extractor at {root} is {sha[:12]}, older than "
+            f"{MIN_EXTRACTOR_COMMIT[:12]} - it lacks the fail-closed "
+            f"connectivity checks; update it")
+    if anc.returncode != 0:
+        # 128: the minimum commit is unknown here (shallow clone, a
+        # different repository) - "not proven older" is not "proven newer"
+        die(f"cannot establish that extractor {sha[:12]} contains "
+            f"{MIN_EXTRACTOR_COMMIT[:12]}: {anc.stderr.strip()}")
+    st = git("status", "--porcelain", "--untracked-files=no")
+    if st.returncode != 0:
+        die(f"git status failed in {root}: {st.stderr.strip()}")
+    return sha, bool(st.stdout.strip())
+
+
 def run_extractor(board, outdir, config, extra_args,
                   allow_unchanged=False):
     root = os.environ.get(
@@ -167,6 +214,7 @@ def run_extractor(board, outdir, config, extra_args,
     tool = os.path.join(root, "extract_parasitics.py")
     if not os.path.isfile(tool):
         die(f"extractor not found at {tool} (set $DCDC_PARASITICS)")
+    rev = extractor_revision(root)
     env = dict(os.environ)
     env.setdefault("FASTHENRY", os.path.expanduser(
         "~/dev/tools/fasthenry/bin/fasthenry"))
@@ -206,7 +254,7 @@ def run_extractor(board, outdir, config, extra_args,
             f"rewritten at all. Delete it and re-extract, or pass "
             f"--allow-unchanged-extraction if the extractor is known "
             f"deterministic")
-    return jpath
+    return jpath, rev
 
 
 def main():
@@ -243,13 +291,16 @@ def main():
         jpath = args.json
         if not os.path.isfile(jpath):
             die(f"--json {jpath!r} not found")
+        extractor = "unrecorded (reused --json carries no extractor commit)"
     else:
         if not args.out:
             die("need -o OUTDIR to run the extraction (or --json to gate "
                 "an existing one)")
-        jpath = run_extractor(args.board, args.out, args.config,
-                              args.extractor_args,
-                              args.allow_unchanged_extraction)
+        jpath, (rev, dirty) = run_extractor(
+            args.board, args.out, args.config, args.extractor_args,
+            args.allow_unchanged_extraction)
+        extractor = (f"{rev[:12]}{' +uncommitted changes' if dirty else ''}"
+                     f" (>= {MIN_EXTRACTOR_COMMIT[:12]})")
 
     try:
         data = json.load(open(jpath))
@@ -313,6 +364,7 @@ def main():
     print(f"\nloop-inductance gate on {args.board}")
     print(f"  extraction: {jpath} (freq {freq} Hz, board sha "
           f"{board_sha[:16]}..)")
+    print(f"  extractor: {extractor}")
     warns = [w for k in ("reduce_warn", "reduce_warn_base")
              for w in (data.get(k) or [])]
     for w in warns:

@@ -168,9 +168,11 @@ explicit nH budgets (`--max-nh L_loop=<nH> csi_hs=<nH> probe:<name>=<nH> ...`; s
 mount loops are `probe_ports` REF.PAD pairs). Budgets are derived values the caller must record —
 the guard refuses to run without them, fails any budget whose quantity the extraction did not
 produce, and accepts a reused extraction only when its recorded board hash matches the board
-being gated. A coarse mesh is adequate for L (measured drift pitch 3.0→2.0 mm: 0.1 % on a 28.7 nH
-commutation loop); resistance from this tool is mesh-sensitive — the DC-R gate above stays with
-`copper_guards.py`. **Declining to derive a budget does not skip this gate.** On any board with a
+being gated. L converged at a coarse mesh on the calibration board (pitch 3.0→2.0 mm: 0.1 % on a
+28.7 nH commutation loop), but that is one board, not a pitch rule. On others, 2.0 mm left a cap
+unbonded (Fugu2 C27) and gave a near-degenerate matrix (`SVD did not converge`, ReboostV2). The
+extractor's default is 1.0 mm. Resistance from this tool is mesh-sensitive, so the DC-R gate above
+stays with `copper_guards.py`. **Declining to derive a budget does not skip this gate.** On any board with a
 hard-switched half-bridge or other declared high-di/dt loop, deriving the loop-L budgets
 (L ≤ V_margin/(di/dt) with the device dv/dt, overshoot margin and ring analysis per
 [`POWER.md`](POWER.md)) is itself part of the completion record. An inapplicability record is
@@ -182,9 +184,34 @@ per loop why no numeric budget applies, and names the analysis or decision it re
 budgeted loop are demonstrably the same loop, and gate `*_ring` quantities when the budget comes
 from a ring-frequency analysis.
 
+**Extraction choices the caller owns.** The extractor refuses floating ports, duplicate ports and
+disconnected loops by itself; it cannot know the following, and each has produced a plausible wrong
+number. Record each choice in the committed YAML:
+
+1. **Package inductance has exactly one owner.** `--lead-mm` is an artificial die-plane riser,
+   default 3 mm. On a leadless GaN LGA it added ~4.6 nH of fictitious copper (2.64 → 7.25 nH) and
+   dominated R. Use `lead_mm: 0` with a lead-inclusive device model, and `--parallel-fets
+   per-device` when switches are paralleled. See `parasitics/docs/fet-package-boundary.md`.
+2. **Name the switches** (`hs_ref`/`ls_ref`, and gates if needed). Auto-discovery took a gate-drive
+   BJT as a second high-side device and reported 2.61 nH with no real low-side port.
+3. **Pin the HF input caps** (`cin_loop_refs`). The nearest-centroid pick once chose a 1 µF cap
+   13 mm away on an isolated plane pocket.
+4. **Kelvin source connections are not detected.** CSI defaults to worst case (non-Kelvin); set
+   `hs_kelvin`/`ls_kelvin` when the layout Kelvin-senses.
+5. **A dropped-port or point-fallback warning is a mesh defect, not a result.** A cap dropped from
+   the manifest never bonded to the mesh; refine the pitch until every intended cap is ported.
+   "FastHenry exited 0 and wrote `Zc.mat`" does not prove the deck had a loop.
+6. **Altium sources:** the programmatic importer flips the board and silently drops copper pours;
+   treat its result as provisional (`parasitics/docs/FINDINGS.md` §5, §8).
+
+FastHenry gives L and R only; Coss resonance stays in SPICE. The guard pins the extractor to a
+minimum commit that contains these fail-closed fixes and prints the commit it ran. The
+tool-independent FastHenry pitfalls are in `~/dev/kb/tooling/fasthenry-deck-pitfalls.md`.
+
 **Prove the solver runs before reporting the gate blocked on tooling.** `fasthenry` is not on
 `PATH`. `dcdc-tools/parasitics/lib/solve_reduce.py` resolves it from `$FASTHENRY`, defaulting to
-`/Users/fab/dev/vendor/FastHenry2/bin/fasthenry`, so `which fasthenry` returns nothing on a machine
+`/Users/fab/dev/vendor/FastHenry2/bin/fasthenry` (the guard instead defaults `$FASTHENRY` to
+`~/dev/tools/fasthenry/bin/fasthenry`, a byte-identical copy), so `which fasthenry` returns nothing on a machine
 where the solver is installed and working. Check the resolved path and execute it — its startup
 banner or a completed solve is the evidence, never a `PATH` lookup. Measured 2026-09-16: that
 substitution was asserted three times in one session, twice inside answers to direct engineering
