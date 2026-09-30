@@ -41,7 +41,7 @@ Read only the companions required by the task:
 |---|---|
 | [`SCHEMATIC.md`](SCHEMATIC.md) | the task captures, generates, edits, reviews, or declares completion of a schematic, or begins PCB work from one |
 | [`SETUP.md`](SETUP.md) | before any task that will read a datasheet, schematic capture included; when the task selects or substitutes a component; designs or reviews circuitry, placement, or layout around a critical component; validates procurement; or requires reference-design, eval-board, lifecycle, inventory, stock, or distributor evidence |
-| [`CHARTS.md`](CHARTS.md) | any value is read from a datasheet chart (curve), not a table: dsdig first, what its status and refusals mean, and the hand-then-multi-model fallback (GPT Astra, Fable, Qwen, DeepSeek, Gemini) with what a model reading may and may not be used for |
+| `chart-digitization` skill | any value is read from a datasheet chart (curve), not a table: dsdig first, what its status and refusals mean, and the hand-then-multi-model fallback with what a model reading may and may not be used for. Load the skill; it lives in the dsdig repo (`/Users/fab/dev/pv/ee/datasheet-chart-digitizer/skills/chart-digitization/`) and versions with the tool |
 | [`PCB.md`](PCB.md) | the task touches layout, zones, stackup, creepage, surface leakage, or routing ownership and completion |
 | [`ROUTING.md`](ROUTING.md) | any routing pass is planned, by hand or by machine — layer plan, escape stage, net priority, router cost weights, and the routing-shape audit; read it before [`AUTOROUTING.md`](AUTOROUTING.md), and whenever a routed board is reviewed or a route looks arbitrary |
 | [`AUTOROUTING.md`](AUTOROUTING.md) | any routing pass is planned — the default pre-pass scout lives here (with [`PCB.md`](PCB.md)); promotion of external geometry (Freerouting/KRT candidates, route manifests) additionally needs the project opt-in |
@@ -354,8 +354,8 @@ Then:
   passive tolerance, temperature, and ageing where they establish compliance or stress.
 - Distinguish recommended operation, characterized operation, and absolute maximum.
 - Validate models against datasheet tables and charts at every load-bearing operating point.
-  Read chart values per [`CHARTS.md`](CHARTS.md): dsdig first, never a model's visual
-  reading as a number.
+  Read chart values per the `chart-digitization` skill: dsdig first, never a model's
+  visual reading as a number.
 - Verify exact orderable MPN, package, performance grade, manufacturer lifecycle status, and stock
   as separate questions. Distributor availability does not override manufacturer lifecycle state.
   A populated MPN field is a completeness fact, not a correctness one. Resolve the exact string at a
