@@ -215,9 +215,10 @@ accepts that last case knowingly, and the verdict then says it is not release ev
 
 On a fresh run the guard also:
 - strips `PYTHONPATH` from the extractor's environment and disables user site-packages;
-- refuses untracked modules in the extractor's root and `lib/`, ignored or not (`.py`, `.pyc`,
-  `.so`, packages). The extractor also records these in its stamp, so a re-gate of an artifact made
-  with `--allow-dirty-extractor` is refused without it;
+- refuses untracked files, ignored or not, that can change what runs: root-level modules and
+  packages (any `__init__.*`, including ABI-tagged extension initializers), and anything under
+  `lib/` at any depth (`__pycache__` excepted). The extractor also records these in its stamp, so a
+  re-gate of an artifact made with `--allow-dirty-extractor` is refused without it;
 - refuses if the checkout changed during the solve.
 
 The interpreters' own site-packages, KiCad's Python included, are the installation and are trusted.

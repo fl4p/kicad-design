@@ -255,12 +255,16 @@ def is_code_change(line):
     return False
 
 
-# What can be imported from a directory on the extractor's sys.path (root
-# and lib/): modules, extension modules, and regular packages. Keep in step
-# with _IMPORTABLE_GLOBS in dcdc-parasitics extract_parasitics.py, which
-# stamps the same set.
-IMPORTABLE_GLOBS = ("*.py", "*.pyc", "*.so", "*/__init__.py",
-                    "*/__init__.pyc", "*/__init__.so")
+# What can change what the extractor runs: root-level modules and packages
+# (`*/__init__.*` covers ABI-tagged extension initializers such as
+# __init__.cpython-39-darwin.so), and ANYTHING under lib/, recursively. A shallow
+# `lib/*/__init__.py` list missed exactly that tagged initializer, and an untracked
+# lib/fet_discovery/__init__.cpython-39-darwin.so shadowed the tracked helper with
+# a PASS (Codex review of e180a53, finding 1). lib/ holds only code, so matching
+# everything there costs nothing. __pycache__ is filtered out after matching.
+# Keep in step with _IMPORTABLE_PATHSPECS in dcdc-parasitics extract_parasitics.py.
+IMPORTABLE_PATHSPECS = (":(glob)*.py", ":(glob)*.pyc", ":(glob)*.so",
+                        ":(glob)*/__init__.*", ":(glob)lib/**")
 
 
 def importable_strays(root):
@@ -273,11 +277,10 @@ def importable_strays(root):
     without exclude options lists untracked files whether ignored or not.
     __pycache__ is Python's own cache, validated against its source.
     """
-    pats = [f":(glob){d}{p}" for d in ("", "lib/") for p in IMPORTABLE_GLOBS]
-    r = git(root, "ls-files", "--others", "--", *pats)
+    r = git(root, "ls-files", "--others", "--", *IMPORTABLE_PATHSPECS)
     if r.returncode != 0:
         die(f"git ls-files failed in {root}: {r.stderr.strip()}")
-    return [f"!! {p}" for p in r.stdout.splitlines()]
+    return [f"!! {p}" for p in r.stdout.splitlines() if "__pycache__/" not in p]
 
 
 def checkout_code_changes(root):
