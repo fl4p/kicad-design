@@ -255,19 +255,26 @@ def is_code_change(line):
     return False
 
 
+# What can be imported from a directory on the extractor's sys.path (root
+# and lib/): modules, extension modules, and regular packages. Keep in step
+# with _IMPORTABLE_GLOBS in dcdc-parasitics extract_parasitics.py, which
+# stamps the same set.
+IMPORTABLE_GLOBS = ("*.py", "*.pyc", "*.so", "*/__init__.py",
+                    "*/__init__.pyc", "*/__init__.so")
+
+
 def importable_strays(root):
-    """Untracked or IGNORED modules where the extractor imports from.
+    """Untracked modules where the extractor imports from, ignored or not.
 
     `git status` never lists ignored files, and an ignored lib/numpy.py
-    shadows the real one (Codex review of d43ba52, finding 1). Only the two
-    directories on the extractor's sys.path are checked (root and lib/,
-    one level, packages by __init__.py); __pycache__ is Python's own cache
-    and is validated against its source.
+    shadows the real one (Codex review of d43ba52, finding 1); nor does the
+    porcelain filter keep an untracked .so or a package that has only an
+    __init__.pyc (Codex review of 5466ec5, finding 1). `ls-files --others`
+    without exclude options lists untracked files whether ignored or not.
+    __pycache__ is Python's own cache, validated against its source.
     """
-    pats = [f":(glob){d}{p}" for d in ("", "lib/")
-            for p in ("*.py", "*.pyc", "*.so", "*/__init__.py")]
-    r = git(root, "ls-files", "--others", "--ignored", "--exclude-standard",
-            "--", *pats)
+    pats = [f":(glob){d}{p}" for d in ("", "lib/") for p in IMPORTABLE_GLOBS]
+    r = git(root, "ls-files", "--others", "--", *pats)
     if r.returncode != 0:
         die(f"git ls-files failed in {root}: {r.stderr.strip()}")
     return [f"!! {p}" for p in r.stdout.splitlines()]
@@ -324,9 +331,15 @@ def run_extractor(root, board, outdir, config, extra_args,
     # a caller's PYTHONPATH puts modules from outside the checkout ahead of
     # the site ones - a clean checkout would then not be the code that ran
     # (Codex review of d43ba52, finding 1). The extractor puts lib/ on its
-    # own path and needs nothing from the environment.
-    for var in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
+    # own path and needs nothing from the environment. User site-packages
+    # (and their .pth / usercustomize hooks) are likewise outside the
+    # checkout; the module example extracts identically without them
+    # (3.67 nH, Codex review of 5466ec5, finding 2). The interpreter's own
+    # site-packages are the installation, and are not covered.
+    for var in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",
+                "PYTHONUSERBASE"):
         env.pop(var, None)
+    env["PYTHONNOUSERSITE"] = "1"
     env.setdefault("FASTHENRY", os.path.expanduser(
         "~/dev/tools/fasthenry/bin/fasthenry"))
     if not os.path.isfile(env["FASTHENRY"]):
@@ -405,6 +418,7 @@ def main():
     # a reused extraction needs the checkout too: its stamped commit is
     # checked for ancestry against the minimum there
     root, head = extractor_checkout()
+    own = []
     if args.json:
         jpath = args.json
         if not os.path.isfile(jpath):
@@ -452,6 +466,14 @@ def main():
     extractor, dirty = check_provenance(
         meta, root, args.allow_dirty_extractor,
         expect_commit=None if args.json else head)
+    if not args.json and own and not dirty:
+        # the guard saw code changes the stamp did not record; an override
+        # must not turn that into an unqualified PASS (Codex review of
+        # 5466ec5, finding 3)
+        dirty = True
+        extractor += (f" with {len(own)} UNCOMMITTED code change(s) seen by "
+                      f"the guard but missing from the stamp, accepted by "
+                      f"--allow-dirty-extractor: not bound to a revision")
     if args.json and not args.config:
         # meta.pcb_sha256 binds the BOARD BYTES, never the loop the budget
         # means: an extraction of the same board configured for the wrong

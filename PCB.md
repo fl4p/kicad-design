@@ -214,9 +214,13 @@ commit older than its pinned minimum, and uncommitted extractor code (`--allow-d
 accepts that last case knowingly, and the verdict then says it is not release evidence).
 
 On a fresh run the guard also:
-- strips `PYTHONPATH` from the extractor's environment;
-- refuses untracked or ignored modules where the extractor imports from;
+- strips `PYTHONPATH` from the extractor's environment and disables user site-packages;
+- refuses untracked modules in the extractor's root and `lib/`, ignored or not (`.py`, `.pyc`,
+  `.so`, packages). The extractor also records these in its stamp, so a re-gate of an artifact made
+  with `--allow-dirty-extractor` is refused without it;
 - refuses if the checkout changed during the solve.
+
+The interpreters' own site-packages, KiCad's Python included, are the installation and are trusted.
 
 A reused `parasitics.json` is trusted as the extractor wrote it: its stamp is self-reported, so a
 hand-edited or fabricated file with a plausible stamp still passes. Treat reused artifacts as caller
