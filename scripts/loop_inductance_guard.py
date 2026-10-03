@@ -58,7 +58,8 @@ Extractor provenance: the extractor stamps meta.extractor_commit and
 meta.extractor_status (git status lines) into every parasitics.json. Fresh
 or reused, the verdict requires that stamp, a commit containing
 MIN_EXTRACTOR_COMMIT, and no uncommitted change to extractor code (tests,
-docs, examples and untracked non-.py files excepted). $DCDC_PARASITICS must
+docs, examples and *.md excepted; untracked files count only if
+importable_pathspecs() selects them). $DCDC_PARASITICS must
 be the root of that git checkout, and a fresh run's stamp must equal the
 checkout's HEAD. Anything else is unevaluable; --allow-dirty-extractor
 accepts uncommitted code knowingly and says so in the verdict.
@@ -255,36 +256,55 @@ def is_code_change(line):
     return False
 
 
-# What can change what the extractor runs: root-level modules and packages
-# (`*/__init__.*` covers ABI-tagged extension initializers such as
-# __init__.cpython-39-darwin.so), and ANYTHING under lib/, recursively. A shallow
-# `lib/*/__init__.py` list missed exactly that tagged initializer, and an untracked
-# lib/fet_discovery/__init__.cpython-39-darwin.so shadowed the tracked helper with
-# a PASS (Codex review of e180a53, finding 1). lib/ holds only code, so matching
-# everything there costs nothing. __pycache__ is filtered out after matching.
-# Keep in step with _IMPORTABLE_PATHSPECS in dcdc-parasitics extract_parasitics.py.
-IMPORTABLE_PATHSPECS = (":(glob)*.py", ":(glob)*.pyc", ":(glob)*.so",
-                        ":(glob)*/__init__.*", ":(glob)lib/**")
+# What can change what the extractor runs, by IMPORTABLE extension only (an
+# editor's lib/.x.py.swp or lib/x.py~ cannot be imported, yet refused a run with
+# exit 3 when lib/** matched every file -- Codex review of 77f69ce, finding 3):
+#   - root-level modules and new root packages (`*/__init__.*` covers ABI-tagged
+#     initializers such as __init__.cpython-39-darwin.so, which shadowed the
+#     tracked lib/fet_discovery with a PASS -- review of e180a53, finding 1);
+#   - importable files at any depth under lib/ and every other top-level dir that
+#     already holds tracked Python (an untracked experiments/x.pyc imported
+#     unseen -- review of 77f69ce, finding 1), except the never-imported
+#     EXTRACTOR_NONCODE_PREFIXES dirs.
+# A __pycache__ path COMPONENT is Python's own cache, validated against its source;
+# a substring match let lib/review__pycache__/m.pyc through (same review, finding 2).
+# Keep in step with _importable_pathspecs in dcdc-parasitics extract_parasitics.py.
+IMPORTABLE_EXTS = (".py", ".pyc", ".so", ".pyd")
+
+
+def importable_pathspecs(root):
+    r = git(root, "ls-files", "--", *(f":(glob)*/**/*{e}" for e in IMPORTABLE_EXTS))
+    if r.returncode != 0:
+        die(f"git ls-files failed in {root}: {r.stderr.strip()}")
+    skip = {p.rstrip("/") for p in EXTRACTOR_NONCODE_PREFIXES}
+    dirs = sorted(({p.split("/", 1)[0] for p in r.stdout.splitlines()} | {"lib"}) - skip)
+    return ([f":(glob)*{e}" for e in IMPORTABLE_EXTS] + [":(glob)*/__init__.*"]
+            + [f":(glob){d}/**/*{e}" for d in dirs for e in IMPORTABLE_EXTS])
 
 
 def importable_strays(root):
-    """Untracked modules where the extractor imports from, ignored or not.
+    """Untracked importable files where the extractor imports from, ignored or not.
 
     `git status` never lists ignored files, and an ignored lib/numpy.py
     shadows the real one (Codex review of d43ba52, finding 1); nor does the
     porcelain filter keep an untracked .so or a package that has only an
     __init__.pyc (Codex review of 5466ec5, finding 1). `ls-files --others`
     without exclude options lists untracked files whether ignored or not.
-    __pycache__ is Python's own cache, validated against its source.
     """
-    r = git(root, "ls-files", "--others", "--", *IMPORTABLE_PATHSPECS)
+    r = git(root, "ls-files", "--others", "--", *importable_pathspecs(root))
     if r.returncode != 0:
         die(f"git ls-files failed in {root}: {r.stderr.strip()}")
-    return [f"!! {p}" for p in r.stdout.splitlines() if "__pycache__/" not in p]
+    return [f"!! {p}" for p in r.stdout.splitlines()
+            if "__pycache__" not in p.split("/")]
 
 
 def checkout_code_changes(root):
-    st = git(root, "status", "--porcelain", "--untracked-files=all")
+    # Tracked changes from git status; untracked files ONLY from importable_strays,
+    # which is the narrower and the stronger list (it sees ignored files). Porcelain
+    # "?? *.py" also refused a .py anywhere, e.g. an un-ignored .venv's
+    # site-packages (review of 77f69ce). is_code_change still counts "??" .py for
+    # stamps written by extractors older than dcdc-parasitics 489012a.
+    st = git(root, "status", "--porcelain", "--untracked-files=no")
     if st.returncode != 0:
         die(f"git status failed in {root}: {st.stderr.strip()}")
     return ([s for s in st.stdout.splitlines() if is_code_change(s)]

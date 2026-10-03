@@ -212,13 +212,20 @@ extractor **by accident, not by intent**. The extractor stamps its commit and `g
 `meta`. Whether the extraction is fresh or reused, the guard refuses an unstamped extraction, a
 commit older than its pinned minimum, and uncommitted extractor code (`--allow-dirty-extractor`
 accepts that last case knowingly, and the verdict then says it is not release evidence).
+"Code" excludes `test/`, `docs/`, `examples/` and `*.md`; changes there are stamped but never
+refuse.
 
 On a fresh run the guard also:
 - strips `PYTHONPATH` from the extractor's environment and disables user site-packages;
-- refuses untracked files, ignored or not, that can change what runs: root-level modules and
-  packages (any `__init__.*`, including ABI-tagged extension initializers), and anything under
-  `lib/` at any depth (`__pycache__` excepted). The extractor also records these in its stamp, so a
-  re-gate of an artifact made with `--allow-dirty-extractor` is refused without it;
+- refuses untracked files, ignored or not, with an importable extension (`.py`, `.pyc`, `.so`,
+  `.pyd`) where the extractor can import them: the checkout root, any new root package
+  (`*/__init__.*`, ABI-tagged extension initializers included), and any depth under `lib/` and
+  every other top-level directory that already holds tracked Python (not `test/`, `docs/`,
+  `examples/`). Files inside a `__pycache__` directory are skipped as Python's own cache; editor
+  backups, swap files and other non-importable files are ignored. The extractor records the same
+  list in its stamp, so a re-gate of an artifact made with `--allow-dirty-extractor` is refused
+  without it. Other import routes (`.pth` files, zip archives, `.dylib`s) do not load from the
+  checkout on their own and are not scanned;
 - refuses if the checkout changed during the solve.
 
 The interpreters' own site-packages, KiCad's Python included, are the installation and are trusted.
