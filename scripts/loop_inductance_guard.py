@@ -57,9 +57,10 @@ Extractor location: $DCDC_PARASITICS (default
 Extractor provenance: the extractor stamps meta.extractor_commit and
 meta.extractor_status (git status lines) into every parasitics.json. Fresh
 or reused, the verdict requires that stamp, a commit containing
-MIN_EXTRACTOR_COMMIT, and no uncommitted change to extractor code (tests,
-docs, examples and *.md excepted; untracked files count only if
-importable_pathspecs() selects them). $DCDC_PARASITICS must
+MIN_EXTRACTOR_COMMIT, and no uncommitted change to extractor code: tracked
+changes outside tests, docs, examples and *.md, plus untracked files that
+importable_strays() lists -- or, in a stamp from an extractor older than
+dcdc-parasitics 844dad2, its "??" .py lines. $DCDC_PARASITICS must
 be the root of that git checkout, and a fresh run's stamp must equal the
 checkout's HEAD. Anything else is unevaluable; --allow-dirty-extractor
 accepts uncommitted code knowingly and says so in the verdict.
@@ -258,32 +259,35 @@ def is_code_change(line):
 
 # What can change what the extractor runs, by IMPORTABLE extension only (an
 # editor's lib/.x.py.swp or lib/x.py~ cannot be imported, yet refused a run with
-# exit 3 when lib/** matched every file -- Codex review of 77f69ce, finding 3):
-#   - root-level modules and new root packages (`*/__init__.*` covers ABI-tagged
-#     initializers such as __init__.cpython-39-darwin.so, which shadowed the
-#     tracked lib/fet_discovery with a PASS -- review of e180a53, finding 1);
-#   - importable files at any depth under lib/ and every other top-level dir that
-#     already holds tracked Python (an untracked experiments/x.pyc imported
-#     unseen -- review of 77f69ce, finding 1), except the never-imported
-#     EXTRACTOR_NONCODE_PREFIXES dirs.
-# A __pycache__ path COMPONENT is Python's own cache, validated against its source;
-# a substring match let lib/review__pycache__/m.pyc through (same review, finding 2).
-# Keep in step with _importable_pathspecs in dcdc-parasitics extract_parasitics.py.
+# exit 3 when lib/** matched every file -- Codex review of 77f69ce, finding 3).
+# Two lists:
+#   1. ignored or not: root-level modules, new root package initializers
+#      (`*/__init__.py[c]`, `*/__init__*.so|.pyd`; an untracked ABI-tagged
+#      __init__.cpython-39-darwin.so shadowed the tracked lib/fet_discovery with a
+#      PASS -- review of e180a53, finding 1), and importable files at any depth
+#      under lib/ and every other top-level dir that already holds tracked Python
+#      (an untracked experiments/x.pyc imported unseen -- review of 77f69ce);
+#   2. NOT ignored, at any depth anywhere: an untracked root directory joins a
+#      namespace package of the same name -- mpl_toolkits/mplot3d.py at the root
+#      ran inside matplotlib's import with a PASS (review of d831a97, finding 1).
+# Dropped from both: EXTRACTOR_NONCODE_PREFIXES dirs (never imported), dot-dirs (no
+# importable name: .venv, .git), and anything inside a __pycache__ directory. A
+# plain `*/__init__.*` also matched lib/__init__.py~ and test/__init__.py and
+# refused (same review, finding 2). An IGNORED root directory named like a
+# namespace package is not seen.
+# Keep in step with _importable_strays in dcdc-parasitics extract_parasitics.py.
 IMPORTABLE_EXTS = (".py", ".pyc", ".so", ".pyd")
 
 
-def importable_pathspecs(root):
-    r = git(root, "ls-files", "--", *(f":(glob)*/**/*{e}" for e in IMPORTABLE_EXTS))
+def _git_lines(root, *args):
+    r = git(root, *args)
     if r.returncode != 0:
-        die(f"git ls-files failed in {root}: {r.stderr.strip()}")
-    skip = {p.rstrip("/") for p in EXTRACTOR_NONCODE_PREFIXES}
-    dirs = sorted(({p.split("/", 1)[0] for p in r.stdout.splitlines()} | {"lib"}) - skip)
-    return ([f":(glob)*{e}" for e in IMPORTABLE_EXTS] + [":(glob)*/__init__.*"]
-            + [f":(glob){d}/**/*{e}" for d in dirs for e in IMPORTABLE_EXTS])
+        die(f"git {args[0]} failed in {root}: {r.stderr.strip()}")
+    return r.stdout.splitlines()
 
 
 def importable_strays(root):
-    """Untracked importable files where the extractor imports from, ignored or not.
+    """Untracked importable files the extractor could import (see above).
 
     `git status` never lists ignored files, and an ignored lib/numpy.py
     shadows the real one (Codex review of d43ba52, finding 1); nor does the
@@ -291,19 +295,34 @@ def importable_strays(root):
     __init__.pyc (Codex review of 5466ec5, finding 1). `ls-files --others`
     without exclude options lists untracked files whether ignored or not.
     """
-    r = git(root, "ls-files", "--others", "--", *importable_pathspecs(root))
-    if r.returncode != 0:
-        die(f"git ls-files failed in {root}: {r.stderr.strip()}")
-    return [f"!! {p}" for p in r.stdout.splitlines()
-            if "__pycache__" not in p.split("/")]
+    exts = IMPORTABLE_EXTS
+    skip = {p.rstrip("/") for p in EXTRACTOR_NONCODE_PREFIXES}
+    tracked = _git_lines(root, "ls-files", "--", *(f":(glob)*/**/*{e}" for e in exts))
+    dirs = sorted(({p.split("/", 1)[0] for p in tracked} | {"lib"}) - skip)
+    code = ([f":(glob)*{e}" for e in exts]
+            + [":(glob)*/__init__.py", ":(glob)*/__init__.pyc",
+               ":(glob)*/__init__*.so", ":(glob)*/__init__*.pyd"]
+            + [f":(glob){d}/**/*{e}" for d in dirs for e in exts])
+    found = set(_git_lines(root, "ls-files", "--others", "--", *code))
+    found |= set(_git_lines(root, "ls-files", "--others", "--exclude-standard", "--",
+                            *(f":(glob)**/*{e}" for e in exts)))
+    keep = []
+    for p in sorted(found):
+        parts = p.split("/")
+        if "__pycache__" in parts:
+            continue
+        if len(parts) > 1 and (parts[0] in skip or parts[0].startswith(".")):
+            continue
+        keep.append(f"!! {p}")
+    return keep
 
 
 def checkout_code_changes(root):
     # Tracked changes from git status; untracked files ONLY from importable_strays,
-    # which is the narrower and the stronger list (it sees ignored files). Porcelain
-    # "?? *.py" also refused a .py anywhere, e.g. an un-ignored .venv's
+    # which also sees ignored files and skips what cannot be imported. Porcelain
+    # "?? *.py" refused a .py in a dot-directory too, e.g. an un-ignored .venv's
     # site-packages (review of 77f69ce). is_code_change still counts "??" .py for
-    # stamps written by extractors older than dcdc-parasitics 489012a.
+    # stamps written by extractors older than dcdc-parasitics 844dad2.
     st = git(root, "status", "--porcelain", "--untracked-files=no")
     if st.returncode != 0:
         die(f"git status failed in {root}: {st.stderr.strip()}")
