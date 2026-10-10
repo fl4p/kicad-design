@@ -188,9 +188,10 @@ from a ring-frequency analysis.
 input-cap ports that never bonded to the mesh, and it folds a duplicate anchor port. On every path
 (discrete and `module:`) it refuses a port whose two terminals sit on disconnected copper (from
 dcdc-parasitics `a900891`); before that, a discrete `P_pwr` with its ground pad on an unbonded island
-went to FastHenry, which then fails or returns ~4e16 nH. Pin the board with `pcb_rev: <commit>` when
-another session may be editing it: the extractor then reads the committed board, never the working
-copy. The guard hashes the board file it is given, so gate a pinned config against the exported
+went to FastHenry, which then fails or returns ~4e16 nH. Pin the board with `pcb_rev: <full commit SHA>` and
+`pcb_repo: <repository root>` when another session may be editing it: the extractor then reads the
+committed board, never the working copy (the board's path inside the commit comes from those two
+strings, so nothing in the working copy can redirect it). The guard hashes the board file it is given, so gate a pinned config against the exported
 board (`git show <rev>:<board>.kicad_pcb > board.kicad_pcb`). The extractor cannot know the
 following, and each has produced a plausible wrong number. Record each choice in the committed YAML:
 
