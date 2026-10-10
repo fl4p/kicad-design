@@ -27,7 +27,7 @@ can check budget and measurement name the same loop.
 
 Typical loops (see dcdc-tools/parasitics/README.md for the port model):
   L_loop        effective commutation loop (all ported Cin in parallel)
-  L_loop_single nearest single Cin - conservative upper bound
+  L_loop_single nearest single Cin alone (a reference, not a bound)
   L_loop_ring   commutation loop read at the ring frequency
   L_gate_hs/ls  gate-drive loops
   csi_hs/ls     common-source inductance (power di/dt into the gate)
