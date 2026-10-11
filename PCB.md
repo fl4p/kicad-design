@@ -262,8 +262,9 @@ and similar parts carrying both FETs, and usually the inductor, inside one packa
 `hs_ref`/`ls_ref` for the discrete path, which refuses it: `no high-side FET found on '<sw>'`.
 `probe_ports` does not substitute. Declare a `module:` block instead (`parasitics/README.md`,
 "`module`"). It closes the input loop at the package pads, with an `internal_closure` that has no
-default. Its `L_loop` is **board copper only**, a *lower bound* on the physical loop, because the
-pad-to-die geometry is not public. So a module-mode PASS proves the board copper meets the budget,
+default. Its `L_loop` is **board copper only**, a *lower bound* on the physical loop under the
+additive model (the internal path adds L; board-to-module mutual coupling, which could lower the
+total, is neglected), because the pad-to-die geometry is not public. So a module-mode PASS proves the board copper meets the budget,
 not the total loop. The record gates `L_loop` against the budget minus a declared internal
 contribution (`declared_internal`, whose `internal_source` must name the source), or states that the
 internal part is unbounded and names the basis that covers it: the part's own datasheet layout

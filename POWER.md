@@ -229,7 +229,8 @@ Murata MYx), `fet_discovery` style tooling correctly refuses the board — the c
 closes through dies the board cannot see. What remains board-side is the **input capacitor loop**,
 and it is worth extracting on its own terms.
 
-- **Close the loop at the package pads and label the result a LOWER BOUND.** The pad-to-die path
+- **Close the loop at the package pads and label the result a LOWER BOUND** (under the additive
+  model: board-to-module mutual coupling is neglected and could lower the total). The pad-to-die path
   is not published for any module surveyed (TI SNVSCS7E gives a land pattern and layout guidance
   and no internal geometry), so an extraction that stops at the pads under-reports by an unknown
   amount. Say so wherever the number is quoted; do not invent an internal figure.
