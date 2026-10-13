@@ -294,13 +294,53 @@ returns a verdict against a requirement the caller records. Three things govern 
   extraction there is no bank, only parts. Neither absence is a reason to fall back to
   hand-computed nH or an assumed derate — that is the failure [`PCB.md`](PCB.md) records.
 - **It judges banks; it does not choose parts.** `mlcc.select` screens and ranks candidates
-  handed to it, but nothing enumerates candidates from the store yet. Do not ask it "which
+  handed to it. Candidates come from the store via `vendorpull.select` (below); nothing joins
+  the two, so the caller loads each hit with `Part.load(vendor, mpn)`. Do not ask it "which
   capacitor should I fit".
 
 `mlcc/README.md` is the interface. Its one runnable module, `vin_budget_tpsm33610.py`, is a
 single board's **worked example**, not an entry point — it fuses that board's parts, datasheet
 limits and report format, so starting a second board by copying it inherits whatever was
 specific to the first.
+
+### Capacitor vendor data: `dcdc-tools/vendorpull`
+
+Every capacitor value a power argument rests on (C at bias, ESR, ESL, Z max, ripple rating)
+comes from the vendor's own published data. Get it from the vendorpull store. Do not use
+schematic defaults or "typical" values. Two measured reasons: an assumed 1 nH / 3 mΩ input cap
+was 0.75 nH / 3.08 mΩ with C 21 % off, and that changed the conclusion. Swapping an assumed
+"1000 µF, 25 mΩ" output electrolytic for the fitted part's Z max moved an EMC verdict by ~4 dB.
+
+Run everything from `~/dev/pv/ee/dcdc-tools`. The store (`vendorpull/store/`) and
+`out/mlcc-curves.sqlite` are gitignored, so a part that isn't there gets pulled first.
+
+- **MLCC** (pullers `tdk`, `samsung`, `ty`, `murata`, `kemet`, `yageo`, `kyocera_avx`):
+  `python3 -m vendorpull <puller> <MPN>` stores the SPICE models, every published curve with
+  SI conversion factors, and a manifest with URL, timestamp and SHA-256.
+  `python3 -m vendorpull.select --cap <F> --volt <V>` lists stored parts at a C/V point. It
+  leaves out AC-rated X/Y parts unless you pass `--include-ac`. On stderr it reports parts it
+  **could not evaluate**: the stated half matches but the other is unstated, the vendor has no
+  C/V decoder (`kyocera_avx` as of 2026-10-12), or the pull failed. Parts that a stated value
+  rules out are not counted. If that list includes the vendor you care about, an empty result
+  means "unknown", not "no such part". KEMET's ~108k spec-less rows appear on every query. Use
+  the store's spelling of the MPN, which drops the packaging code (Samsung `CL10B105KB8NQNC` →
+  `CL10B105KB8NQN`, Murata `GRM155R61H104ME14D` → `GRM155R61H104ME14#`; `mlcc/README.md`).
+  Interface, units traps and the model-vs-curve fidelity check: `vendorpull/README.md`.
+- **Aluminium electrolytics** (pullers `chemicon`, `rubycon`, `nichicon`, `wurth`, `tdk_alu`,
+  `kemet_alu`, `panasonic`, `samyoung` (NXA only), `lcsc` by C-number; `tdk` and `kemet` are the
+  MLCC pullers): stored as **rating rows with their conditions** (Z max at
+  20 °C and −10 °C / 100 kHz, ripple at a stated T and f, multipliers, tan δ, endurance), not
+  curves. Pull with `python3 -m vendorpull <puller> <MPN>`. Query with
+  `python3 -m vendorpull.electrolytic show <MPN|glob>` or `list --vendor <v> --min-v <V>`.
+  `emit <MPN> --ref C10 --nodes a b` produces a SPICE element. Z max and ESR are separate
+  quantities; pick one deliberately (`--rser esr|zmax`). ESL is labelled by strength
+  (published / vendor-model element / derived from the vendor |Z| curve / sibling). Where none
+  exists, `emit` refuses rather than invent one, and any `--lser-assumed` value you pass is an
+  assumption that the report must state. Full reference: `vendorpull/ELECTROLYTIC.md`.
+
+A field that comes back null is a recorded gap ("where the puller looked"). Do not fill it from
+a similar part or a rule of thumb without labelling it. Missing data means the check is
+unverified. It is never a reason to fall back to an assumed value.
 
 ## Name the loop arrangement before quoting any number about it
 
