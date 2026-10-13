@@ -278,17 +278,25 @@ returns a verdict against a requirement the caller records. Three things govern 
 - **It answers on TWO impedance bases and refuses to average them.** A vendor's SPICE model and
   its own published |Z|/ESR curves disagree on ESL by a median 1.79×, always in the same
   direction (`~/dev/kb/spice/mlcc-model-and-curve-disagree-on-esl.md`). A bank passes only when
-  both bases agree; one basis alone is a weaker verdict and is reported as one. **Only 18,997 of
-  217,855 stored parts (8.7 %) can reach a two-basis verdict at all** — the model basis needs a
-  *simple* lumped netlist with one readable ESL, which only TDK (`_s.mod`) and Samsung
-  (`Simple_*.lib`) ship. Murata, Taiyo Yuden and Kemet do publish SPICE models, but ladder ones
-  that `mlcc/part.py` refuses because no single element is their ESL; Yageo ships S-parameters
-  and no netlist at all. Of the 96,602 stored parts that ship a netlist, **77,528 (80 %) are
-  ladders** — so "it has a vendor SPICE model" is a true statement that tells you nothing about
+  both bases agree; one basis alone is a weaker verdict and is reported as one. **Only 19,090 of
+  222,243 stored parts (8.6 %) can reach a two-basis verdict at all** — the model basis needs a
+  *simple* lumped netlist with one readable ESL. TDK (`_s.mod`, 9,874) and Samsung
+  (`Simple_*.lib`, 9,195) ship one across their range; Murata (27) and Taiyo Yuden (71) ship one
+  on a handful of parts and a LADDER on the rest; Kemet ships 40,406 netlists and not one simple
+  model; of the Yageo and Kyocera AVX artifacts inspected, none is a netlist at all. Of the
+  98,600 stored parts that ship a netlist, **79,433 (81 %) ship one no single element of which is
+  the ESL** — so "it has a vendor SPICE model" is a true statement that tells you nothing about
   whether a second basis exists. Where it does not, it cannot be manufactured by assuming the
   first.
-- **It needs two inputs that are not in any repo**: the vendorpull store (gitignored, 1.9 GB on
-  disk at 2026-09-28 and still growing, so a fresh clone does not have it) and a
+  - **Do not restate this as "vendor X ships ladders only."** That sentence stood here from
+    2026-10-12 to 2026-10-13 and was false for two vendors, because it was written from what the
+    reader accepted rather than from the catalogue: `mlcc/part.py` gated on the FILE NAME
+    (`_s.mod`/`simple`, TDK's and Samsung's convention), so 27 Murata series C-L-R models were
+    never read, and `parse_simple_model` had no SPICE unit table, so Taiyo Yuden's scaled values
+    (`0.518n`) lost every element and its 71 series models came back "not a simple model". Both
+    are fixed; the counts above are measured from the archives, not inferred from a refusal.
+- **It needs two inputs that are not in any repo**: the vendorpull store (gitignored, 2.1 GB on
+  disk at 2026-10-13 and still growing, so a fresh clone does not have it) and a
   `parasitics.json` from the extractor above.
   Without the store it skips the vendor-data checks rather than substituting values; without an
   extraction there is no bank, only parts. Neither absence is a reason to fall back to
