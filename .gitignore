@@ -7,3 +7,13 @@
 
 # KiCad per-user local settings, written by kicad-cli next to a board
 *.kicad_prl
+
+# Detached review runs: process debris. FINDINGS.md, prompt.txt and the
+# reviewed copies under scratch/ are the record and stay tracked.
+reviews/*/EXITED
+reviews/*/nohup.out
+reviews/*/*.log
+reviews/**/*.pid
+reviews/**/*.stdout
+reviews/**/*.stderr
+reviews/*/scratch/tmp/
