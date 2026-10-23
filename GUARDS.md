@@ -59,6 +59,15 @@ For each load-bearing check, record at least:
   visits. Text, symbol properties, labels, pads, tracks, vias, zone settings, zone fills and
   drawing-sheet items are separate classes. A calibration built from a class already visited
   cannot expose an omitted class.
+- A per-subject guard is blind to a subject that was never enumerated. The loop-inductance guard
+  grades the loops in its config; it cannot flag a switching cell for which no loop was budgeted,
+  so a full/H-bridge whose second leg's commutation loop was never listed passes on the first
+  leg's number alone — but only if that first number itself passes (a leg already over budget
+  still fails). Take the expected subject set from an independently-reviewed topology manifest —
+  every switching cell — not from a config sitting beside the board, and compare subject
+  *identities and required loop mappings*, not counts alone (automatic topology inference is not
+  always feasible; a reviewed manifest is the dependable authority). An under-covered set is
+  unevaluable, not a PASS — and unevaluable must not overwrite an already-known failure.
 - Take the expectation from the authority, never from the artefact's own directory, and make
   running the check part of the result. These are two separate failures. A verifier that imports
   its expected geometry from the generator sitting beside the board it checks certifies that board
