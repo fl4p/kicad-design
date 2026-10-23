@@ -240,6 +240,14 @@ removes the floating-side source-referenced plane that the gate loop needs for i
   separate FastHenry study moved 3.45 → 0.67 nH, an 80.6 % reduction. **Routing can beat
   stack-up; do both.** The "most field energy is in the dielectric" framing comes from one Reusch
   GaN geometry, whose thesis actually partitions leakage energy between substrate and air.
+- **A measured stack-up/routing split on a real 2-layer board** (FastHenry, TI TPSM33610 module
+  board, input loop closed at the package pads): widening the feed track and adding a third return
+  via bought 5 % of L_loop (3.671 → 3.493 nH), while moving the return plane from 1.6 mm to 0.2 mm
+  took it to 1.514 nH, −59 %, and the shared trunk 3.104 → 1.256 nH. The placement was already
+  minimal (HF cap hard against the pin row, two parallel return vias), which is exactly when
+  stack-up is the only lever left. Consistent with the sweep above, on hardware geometry rather
+  than a parameter study; the plane distance was emulated by board thickness, so it is a proxy for
+  a layer-2 plane, not a drawn 4-layer board.
 - **Return-plane continuity.** One Q3D-simulated layout showed inductor-via antipads interrupting
   a **passive shield plane** dominating the result. Thermal vias were not tested, and this is
   simulation. The continuity rule is sound engineering; this evidence is narrower than the rule.
