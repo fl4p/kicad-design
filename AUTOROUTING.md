@@ -37,7 +37,31 @@ its existence, corridor choices, via hotspots, and failures to revise placement
 or plan the critical skeleton; discard the trace geometry itself. Then author
 critical routing, planes, keepouts, and their audits, then emit the deterministic
 seed for the promotable routine scope. The project seed audit must prove each
-declared critical route group is present with its required geometry. The wrapper
+declared critical route group is present with its required geometry.
+
+For that routine scope, promotion is the **default**, not merely a permission —
+but define the scope *positively*, never by the absence of a budget. Routine
+means reviewed, allowlisted connectivity whose complete routing requirements are
+met by its verified netclass/style and clearance constraints: typically the
+low-voltage aux, fan, and unshared control fan-out. It is **not** "any net that
+carries no commutation current" — an unassigned budget is not evidence that none
+is required. Keep Kelvin, current-sense, guard, star-point, feedback that couples
+to a switch node, differential, controlled-impedance, and return-path-sensitive
+nets in the **critical, hand-authored** scope per [`PCB.md`](PCB.md)'s "keep
+these critical" list, regardless of their voltage or current (a low-side
+shunt-sense pair carries no commutation current yet needs a controlled
+differential route). Hand-author a routine net only for a recorded,
+evidence-backed reason tied to the named net or interacting bundle — a
+manufacturability/clearance/shielding constraint, router non-completion, a
+rejected candidate, unavailable qualified tooling, or a measured case where a
+small manual completion costs less than further routing — never a blanket "small
+board" or "generator owns everything" rationale. Promotion's win is eliminating
+the manual trace-authoring of that fan-out (the router lays it down in seconds,
+though verified completion still carries this section's visual-review,
+promotion-check and two-run reproduction cost); hand-authoring the whole net list
+forgoes it and routinely spends a run's turn budget on tedious aux routing. The
+critical skeleton stays generator-owned; the correctly-classified routine scope
+defaults to the promoted candidate. The wrapper
 then locks every existing route only in the scratch export board and proves that
 DSN represents it as fixed copper; scratch lock bits never enter the manifest or
 final board. This order gives critical structures first claim on space while
