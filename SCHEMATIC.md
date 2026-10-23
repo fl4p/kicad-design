@@ -70,8 +70,54 @@ Do not report schematic capture complete until all of the following are true:
    graphic and its authoritative provenance, not only the claimed library identifier; a generator
    must not hide a generic box behind an approved-looking name.
 
-ERC and connectivity audits are necessary but cannot satisfy items 1 or 5. A successful generator
+ERC and connectivity audits are necessary but cannot satisfy items 1, 5 or 7. A successful generator
 run proves only that it emitted an artifact.
+
+7. The schematic-wiring guard (`scripts/schematic_wiring_guard.py`) has been run, and every net it
+   surfaces (`label-soup` and the wide-gap `many-fragments` signal) has an explicit disposition. It
+   is **warn-only** — it does not block the gate — but a surfaced net that is neither wired nor
+   justified in writing leaves the gate incomplete. An `UNEVALUABLE` result is a different, harder
+   status: the guard could not analyse the schematic (parse failure, more than one sheet, a bad
+   `--locality-mm`), so the check did not run — resolve that before the gate can be considered at all,
+   never treat it as a pass.
+
+## Wires, not labels — human-readable connectivity
+
+A net label and a drawn wire produce the identical netlist, so ERC, connectivity audits and netlist
+parity are all blind to the difference. A *reviewer* is not: a half-bridge drawn as four MOSFET
+symbols joined by seven `SW_FAST` labels cannot be traced by following copper, and a board reviewed
+that way hides real errors. Generators reach for labels because a label is cheap (place it at the
+pin) while a wire is geometry (route between two pins) — so this degrades silently unless a gate
+distinguishes drawn wire from label. Measured across the model benchmark, the boards a human reads
+easily (Opus, Kimi-r2) draw their local nets as wires; the label-soup boards (Sonnet, GPT-Astra)
+label everything, including the tightest bridge nets, and pass every automated gate.
+
+Doctrine:
+
+- **Local same-net connections are drawn wires.** Two pins in the same functional block — a
+  half-bridge totem-pole, a gate resistor to its FET, an RC filter, a divider string — are joined by
+  wire segments and junctions, not by repeating a label at each pin. Draw the H-bridge as a bridge.
+- **Net labels are for rails and remote fan-out only.** Power/return rails (`GND`, `+BUS`, `DC_NEG`,
+  `+12V`…) and genuinely distant connections (a sense net crossing the sheet to the driver module)
+  are the correct place for labels; wiring them would hurt readability. Declare the project's rails
+  to the guard with `--rail`.
+- **Cross-sheet connections use hierarchical labels**, never repeated local labels.
+
+The guard reads one sheet's wires, buses, junctions and local + global labels. It flags a net when
+its labels fall in more than one drawn-connectivity fragment *and* the net is not a rail (a name the
+project declares with `--rail`, or the conservative built-in `GND*`/`Vcc/Vdd/Vss` pattern — the
+default deliberately matches almost nothing, so declare your rails). Two triggers: `label-soup` when
+the closest inter-fragment pair is within `--locality-mm` (default 30; this corpus was reviewed at
+15 — lower is stricter) — a wire was the readable option; and `many-fragments` when a net is split
+across at least `--max-fragments` (default 5) pieces regardless of gap — the wide-gap case a
+distance threshold alone misses. Both are **heuristics for review, not proofs**: label spacing is an
+imperfect proxy for functional locality, and a legitimate multi-drop remote net can raise the
+fragment count. A single wired lattice is one fragment and does not trip the wire-vs-label check —
+but a clean result means only "no label-bridged local net was found", never that the wiring is
+complete or correct; unconnected pins are ERC's job, not this guard's. Because it is warn-only,
+treat each surfaced net as a disposition item — redraw it as wire, or record why the label is
+correct (rail, cross-block distance) — exactly as a DRC class is dispositioned per pair. Do not
+silence it by adding names to `--rail` that are not real rails.
 
 ## PCB-start gate
 
