@@ -30,6 +30,89 @@ _NETLIST = """\
 """
 
 
+class ReportInputSafetyTests(unittest.TestCase):
+    def test_both_verifiers_reject_all_context_aliases_before_cli(self):
+        for kind in ("erc", "drc"):
+            for suffix in (".kicad_pcb", ".kicad_sch", ".kicad_pro",
+                           ".kicad_prl", ".kicad_dru"):
+                for alias in ("direct", "normalized", "symlink", "hardlink"):
+                    with self.subTest(kind=kind, suffix=suffix, alias=alias):
+                        with tempfile.TemporaryDirectory() as raw:
+                            root = Path(raw)
+                            source = root / ("probe.kicad_sch" if kind == "erc"
+                                             else "probe.kicad_pcb")
+                            source.write_text("original input")
+                            target = source.with_suffix(suffix)
+                            target.write_text("original design")
+                            report = target
+                            if alias == "normalized":
+                                (root / "sub").mkdir()
+                                report = root / "sub" / ".." / target.name
+                            elif alias == "symlink":
+                                report = root / "report.rpt"
+                                report.symlink_to(target)
+                            elif alias == "hardlink":
+                                report = root / "report.rpt"
+                                report.hardlink_to(target)
+                            before = {p: p.read_bytes() for p in (source, target)}
+                            with mock.patch.object(verify, "find_kicad_cli") as cli:
+                                with self.assertRaisesRegex(
+                                        verify.VerifyError, "REPORT_INPUT_ALIAS"):
+                                    getattr(verify, "run_" + kind)(source, report)
+                                cli.assert_not_called()
+                            for p, data in before.items():
+                                self.assertEqual(p.read_bytes(), data)
+
+    def test_symlinked_input_protects_context_at_both_stems(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "real.kicad_pcb"
+            source.write_text("board")
+            linked = root / "alias.kicad_pcb"
+            linked.symlink_to(source)
+            for stem in (source, linked):
+                target = stem.with_suffix(".kicad_pro")
+                target.write_text("project")
+                report = root / "report.rpt"
+                report.hardlink_to(target)
+                with self.assertRaisesRegex(verify.VerifyError, "REPORT_INPUT_ALIAS"):
+                    verify.run_drc(linked, report, parity=False)
+                report.unlink()
+
+    def test_missing_context_path_is_reserved(self):
+        with tempfile.TemporaryDirectory() as raw:
+            board = Path(raw) / "probe.kicad_pcb"
+            board.write_text("board")
+            with self.assertRaisesRegex(verify.VerifyError, "REPORT_INPUT_ALIAS"):
+                verify.run_drc(board, board.with_suffix(".kicad_pro"), parity=False)
+
+    def test_probe_errors_and_symlink_loops_are_unverified(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            board = root / "probe.kicad_pcb"
+            board.write_text("board")
+            report = root / "report.rpt"
+            with mock.patch.object(Path, "stat", side_effect=PermissionError("denied")):
+                with self.assertRaisesRegex(verify.VerifyError, "REPORT_PATH_UNVERIFIED"):
+                    verify.run_drc(board, report, parity=False)
+            report.symlink_to(report)
+            with self.assertRaisesRegex(verify.VerifyError, "REPORT_PATH_UNVERIFIED"):
+                verify.run_erc(board, report)
+
+    def test_distinct_new_and_existing_reports_remain_allowed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            board = root / "probe.kicad_pcb"
+            board.write_text("board")
+            report = root / "report.rpt"
+            verify._reject_report_input_alias(report, board)
+            report.write_text("previous report")
+            verify._reject_report_input_alias(report, board)
+            linked_report = root / "linked.rpt"
+            linked_report.symlink_to(report)
+            verify._reject_report_input_alias(linked_report, board)
+
+
 class VerifyDrcTests(unittest.TestCase):
     def _board(self, root, context=True):
         board = Path(root) / "probe.kicad_pcb"

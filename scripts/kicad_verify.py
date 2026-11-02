@@ -410,14 +410,58 @@ def _run_producing(cmd, report, timeout=None):
     return rc, out, err
 
 
+def _reject_report_input_alias(report, design):
+    """Protect the primary input and same-stem KiCad project context.
+
+    This is a filesystem preflight, not exclusion of concurrent path changes.
+    Check both lexical and resolved input stems: a symlinked input may have
+    project context beside either name. Missing optional context is allowed;
+    an identity probe that fails for any other reason is not safe to use.
+    """
+    try:
+        output = Path(report).resolve()
+        source = Path(design)
+        protected = {source, source.resolve()}
+        for stem in tuple(protected):
+            protected.update(stem.with_suffix(ext) for ext in (
+                ".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl",
+                ".kicad_dru"))
+        try:
+            output_stat = output.stat()
+        except FileNotFoundError:
+            output_stat = None
+        for path in protected:
+            target = path.resolve()
+            if output == target:
+                raise VerifyError(
+                    "REPORT_INPUT_ALIAS: report %s aliases design input %s"
+                    % (report, path))
+            if output_stat is not None:
+                try:
+                    target_stat = target.stat()
+                except FileNotFoundError:
+                    continue
+                if os.path.samestat(output_stat, target_stat):
+                    raise VerifyError(
+                        "REPORT_INPUT_ALIAS: report %s aliases design input %s"
+                        % (report, path))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise VerifyError(
+            "REPORT_PATH_UNVERIFIED: cannot establish report/input separation: %s"
+            % exc) from exc
+
+
 def run_erc(schematic, report="erc.rpt", cli=None, timeout=None,
             output_format="text"):
     """ERC with --severity-all --exit-code-violations.
 
     Returns (rc, counts). Raises if the report is missing or unparseable.
+    Report paths must not alias the schematic or its same-stem KiCad context
+    (project, board, local settings and custom rules), including filesystem links.
     Both signals are returned; callers should require rc == 0 AND every count
     == 0, because each has been seen to be wrong alone.
     """
+    _reject_report_input_alias(report, schematic)
     cli = find_kicad_cli(cli)
     if not Path(schematic).exists():
         raise VerifyError("schematic %s does not exist" % schematic)
@@ -489,6 +533,9 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
             refill=True, save_board=False, output_format="text", timeout=None):
     """DRC with explicit refill/save controls and fail-closed parity.
 
+    Report paths must not alias the board or its same-stem KiCad context
+    (schematic, project, local settings and custom rules), even without parity.
+
     `parity` defaults True: footprint/symbol field mismatches are invisible
     without it, and they are how a schematic-only edit silently leaves the
     board contradicting the schematic.  True requires same-stem `.kicad_pro`
@@ -503,6 +550,7 @@ def run_drc(board, report="drc.rpt", parity=True, cli=None,
     report when KiCad's persisted board differs. Run it only on the isolated
     scratch release bundle, then hash the post-DRC board as release authority.
     """
+    _reject_report_input_alias(report, board)
     board = Path(board)
     if not board.exists():
         raise VerifyError("board %s does not exist" % board)
