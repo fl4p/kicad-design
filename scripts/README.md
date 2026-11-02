@@ -263,7 +263,13 @@ immutable calibration fixture/mechanism, but every candidate still receives a fr
 Promotion is multi-file crash-*recoverable*, not filesystem-atomic. The durable journal records
 intent and completion for each same-filesystem replace; startup either clears a committed journal or
 rolls an incomplete transaction back only from recognized original/staged digests. The aggregate
-report is itself a journaled promotion. The tool snapshots every declared authority input before
+report is itself a journaled promotion. Each destination is checked again after its replacement
+copy is staged, immediately before replacement; rollback likewise rechecks before changing a file.
+A conflict preserves unknown bytes and retains the journal when recovery cannot finish, so some
+earlier files may remain promoted. The report marks this as `recovery_required` with promotion
+`incomplete`. These are optimistic checks, not an atomic compare-and-swap: keep external editors
+and generators quiescent, including across the final check/replace or check/unlink interval.
+The tool snapshots every declared authority input before
 running the adapter, rechecks it before promotion, normalizes and separates reserved paths, and
 refuses active board, schematic, project, or transaction locks. Missing
 adapter authority, stale calibration evidence, timeout, unrelated semantic changes, and unsupported

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 import uuid
-from typing import AbstractSet, Optional
+from typing import AbstractSet, Callable, Optional
 
 
 SPEC_SCHEMA = "kicad-footprint-swap-spec-v1"
@@ -128,15 +128,24 @@ def _write_json_durable(path: Path, value) -> None:
     _fsync_dir(path.parent)
 
 
-def _copy_durable(source: Path, destination: Path) -> None:
+def _copy_durable(
+    source: Path, destination: Path, *, before_replace: Optional[Callable[[], None]] = None
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-    with source.open("rb") as incoming, temporary.open("wb") as outgoing:
-        shutil.copyfileobj(incoming, outgoing)
-        outgoing.flush()
-        os.fsync(outgoing.fileno())
-    os.replace(temporary, destination)
-    _fsync_dir(destination.parent)
+    try:
+        with source.open("rb") as incoming, temporary.open("wb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        if before_replace is not None:
+            before_replace()
+        # Optimistic validation, not compare-and-swap: external writers must be
+        # quiescent across this final check/replace interval.
+        os.replace(temporary, destination)
+        _fsync_dir(destination.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _resolve_under(root: Path, value: str, where: str, must_exist=False) -> Path:
@@ -503,15 +512,25 @@ def _prepare_journal(
     return journal
 
 
+def _verify_destination(destination: Path, expected, error_type=ConcurrentChange) -> None:
+    try:
+        try:
+            observed_stat = destination.lstat()
+        except FileNotFoundError:
+            observed_stat = None
+        if expected is None:
+            if observed_stat is None:
+                return
+        elif observed_stat is not None and stat.S_ISREG(observed_stat.st_mode):
+            if _identity(destination) == expected:
+                return
+    except OSError as exc:
+        raise error_type(f"cannot verify destination: {destination}: {exc}") from exc
+    raise error_type(f"destination changed before replacement: {destination}")
+
+
 def _verify_original(operation: dict) -> None:
-    destination = Path(operation["destination"])
-    if operation["original_identity"] is None:
-        if destination.exists():
-            raise ConcurrentChange(f"new destination appeared before promotion: {destination}")
-        return
-    observed = _identity(destination)
-    if observed != operation["original_identity"]:
-        raise ConcurrentChange(f"authority input changed before promotion: {destination}")
+    _verify_destination(Path(operation["destination"]), operation["original_identity"])
 
 
 def _promote(journal_path: Path, journal: dict, deadline: Deadline) -> None:
@@ -525,7 +544,10 @@ def _promote(journal_path: Path, journal: dict, deadline: Deadline) -> None:
         operation["state"] = "intent"
         _write_json_durable(journal_path, journal)
         destination = Path(operation["destination"])
-        _copy_durable(Path(operation["staged"]), destination)
+        _copy_durable(
+            Path(operation["staged"]), destination,
+            before_replace=lambda: _verify_original(operation),
+        )
         deadline.check(reserve=0.2)
         if _sha256(destination) != operation["staged_sha256"]:
             raise RecoveryRequired(f"promoted digest mismatch: {destination}")
@@ -559,12 +581,19 @@ def _recover(journal_path: Path) -> Optional[str]:
         return "cleared_committed_journal"
     for operation in reversed(journal["operations"]):
         destination = Path(operation["destination"])
-        present = os.path.lexists(str(destination))
-        if present and (destination.is_symlink() or not destination.is_file()):
-            raise RecoveryRequired(
-                f"non-regular object at interrupted destination: {destination}"
-            )
-        current_digest = _sha256(destination) if present else None
+        try:
+            try:
+                observed_stat = destination.lstat()
+            except FileNotFoundError:
+                observed_stat = None
+            if observed_stat is not None and not stat.S_ISREG(observed_stat.st_mode):
+                raise RecoveryRequired(
+                    f"non-regular object at interrupted destination: {destination}"
+                )
+            current_identity = _identity(destination) if observed_stat is not None else None
+        except OSError as exc:
+            raise RecoveryRequired(f"cannot verify interrupted destination: {destination}: {exc}") from exc
+        current_digest = current_identity["sha256"] if current_identity else None
         staged_digest = operation["staged_sha256"]
         original = operation["original_identity"]
         if original is None:
@@ -574,6 +603,7 @@ def _recover(journal_path: Path) -> Optional[str]:
                 raise RecoveryRequired(
                     f"unknown bytes at interrupted new destination: {destination}"
                 )
+            _verify_destination(destination, current_identity, RecoveryRequired)
             destination.unlink()
             _fsync_dir(destination.parent)
             continue
@@ -587,7 +617,12 @@ def _recover(journal_path: Path) -> Optional[str]:
         backup = Path(operation["backup"])
         if not backup.is_file() or _sha256(backup) != original_digest:
             raise RecoveryRequired(f"verified rollback backup unavailable: {backup}")
-        _copy_durable(backup, destination)
+        _copy_durable(
+            backup, destination,
+            before_replace=lambda: _verify_destination(
+                destination, current_identity, RecoveryRequired
+            ),
+        )
         if _sha256(destination) != original_digest:
             raise RecoveryRequired(f"rollback verification failed: {destination}")
     journal["state"] = "rolled_back"
@@ -694,6 +729,7 @@ def run(spec_path: Path, apply: bool, seconds: float, report_override=None) -> t
             report["elapsed_seconds"] = round(deadline.elapsed(), 6)
             staged_report = transaction / "transaction-report.json"
             _write_json_durable(staged_report, report)
+            report["promotion"] = "incomplete"
             report_operation = {
                 "staged": str(staged_report),
                 "destination": str(report_path),
@@ -704,6 +740,7 @@ def run(spec_path: Path, apply: bool, seconds: float, report_override=None) -> t
             journal = _prepare_journal(journal_path, transaction_id, operations, deadline)
             _verify_snapshots(authority_snapshots)
             _promote(journal_path, journal, deadline)
+            report["promotion"] = "committed"
             report["elapsed_seconds"] = round(deadline.elapsed(), 6)
         else:
             deadline.check(reserve=0.1)
