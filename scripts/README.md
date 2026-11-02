@@ -241,6 +241,17 @@ python3 scripts/kicad_footprint_swap.py \
   --time-budget 180 --apply
 ```
 
+Transaction ownership requires POSIX `flock` (macOS/Linux); platforms without it refuse
+execution. Use a local filesystem supporting `flock` and atomic hard-link creation; network
+filesystem lock semantics are not qualified. The lock file persists after release. Its existence
+alone does not indicate a running transaction: ownership is held by the kernel and released on
+process exit, including a crash. Never delete or replace it while any runner might be active.
+All runners must use this protocol; older versions can delete its marker and defeat exclusion.
+Before upgrading, stop **all** old runners, then remove any legacy PID lock after independently
+confirming no transaction remains active. Empty, malformed, legacy, or unreadable lock files
+require manual investigation and are never automatically removed. A crash during initialization
+may leave an unused `.swap-lock-*` temporary file; it is not an ownership record.
+
 The adapter receives `--request` and `--result` paths and returns schema
 `kicad-footprint-swap-adapter-result-v1`. It must stage every target inside the transaction
 directory, bind original identities and staged SHA-256 values, and return the strict neutral evidence

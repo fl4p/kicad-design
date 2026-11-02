@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
+import tempfile
 import subprocess
 import sys
 import time
@@ -244,39 +246,63 @@ def _check_kicad_locks(paths) -> None:
         raise SwapError("active KiCad lock: " + ", ".join(map(str, sorted(active))))
 
 
+_LOCK_MARKER = b"kicad-footprint-swap-flock-v1\n"
+
+
 def _acquire_lock(path: Path):
+    """Hold a persistent inode with POSIX flock; never infer ownership from a PID.
+
+    Publish initialized bytes atomically, then lock before inspecting metadata.
+    Unknown/legacy files require operator recovery, not automatic deletion.
+    All cooperating runners must use this protocol and preserve the inode.
+    """
+    try:
+        import fcntl
+    except ImportError as exc:
+        raise RecoveryRequired("transaction locking requires POSIX flock") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
-    for _attempt in range(2):
+    fd = None
+    try:
+        # link() publishes a complete marker without replacing an existing owner.
+        seed_fd, temporary = tempfile.mkstemp(prefix=".swap-lock-", dir=path.parent)
         try:
-            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            break
-        except FileExistsError as exc:
+            with os.fdopen(seed_fd, "wb") as seed:
+                seed.write(_LOCK_MARKER)
+                seed.flush()
+                os.fsync(seed.fileno())
             try:
-                text = path.read_text(encoding="utf-8").strip()
-                pid = int(text.removeprefix("pid="))
-                os.kill(pid, 0)
-            except (OSError, ValueError):
-                path.unlink(missing_ok=True)
+                os.link(temporary, path)
                 _fsync_dir(path.parent)
-                continue
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary)
+        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise RecoveryRequired(f"transaction lock is not a regular file: {path}")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        opened = os.fstat(fd)
+        named = path.lstat()
+        if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            raise RecoveryRequired(f"transaction lock was replaced: {path}")
+        if os.read(fd, len(_LOCK_MARKER) + 1) != _LOCK_MARKER:
             raise RecoveryRequired(
-                f"live footprint-swap transaction lock exists for pid {pid}: {path}"
-            ) from exc
-    else:
-        raise RecoveryRequired(f"could not recover stale transaction lock: {path}")
-    os.write(fd, f"pid={os.getpid()}\n".encode())
-    os.fsync(fd)
-    _fsync_dir(path.parent)
-    return fd
+                f"unrecognized or legacy transaction lock; stop all runners "
+                f"before manual recovery: {path}"
+            )
+        return fd
+    except (OSError, RecoveryRequired) as exc:
+        if fd is not None:
+            os.close(fd)
+        if isinstance(exc, RecoveryRequired):
+            raise
+        raise RecoveryRequired(f"cannot acquire transaction lock {path}: {exc}") from exc
 
 
 def _release_lock(path: Path, fd) -> None:
+    # Closing releases only our inode's kernel lock. Never unlink the pathname:
+    # waiters may already have it open, and it may name a replacement inode.
     os.close(fd)
-    try:
-        path.unlink()
-        _fsync_dir(path.parent)
-    except FileNotFoundError:
-        pass
 
 
 def _run_adapter(
