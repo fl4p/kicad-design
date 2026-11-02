@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -53,7 +54,7 @@ class ReportInputSafetyTests(unittest.TestCase):
                                 report.symlink_to(target)
                             elif alias == "hardlink":
                                 report = root / "report.rpt"
-                                report.hardlink_to(target)
+                                os.link(target, report)
                             before = {p: p.read_bytes() for p in (source, target)}
                             with mock.patch.object(verify, "find_kicad_cli") as cli:
                                 with self.assertRaisesRegex(
@@ -74,7 +75,7 @@ class ReportInputSafetyTests(unittest.TestCase):
                 target = stem.with_suffix(".kicad_pro")
                 target.write_text("project")
                 report = root / "report.rpt"
-                report.hardlink_to(target)
+                os.link(target, report)
                 with self.assertRaisesRegex(verify.VerifyError, "REPORT_INPUT_ALIAS"):
                     verify.run_drc(linked, report, parity=False)
                 report.unlink()
