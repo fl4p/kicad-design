@@ -175,6 +175,75 @@ class PromotionConflictTests(unittest.TestCase):
             self.assertEqual(json.loads((root / '.kicad-footprint-swap-journal.json').read_text())
                              ['state'], 'applying')
 
+    def test_failure_report_preserves_concurrent_broken_symlink(self):
+        from test_kicad_footprint_swap import _ADAPTER, _spec
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            adapter = root / 'adapter.py'
+            adapter.write_text(_ADAPTER)
+            spec = _spec(root, adapter)
+            report_path = root / 'footprint-swap-report.json'
+            copy = swap.shutil.copyfileobj
+
+            def insert_symlink(incoming, outgoing):
+                copy(incoming, outgoing)
+                if Path(incoming.name).name == 'transaction-report.json':
+                    report_path.symlink_to(root / 'missing')
+
+            with patch.object(swap.shutil, 'copyfileobj', side_effect=insert_symlink):
+                rc, report = swap.run(spec, True, 10)
+            self.assertEqual(rc, 2)
+            self.assertEqual(report['status'], 'recovery_required')
+            self.assertTrue(report_path.is_symlink())
+            self.assertEqual(report['report_write'], 'skipped_concurrent_destination')
+            self.assertEqual(report_path.readlink(), root / 'missing')
+            self.assertFalse(list(root.glob('.footprint-swap-report.json.*.tmp')))
+
+    def test_failure_report_rechecks_after_temporary_output_is_written(self):
+        from test_kicad_footprint_swap import _ADAPTER, _spec
+        for mutation in ('file', 'failed_probe'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw).resolve()
+                adapter = root / 'adapter.py'
+                adapter.write_text(_ADAPTER.replace("if os.environ.get('FAKE_MUTATE'):", 'if True:'))
+                spec = _spec(root, adapter)
+                report_path = root / 'footprint-swap-report.json'
+                write = swap._write_json_durable
+                fsync = swap.os.fsync
+                lstat = Path.lstat
+                injected = False
+
+                def late_mutation(fd):
+                    nonlocal injected
+                    fsync(fd)
+                    if not injected:
+                        injected = True
+                        if mutation == 'file':
+                            report_path.write_text('external report')
+
+                def probe(destination, *args, **kwargs):
+                    if injected and mutation == 'failed_probe' and destination == report_path:
+                        raise PermissionError('unreadable report destination')
+                    return lstat(destination, *args, **kwargs)
+
+                def write_failure(path, value, **kwargs):
+                    if path == report_path:
+                        with patch.object(swap.os, 'fsync', side_effect=late_mutation):
+                            return write(path, value, **kwargs)
+                    return write(path, value, **kwargs)
+
+                with patch.object(swap, '_write_json_durable', side_effect=write_failure), \
+                     patch.object(Path, 'lstat', probe):
+                    rc, report = swap.run(spec, True, 10)
+                self.assertTrue(injected)
+                self.assertEqual(rc, 2)
+                if mutation == 'file':
+                    self.assertEqual(report_path.read_text(), 'external report')
+                else:
+                    self.assertFalse(report_path.exists())
+                self.assertEqual(report['report_write'], 'skipped_concurrent_destination')
+                self.assertFalse(list(root.glob('.footprint-swap-report.json.*.tmp')))
+
     def test_unchanged_existing_and_new_destinations_commit(self):
         for new in (False, True):
             with self.subTest(new=new), tempfile.TemporaryDirectory() as raw:

@@ -116,16 +116,23 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def _write_json_durable(path: Path, value) -> None:
+def _write_json_durable(
+    path: Path, value, *, before_replace: Optional[Callable[[], None]] = None
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     payload = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
-    with temporary.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    _fsync_dir(path.parent)
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if before_replace is not None:
+            before_replace()
+        os.replace(temporary, path)
+        _fsync_dir(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _copy_durable(
@@ -747,7 +754,10 @@ def run(spec_path: Path, apply: bool, seconds: float, report_override=None) -> t
             report["status"] = "valid_dry_run"
             report["promotion"] = "not_requested"
             report["elapsed_seconds"] = round(deadline.elapsed(), 6)
-            _write_json_durable(report_path, report)
+            _write_json_durable(
+                report_path, report,
+                before_replace=lambda: _verify_destination(report_path, report_original),
+            )
             deadline.check()
         return 0, report
     except SwapError as exc:
@@ -760,13 +770,16 @@ def run(spec_path: Path, apply: bool, seconds: float, report_override=None) -> t
         report["status"] = exc.status
         report["error"] = str(exc)
         report["elapsed_seconds"] = round(deadline.elapsed(), 6)
-        current_report = _identity(report_path) if report_path.is_file() else None
-        if current_report == report_original or (
-            current_report is None and report_original is None
-        ):
-            _write_json_durable(report_path, report)
-        else:
+        try:
+            _write_json_durable(
+                report_path, report,
+                before_replace=lambda: _verify_destination(report_path, report_original),
+            )
+        except ConcurrentChange:
             report["report_write"] = "skipped_concurrent_destination"
+        except OSError as write_exc:
+            report["report_write"] = "skipped_write_error"
+            report["report_write_error"] = str(write_exc)
         return 2, report
     finally:
         _release_lock(lock_path, lock_fd)
